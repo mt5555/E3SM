@@ -2346,6 +2346,90 @@ contains
 
   end subroutine compute_stage_value_dirk
 
+  subroutine copy_state(state1,state2,elem,par,a1,a2,n1,n2,n3,nets,nete)
+    real (kind=real_kind), intent(inout) :: state1(:,:,:,:,:),state2(:,:,:,:,:)
+    type (element_t), intent(inout), target :: elem(:)
+    integer, intent(in) :: par,n1,n2,n3,nets,nete
+    real (kind=real_kind), intent(in) :: a1,a2
+
+    integer :: ie
+    if (par.eq.0) then ! copy state to state
+      do ie=nets,nete
+        state1(:,:,1:nlev,ie,1)  =  state2(:,:,1:nlev,ie,1)
+        state1(:,:,1:nlev,ie,2)  =  state2(:,:,1:nlev,ie,2)
+        state1(:,:,1:nlevp,ie,3) =  state2(:,:,1:nlevp,ie,3)
+        state1(:,:,1:nlevp,ie,4) =  state2(:,:,1:nlevp,ie,4)
+        state1(:,:,1:nlev,ie,5)  =  state2(:,:,1:nlev,ie,5)
+        state1(:,:,1:nlev,ie,6)  =  state2(:,:,1:nlev,ie,6)
+      enddo
+    elseif (par.eq.1) then ! copy element to state
+      do ie=nets,nete
+        state1(:,:,1:nlev,ie,1)  = elem(ie)%state%v(:,:,1,1:nlev,n1)
+        state1(:,:,1:nlev,ie,2)  = elem(ie)%state%v(:,:,2,1:nlev,n1)
+        state1(:,:,1:nlevp,ie,3) = elem(ie)%state%w_i(:,:,1:nlevp,n1)
+        state1(:,:,1:nlevp,ie,4) = elem(ie)%state%phinh_i(:,:,1:nlevp,n1)
+        state1(:,:,1:nlev,ie,5)  = elem(ie)%state%vtheta_dp(:,:,1:nlev,n1)
+        state1(:,:,1:nlev,ie,6)  = elem(ie)%state%dp3d(:,:,1:nlev,n1)
+      enddo
+    elseif (par.eq.2) then ! copy state to element
+      do ie=nets,nete
+        elem(ie)%state%v(:,:,1,1:nlev,n1)       = state1(:,:,1:nlev,ie,1)
+        elem(ie)%state%v(:,:,2,1:nlev,n1)       = state1(:,:,1:nlev,ie,2)
+        elem(ie)%state%w_i(:,:,1:nlevp,n1)      = state1(:,:,1:nlevp,ie,3)
+        elem(ie)%state%phinh_i(:,:,1:nlevp,n1)  = state1(:,:,1:nlevp,ie,4)
+        elem(ie)%state%vtheta_dp(:,:,1:nlev,n1) = state1(:,:,1:nlev,ie,5)
+        elem(ie)%state%dp3d(:,:,1:nlev,n1)      = state1(:,:,1:nlev,ie,6)
+      end do
+    elseif (par.eq.3) then ! copy element to element
+      do ie=nets,nete
+        elem(ie)%state%v(:,:,1,1:nlev,n1)       = elem(ie)%state%v(:,:,1,1:nlev,n2)
+        elem(ie)%state%v(:,:,2,1:nlev,n1)       = elem(ie)%state%v(:,:,2,1:nlev,n2)
+        elem(ie)%state%w_i(:,:,1:nlevp,n1)      = elem(ie)%state%w_i(:,:,1:nlevp,n2)
+        elem(ie)%state%phinh_i(:,:,1:nlevp,n1)  = elem(ie)%state%phinh_i(:,:,1:nlevp,n2)
+        elem(ie)%state%vtheta_dp(:,:,1:nlev,n1) = elem(ie)%state%vtheta_dp(:,:,1:nlev,n2)
+        elem(ie)%state%dp3d(:,:,1:nlev,n1)      = elem(ie)%state%dp3d(:,:,1:nlev,n2)
+      end do
+    elseif (par.eq.4) then ! copy element + state to element
+      do ie=nets,nete
+        elem(ie)%state%v(:,:,1,1:nlev,n1)       = a1*elem(ie)%state%v(:,:,1,1:nlev,n2) + a2*state1(:,:,1:nlev,ie,1)
+        elem(ie)%state%v(:,:,2,1:nlev,n1)       = a1*elem(ie)%state%v(:,:,2,1:nlev,n2) + a2*state1(:,:,1:nlev,ie,2)
+        elem(ie)%state%w_i(:,:,1:nlevp,n1)      = a1*elem(ie)%state%w_i(:,:,1:nlevp,n2) + a2*state1(:,:,1:nlevp,ie,3)
+        elem(ie)%state%phinh_i(:,:,1:nlevp,n1)  = a1*elem(ie)%state%phinh_i(:,:,1:nlevp,n2) + a2*state1(:,:,1:nlevp,ie,4)
+        elem(ie)%state%vtheta_dp(:,:,1:nlev,n1) = a1*elem(ie)%state%vtheta_dp(:,:,1:nlev,n2) + a2*state1(:,:,1:nlev,ie,5)
+        elem(ie)%state%dp3d(:,:,1:nlev,n1)      = a1*elem(ie)%state%dp3d(:,:,1:nlev,n2) + a2*state1(:,:,1:nlev,ie,6)
+      end do
+    elseif (par.eq.5) then ! copy element+element to element
+      do ie=nets,nete
+        elem(ie)%state%v(:,:,1,1:nlev,n1)       = a1*elem(ie)%state%v(:,:,1,1:nlev,n2) + a2*elem(ie)%state%v(:,:,1,1:nlev,n3)
+        elem(ie)%state%v(:,:,2,1:nlev,n1)       = a1*elem(ie)%state%v(:,:,2,1:nlev,n2) + a2*elem(ie)%state%v(:,:,2,1:nlev,n3)
+        elem(ie)%state%w_i(:,:,1:nlevp,n1)      = a1*elem(ie)%state%w_i(:,:,1:nlevp,n2) + a2*elem(ie)%state%w_i(:,:,1:nlevp,n3)
+        elem(ie)%state%phinh_i(:,:,1:nlevp,n1)  = a1*elem(ie)%state%phinh_i(:,:,1:nlevp,n2) + a2*elem(ie)%state%phinh_i(:,:,1:nlevp\
+,n3)
+        elem(ie)%state%vtheta_dp(:,:,1:nlev,n1) = a1*elem(ie)%state%vtheta_dp(:,:,1:nlev,n2) + a2*elem(ie)%state%vtheta_dp(:,:,1:nl\
+ev,n3)
+        elem(ie)%state%dp3d(:,:,1:nlev,n1)      = a1*elem(ie)%state%dp3d(:,:,1:nlev,n2) + a2*elem(ie)%state%dp3d(:,:,1:nlev,n3)
+      end do
+    elseif (par.eq.6) then ! copy element+state to state
+      do ie=nets,nete
+        state1(:,:,1:nlev,ie,1)  = a1*elem(ie)%state%v(:,:,1,1:nlev,n1) + a2*state2(:,:,1:nlev,ie,1)
+        state1(:,:,1:nlev,ie,2)  = a1*elem(ie)%state%v(:,:,2,1:nlev,n1) + a2*state2(:,:,1:nlev,ie,2)
+        state1(:,:,1:nlevp,ie,3) = a1*elem(ie)%state%w_i(:,:,1:nlevp,n1) + a2*state2(:,:,1:nlevp,ie,3)
+        state1(:,:,1:nlevp,ie,4) = a1*elem(ie)%state%phinh_i(:,:,1:nlevp,n1) + a2*state2(:,:,1:nlevp,ie,4)
+        state1(:,:,1:nlev,ie,5)  = a1*elem(ie)%state%vtheta_dp(:,:,1:nlev,n1) + a2*state2(:,:,1:nlev,ie,5)
+        state1(:,:,1:nlev,ie,6)  = a1*elem(ie)%state%dp3d(:,:,1:nlev,n1) + a2*state2(:,:,1:nlev,ie,6)
+      end do
+    elseif (par.eq.7) then ! copy element+element to state
+       do ie=nets,nete
+        state1(:,:,1:nlev,ie,1)  = a1*elem(ie)%state%v(:,:,1,1:nlev,n1) + a2*elem(ie)%state%v(:,:,1,1:nlev,n2)
+        state1(:,:,1:nlev,ie,2)  = a1*elem(ie)%state%v(:,:,2,1:nlev,n1) + a2*elem(ie)%state%v(:,:,2,1:nlev,n2)
+        state1(:,:,1:nlevp,ie,3) = a1*elem(ie)%state%w_i(:,:,1:nlevp,n1) + a2*elem(ie)%state%w_i(:,:,1:nlevp,n2)
+        state1(:,:,1:nlevp,ie,4) = a1*elem(ie)%state%phinh_i(:,:,1:nlevp,n1) + a2*elem(ie)%state%phinh_i(:,:,1:nlevp,n2)
+        state1(:,:,1:nlev,ie,5)  = a1*elem(ie)%state%vtheta_dp(:,:,1:nlev,n1) + a2*elem(ie)%state%vtheta_dp(:,:,1:nlev,n2)
+        state1(:,:,1:nlev,ie,6)  = a1*elem(ie)%state%dp3d(:,:,1:nlev,n1) + a2*elem(ie)%state%dp3d(:,:,1:nlev,n2)
+      end do
+    end if
+
+  end subroutine copy_state
 
 
 
