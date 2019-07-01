@@ -70,6 +70,7 @@ contains
     type(element_t), pointer :: elem(:)
     real(r8), allocatable :: tmp(:,:,:)    ! (npsp,nlev,nelemd)
     real(r8), allocatable :: qtmp(:,:)     ! (npsp*nelemd,nlev)
+    real(r8) :: ps(np,np)     
     logical,  allocatable :: tmpmask(:,:)  ! (npsp,nlev,nelemd) unique grid val
     integer :: ie, k, t
     integer :: indx_scm, ie_scm, i_scm, j_scm
@@ -536,14 +537,15 @@ contains
 
 !$omp parallel do private(ie, t, m_cnst)
     do ie=1,nelemd
+       ps=elem(ie)%state%ps_v(:,:,tl)
 #ifdef MODEL_THETA_L
        elem(ie)%state%w_i = 0.0
        !sets Theta and phi, not w
-       call set_thermostate(elem(ie),elem(ie)%derived%FT,hvcoord)
+       call set_thermostate(elem(ie),ps,elem(ie)%derived%FT,hvcoord)
        !reset FT?
        elem(ie)%derived%FT = 0.0
 #else
-       call set_thermostate(elem(ie),elem(ie)%state%T(:,:,:,tl),hvcoord)
+       call set_thermostate(elem(ie),ps,elem(ie)%state%T(:,:,:,tl),hvcoord)
 #endif
     end do
 
