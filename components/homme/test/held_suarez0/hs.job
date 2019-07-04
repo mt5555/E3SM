@@ -104,7 +104,7 @@ if ( $ndays == 0 ) then
 endif
 
 
-set HOMME = ~/codes/acme/components/homme
+set HOMME = `cd ../.. ; pwd`
 set wdir = ~/scratch1/preqx
 
 set MACH = $HOMME/cmake/machineFiles/anvil.cmake

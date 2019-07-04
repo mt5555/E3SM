@@ -25,9 +25,10 @@ nu_s          = NU1
 nu_p          = NU1
 nu_q          = NU1
 nu_div        = NU2
-nu_top = 2.5e5
+nu_top =  2.5e5
 hypervis_order = 2
 hypervis_subcycle = 1
+hypervis_subcycle_tom = 1
 /
 &vert_nl
 vform         = "ccm"
@@ -39,7 +40,7 @@ infilenames=''
 output_timeunits=1,0,2    ! 1=days, 2=hours, 3=seconds
 output_frequency=1,0,0    ! 0 to disable
 output_start_time=600,0,0
-output_end_time=30000,999999999,0
+output_end_time=1600,999999999,0
 output_varnames1='u','v','T','zeta','div','ps','geos','omega'
 !output_varnames1='u','v','T','zeta','ps','Q','DIFFT'
 ! debug output

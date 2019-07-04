@@ -1,4 +1,4 @@
-#!/bin/tcsh -f 
+#!/bin/tcsh 
 #
 #  Held-Suzrez job "reference" submission script  (Mark Taylor 2008)
 #  updated to CMAKE, 2015
@@ -24,7 +24,7 @@
 #SBATCH --time=2:00:00
 
 set nlev=26
-set ndays = 1600
+set ndays = 1600    # 1600
 set nmax =  5       # no. of timesteps.  ignored, unless ndays=0
 set rfreq = 0       # no. of days, or n. of timesteps if ndays=0
 
@@ -56,7 +56,7 @@ if ( $ne == 15 ) then
  endif
  if ( $ne == 30 ) then
     # 1 degree    H model, 20 nodes, 30min for 1600days
-    set tstep = 288  # H model
+    set tstep = 300
     #set tstep = 300  # H model
     #set tstep = 72  # NH model. edit namelist to turn on NH
     set nu = 1e15       # 1.5e15 crashed, 1.6e15 ran
@@ -65,7 +65,7 @@ if ( $ne == 15 ) then
     set topo = '/home/ccsm-data/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
     #set topo = '/projects/ccsm/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
     #set topo = '/lcrc/group/acme/taylorm/topodata/ne30/USGS-gtopo30_ne30np4_8xdel2.nc'
-    set toponame = 16xdel2-H-TOMsplit
+    set toponame = 16xdel2-H-debug
  endif
  if ( $ne == 60 ) then
     # 0.5 degree     tbird 200 nodes, 560 days: 20h
@@ -101,7 +101,7 @@ if ( $ne == 15 ) then
  endif
 
 
- set HOMME = ~/codes/acme/components/homme
+ set HOMME = `cd ../.. ; pwd`
  set wdir = ~/scratch1/preqx
 
  set MACH = $HOMME/cmake/machineFiles/anvil.cmake
@@ -135,7 +135,7 @@ if ( $ne == 15 ) then
 
  # setup the work directory
  mkdir $wdir/vcoord
- cp -f $HOMME/test/vcoord/*.ascii $wdir/vcoord
+\cp -f $HOMME/test/vcoord/*.ascii $wdir/vcoord
 
 
  set wdir = $wdir/$name

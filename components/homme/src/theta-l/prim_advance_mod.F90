@@ -1143,11 +1143,15 @@ contains
      dp_ref(:,:,:,ie)=0
 #endif
 
+#undef USE_DPTHETA
+#ifdef USE_DPTHETA
+#else
      ! convert vtheta_dp -> theta
      do k=1,nlev
         elem(ie)%state%vtheta_dp(:,:,k,nt)=&
              elem(ie)%state%vtheta_dp(:,:,k,nt)/elem(ie)%state%dp3d(:,:,k,nt)
      enddo
+#endif
   enddo
 
 
@@ -1158,24 +1162,36 @@ contains
   do ic=1,hypervis_subcycle
      do ie=nets,nete
         ! remove ref state
+#ifdef USE_DPTHETA
+        elem(ie)%state%vtheta_dp(:,:,:,nt)=elem(ie)%state%vtheta_dp(:,:,:,nt)-&
+             theta_ref(:,:,:,ie)*dp_ref(:,:,:,ie)
+#else
         elem(ie)%state%vtheta_dp(:,:,:,nt)=elem(ie)%state%vtheta_dp(:,:,:,nt)-&
              theta_ref(:,:,:,ie)
+#endif
+
         elem(ie)%state%phinh_i(:,:,:,nt)=elem(ie)%state%phinh_i(:,:,:,nt)-&
              phi_ref(:,:,:,ie)
         elem(ie)%state%dp3d(:,:,:,nt)=elem(ie)%state%dp3d(:,:,:,nt)-&
              dp_ref(:,:,:,ie)
+
      enddo
      
      call biharmonic_wk_theta(elem,stens,vtens,deriv,edge_g,hybrid,nt,nets,nete)
      
      do ie=nets,nete
         !add ref state back
-        elem(ie)%state%vtheta_dp(:,:,:,nt)=elem(ie)%state%vtheta_dp(:,:,:,nt)+&
-             theta_ref(:,:,:,ie)
         elem(ie)%state%phinh_i(:,:,:,nt)=elem(ie)%state%phinh_i(:,:,:,nt)+&
              phi_ref(:,:,:,ie)
         elem(ie)%state%dp3d(:,:,:,nt)=elem(ie)%state%dp3d(:,:,:,nt)+&
              dp_ref(:,:,:,ie)
+#ifdef USE_DPTHETA
+        elem(ie)%state%vtheta_dp(:,:,:,nt)=elem(ie)%state%vtheta_dp(:,:,:,nt)+&
+             theta_ref(:,:,:,ie)*dp_ref(:,:,:,ie)
+#else
+        elem(ie)%state%vtheta_dp(:,:,:,nt)=elem(ie)%state%vtheta_dp(:,:,:,nt)+&
+             theta_ref(:,:,:,ie)
+#endif
         
         
         ! comptue mean flux
@@ -1194,9 +1210,7 @@ contains
         enddo
         if (nu_top>0 .and. hypervis_subcycle_tom==0) then
            do k=1,nlev_tom
-              !vtheta_dp(:,:)=elem(ie)%state%vtheta_dp(:,:,k,nt)*elem(ie)%state%dp3d(:,:,k,nt)/hvcoord%dp0(k)
               lap_s(:,:,1)=laplace_sphere_wk(elem(ie)%state%dp3d       (:,:,k,nt),deriv,elem(ie),var_coef=.false.)
-              !lap_s(:,:,2)=laplace_sphere_wk(vtheta_dp                           ,deriv,elem(ie),var_coef=.false.)
               lap_s(:,:,2)=laplace_sphere_wk(elem(ie)%state%vtheta_dp(:,:,k,nt)  ,deriv,elem(ie),var_coef=.false.)
               lap_s(:,:,3)=laplace_sphere_wk(elem(ie)%state%w_i        (:,:,k,nt),deriv,elem(ie),var_coef=.false.)
               lap_s(:,:,4)=laplace_sphere_wk(elem(ie)%state%phinh_i    (:,:,k,nt),deriv,elem(ie),var_coef=.false.)
@@ -1238,6 +1252,19 @@ contains
            
         enddo
         
+#ifdef USE_DPTHETA
+        ! compute exner before updated dp3d
+        call pnh_and_exner_from_eos(hvcoord,elem(ie)%state%vtheta_dp(:,:,:,nt),&
+             elem(ie)%state%dp3d(:,:,:,nt),elem(ie)%state%phinh_i(:,:,:,nt),&
+             pnh,exner,temp_i,caller='advance_hypervis')
+#else
+        ! compute exner before updated dp3d
+        temp(:,:,:)=elem(ie)%state%vtheta_dp(:,:,:,nt)*elem(ie)%state%dp3d(:,:,:,nt)
+        call pnh_and_exner_from_eos(hvcoord,temp,&
+             elem(ie)%state%dp3d(:,:,:,nt),elem(ie)%state%phinh_i(:,:,:,nt),&
+             pnh,exner,temp_i,caller='advance_hypervis')
+#endif
+
         do k=1,nlev
            elem(ie)%state%v(:,:,:,k,nt)=elem(ie)%state%v(:,:,:,k,nt) + &
                 vtens(:,:,:,k,ie)
@@ -1255,7 +1282,9 @@ contains
         ! apply heating after updating state.  using updated v gives better results in PREQX model
         !
         ! d(IE)/dt =  cp*exner*d(Theta)/dt + phi d(dp3d)/dt   (Theta = dp3d*theta)
-        !   Our eqation:  d(theta)/dt = diss(theta) - heating
+        !   d(Theta)/dt = diss(Theta) - dp3d*heating
+        !   d(IE)/dt = exner*cp*diss(Theta)  - exner*cp*dp3d*heating               
+        ! OR: d(theta)/dt = diss(theta) - heating
         !   Assuming no diffusion on dp3d, we can approximate by:
         !   d(IE)/dt = exner*cp*dp3d * diss(theta)  - exner*cp*dp3d*heating               
         !
@@ -1266,18 +1295,13 @@ contains
         ! 
         ! compute exner needed for heating term and IE scaling
         ! this is using a mixture of data before viscosity and after viscosity 
-        temp(:,:,:)=elem(ie)%state%vtheta_dp(:,:,:,nt)*elem(ie)%state%dp3d(:,:,:,nt)
-        call pnh_and_exner_from_eos(hvcoord,temp,&
-             elem(ie)%state%dp3d(:,:,:,nt),elem(ie)%state%phinh_i(:,:,:,nt),&
-             pnh,exner,temp_i,caller='advance_hypervis')
         
         do k=1,nlev
-           k2=max(k,nlev)
+           k2=min(k+1,nlev)
            if (theta_hydrostatic_mode) then
               heating(:,:,k)= (elem(ie)%state%v(:,:,1,k,nt)*vtens(:,:,1,k,ie) + &
                    elem(ie)%state%v(:,:,2,k,nt)*vtens(:,:,2,k,ie) ) / &
                    (exner(:,:,k)*Cp)
-
            else
               heating(:,:,k)= (elem(ie)%state%v(:,:,1,k,nt)*vtens(:,:,1,k,ie) + &
                    elem(ie)%state%v(:,:,2,k,nt)*vtens(:,:,2,k,ie)  +&
@@ -1285,17 +1309,26 @@ contains
                      elem(ie)%state%w_i(:,:,k2,nt)*stens(:,:,k2,3,ie))/2 ) /  &
                    (exner(:,:,k)*Cp)  
            endif
+#ifdef USE_DPTHETA
+           elem(ie)%state%vtheta_dp(:,:,k,nt)=elem(ie)%state%vtheta_dp(:,:,k,nt) &
+                +stens(:,:,k,2,ie)*exner0(k)/exner(:,:,k) &
+                -elem(ie)%state%dp3d(:,:,k,nt)*heating(:,:,k)
+#else
            elem(ie)%state%vtheta_dp(:,:,k,nt)=elem(ie)%state%vtheta_dp(:,:,k,nt) &
                 +stens(:,:,k,2,ie)*hvcoord%dp0(k)*exner0(k)/(exner(:,:,k)*elem(ie)%state%dp3d(:,:,k,nt)&
                 )  -heating(:,:,k)
+#endif
         enddo
      enddo ! ie
   enddo  ! subcycle
 
 ! convert vtheta_dp -> theta
   do ie=nets,nete            
+#ifdef USE_DPTHETA
+#else
      elem(ie)%state%vtheta_dp(:,:,:,nt)=&
           elem(ie)%state%vtheta_dp(:,:,:,nt)*elem(ie)%state%dp3d(:,:,:,nt)
+#endif
     
      ! finally update w at the surface: 
      elem(ie)%state%w_i(:,:,nlevp,nt) = (elem(ie)%state%v(:,:,1,nlev,nt)*elem(ie)%derived%gradphis(:,:,1) + &
@@ -1889,6 +1922,13 @@ contains
            div_v_theta(:,:,k)=vtheta(:,:,k)*divdp(:,:,k) + &
                 dp3d(:,:,k)*elem(ie)%state%v(:,:,1,k,n0)*v_theta(:,:,1,k) + &
                 dp3d(:,:,k)*elem(ie)%state%v(:,:,2,k,n0)*v_theta(:,:,2,k) 
+#undef TADV
+#ifdef TADV
+           ! right now, only coded for rsplit>0 and theta_advect_form=1
+           div_v_theta(:,:,k)=&
+                elem(ie)%state%v(:,:,1,k,n0)*v_theta(:,:,1,k) + &
+                elem(ie)%state%v(:,:,2,k,n0)*v_theta(:,:,2,k) 
+#endif
         endif
         theta_tens(:,:,k)=(-theta_vadv(:,:,k)-div_v_theta(:,:,k))*scale1
 
@@ -2107,8 +2147,14 @@ contains
           + dt2*vtens1(:,:,k) )
         elem(ie)%state%v(:,:,2,k,np1) = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%v(:,:,2,k,nm1) &
           +  dt2*vtens2(:,:,k) )
+#ifdef TADV
+        elem(ie)%state%vtheta_dp(:,:,k,np1) = elem(ie)%spheremp(:,:)*&
+             (scale3 * elem(ie)%state%vtheta_dp(:,:,k,nm1)/elem(ie)%state%dp3d(:,:,k,nm1)&
+             + dt2*theta_tens(:,:,k))
+#else
         elem(ie)%state%vtheta_dp(:,:,k,np1) = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%vtheta_dp(:,:,k,nm1) &
           + dt2*theta_tens(:,:,k))
+#endif
 
         if ( .not. theta_hydrostatic_mode ) then
            elem(ie)%state%w_i(:,:,k,np1)    = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%w_i(:,:,k,nm1)   &
@@ -2166,6 +2212,10 @@ contains
      do k=1,nlev
         elem(ie)%state%dp3d(:,:,k,np1) =elem(ie)%rspheremp(:,:)*elem(ie)%state%dp3d(:,:,k,np1)
         elem(ie)%state%vtheta_dp(:,:,k,np1)=elem(ie)%rspheremp(:,:)*elem(ie)%state%vtheta_dp(:,:,k,np1)
+#ifdef TADV
+        elem(ie)%state%vtheta_dp(:,:,k,np1)=elem(ie)%state%vtheta_dp(:,:,k,np1)*&
+             elem(ie)%state%dp3d(:,:,k,np1)
+#endif
         if ( .not. theta_hydrostatic_mode ) then
            elem(ie)%state%w_i(:,:,k,np1)    =elem(ie)%rspheremp(:,:)*elem(ie)%state%w_i(:,:,k,np1)
            elem(ie)%state%phinh_i(:,:,k,np1)=elem(ie)%rspheremp(:,:)*elem(ie)%state%phinh_i(:,:,k,np1)
