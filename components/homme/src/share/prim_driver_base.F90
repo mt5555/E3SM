@@ -1349,6 +1349,7 @@ contains
   use physical_constants, only : cp, g, kappa, Rgas, p0
   use element_ops,        only : get_temperature, get_r_star, get_hydro_pressure
   use eos,                only : pnh_and_exner_from_eos
+  use prim_state_mod,     only : prim_energy_halftimesa
 #endif
   implicit none
   type (element_t),       intent(inout) :: elem
@@ -1375,6 +1376,9 @@ contains
 #endif
 
 #ifdef MODEL_THETA_L
+!E7 and E8
+  call prim_energy_halftimesa(elem,hvcoord,np1,7)
+
   if (rsplit==0) then
      adjust_ps=.true.   ! stay on reference levels for Eulerian case
   else
@@ -1519,7 +1523,9 @@ contains
    
    elem%derived%FPHI(:,:,:) = &
         (phi_n1 - elem%state%phinh_i(:,:,:,np1))/dt
-   
+
+  call prim_energy_halftimesa(elem,hvcoord,np1,8)
+
 #endif
      
 

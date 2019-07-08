@@ -35,6 +35,7 @@ private
   public :: prim_printstate
   public :: prim_printstate_init
   public :: prim_energy_halftimes
+  public :: prim_energy_halftimesa
   public :: prim_diag_scalars
 
 contains
@@ -753,6 +754,13 @@ contains
             (IEner(6)-IEner(5))/tstep,(IEner(2)-IEner(4))/dt
        write(iulog,'(a,3e15.7)') 'dPE/dt(W/m^2): ',(PEner(1)-PEner(3))/dt_f,&
             (PEner(6)-PEner(5))/tstep,(PEner(2)-PEner(4))/dt
+
+!!!! hack, nsplit=1 case only, otherwise use nsplit in dt=nsplit*rsplit*qsplit
+       write(iulog,'(a)') 'Change from psv adjustment:'
+       write(iulog,'(a,3e15.7)') 'dKE/dt(W/m^2): ',(KEner(8)-KEner(7))/dt
+       write(iulog,'(a,3e15.7)') 'dIE/dt(W/m^2): ',(IEner(8)-IEner(7))/dt
+       write(iulog,'(a,3e15.7)') 'dPE/dt(W/m^2): ',(PEner(8)-PEner(7))/dt
+
        q=1
        if (qsize>0) write(iulog,'(a,2e15.7)') 'dQ1/dt(kg/sm^2)',(Qmass(q,1)-Qmass(q,3))/dt
 
@@ -918,6 +926,83 @@ subroutine prim_energy_halftimes(elem,hvcoord,tl,n,t_before_advance,nets,nete)
     
 end subroutine prim_energy_halftimes
     
+
+
+subroutine prim_energy_halftimesa(elem,hvcoord,t1,n)
+    use kinds, only : real_kind
+    use dimensions_mod, only : np, np, nlev,nlevp
+    use hybvcoord_mod, only : hvcoord_t
+    use element_mod, only : element_t
+    use physical_constants, only : Cp, cpwater_vapor
+    use physics_mod, only : Virtual_Specific_Heat
+    use prim_si_mod, only : preq_hydrostatic
+
+    integer :: t1,n
+    type (element_t)     , intent(inout), target :: elem
+    type (hvcoord_t)                  :: hvcoord
+!    type (TimeLevel_t), intent(in)       :: tl
+    logical :: t_before_advance
+
+    integer :: ie,k,i,j
+    real (kind=real_kind), dimension(np,np,nlev)  :: dpt1  ! delta pressure
+    real (kind=real_kind), dimension(np,np)  :: E
+    real (kind=real_kind), dimension(np,np)  :: suml,suml2,v1,v2
+    real (kind=real_kind), dimension(np,np,nlev)  :: sumlk, suml2k
+    real (kind=real_kind) :: phi(np,np,nlev)
+    real (kind=real_kind) :: phi_i(np,np,nlevp)
+    real (kind=real_kind) :: pnh(np,np,nlev)   ! nh nonhyrdo pressure
+    real (kind=real_kind) :: dpnh_dp_i(np,np,nlevp)
+    real (kind=real_kind) :: exner(np,np,nlev)  ! exner nh pressure
+    real (kind=real_kind) :: pnh_i(np,np,nlevp)  ! pressure on intefaces
+
+    integer:: tmp, t1_qdp   ! the time pointers for Qdp are not the same
+
+       dpt1=elem%state%dp3d(:,:,:,t1)
+       call pnh_and_exner_from_eos(hvcoord,elem%state%vtheta_dp(:,:,:,t1),dpt1,&
+            elem%state%phinh_i(:,:,:,t1),pnh,exner,dpnh_dp_i,pnh_i,'prim_state_mod')
+       call get_phi(elem,phi,phi_i,hvcoord,t1,t1)
+
+       !   KE   .5 dp/dn U^2
+       do k=1,nlev
+          E = ( elem%state%v(:,:,1,k,t1)**2 +  &
+               elem%state%v(:,:,2,k,t1)**2  )/2
+          sumlk(:,:,k) = E*dpt1(:,:,k)
+
+          E=(elem%state%w_i(:,:,k,t1)**2+elem%state%w_i(:,:,k+1,t1)**2)/4
+          suml2k(:,:,k) = E*dpt1(:,:,k)
+       enddo
+       suml=0
+       suml2=0
+       do k=1,nlev
+          suml(:,:) = suml(:,:) + sumlk(:,:,k)
+          suml2(:,:) = suml2(:,:) + suml2k(:,:,k)
+       enddo
+       if ( theta_hydrostatic_mode) then
+          elem%accum%KEner(:,:,n)=suml(:,:)
+       else
+          elem%accum%KEner(:,:,n)=suml(:,:)+ suml2(:,:)
+       endif
+
+    !   PE   dp/dn PHIs
+       suml=0
+       do k=1,nlev
+          suml = suml + phi(:,:,k)*dpt1(:,:,k)
+       enddo
+       elem%accum%PEner(:,:,n)=suml(:,:)
+
+    !  IE = c_p^* dp/deta T - pnh dphi/deta  + ptop phi_top
+       suml=0
+       suml2=0
+       do k=1,nlev
+          suml(:,:)=suml(:,:)+&
+                Cp*elem%state%vtheta_dp(:,:,k,t1)*exner(:,:,k)
+          suml2(:,:) = suml2(:,:)+(phi_i(:,:,k+1)-phi_i(:,:,k))*pnh(:,:,k)
+       enddo
+       elem%accum%IEner(:,:,n)=suml(:,:) + suml2(:,:) +&
+            pnh_i(:,:,1)* phi_i(:,:,1)
+
+end subroutine prim_energy_halftimesa
+
 !=======================================================================================================! 
   
 
