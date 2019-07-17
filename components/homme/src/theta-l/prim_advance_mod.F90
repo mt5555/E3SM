@@ -1398,7 +1398,43 @@ contains
   enddo  ! subcycle
   endif
 
+#if 0
+  do ie=nets,nete            
+     call get_phinh(hvcoord,elem(ie)%state%phis,elem(ie)%state%vtheta_dp(:,:,:,nt),&
+          elem(ie)%state%dp3d(:,:,:,nt),phi_ref(:,:,:,ie))
+     phi_i(:,:,:)=elem(ie)%state%phinh_i(:,:,:,nt)-phi_ref(:,:,:,ie)
 
+#if 1
+     ! how about some boundary layer mixing in theta, and then constant pressure apply to PHI?
+     ! compute laplacian:
+     do k=nlev-2,nlev
+        eps=0
+        if (k==nlev) eps=.30
+        if (k==nlev-1) eps=.20
+        if (k==nlev-2) eps=.10
+        eps = .25*k/nlev
+        elem(ie)%state%phinh_i(:,:,k,nt)=elem(ie)%state%phinh_i(:,:,k,nt)+&
+          ( -2*eps*phi_i(:,:,k) + eps*phi_i(:,:,k+1) + eps*phi_i(:,:,k-1) )
+     enddo
+#endif
+#if 0
+      do l=1,nlev
+         l1p = min(l+1,nlevp)
+         l2p = min(l+2,nlevp)
+         if (l.eq.nlevp) l2p=nlevp-1
+         l1n = max(l-1,1)
+         l2n = max(l-2,1)
+         if (l.eq.1) l2n=2
+
+         ! the 10 in the scaling below comes from 4th order Laplacian:                                        
+         ! eigenvalue of (del**4) = 10 / delz**4.                                                             
+         ! vert_vis = damping time on smallest wavelength                                                     
+         elem(ie)%state%phinh_i(:,:,l,nt)=elem(ie)%state%phinh_i(:,:,l,nt)+&
+              (-1.00/10d0)* &
+              (phi_i(:,:,l2p)-4*phi_i(:,:,l1p)+6*phi_i(:,:,l)-4*phi_i(:,:,l1n) + phi_i(:,:,l2n))
+      enddo
+  enddo
+#endif
 
   call t_stopf('advance_hypervis')
 

@@ -135,7 +135,7 @@ contains
         elem(ie)%state%v(:,:,1,:,np1)=ttmp(:,:,:,1)/dp
         elem(ie)%state%v(:,:,2,:,np1)=ttmp(:,:,:,2)/dp
         elem(ie)%state%vtheta_dp(:,:,:,np1)=ttmp(:,:,:,3) ! + theta_ref*dp*Cp
-      
+       
         
         do k=nlev,1,-1
            elem(ie)%state%phinh_i(:,:,k,np1)=&
@@ -143,6 +143,48 @@ contains
            elem(ie)%state%w_i(:,:,k,np1)=&
                 elem(ie)%state%w_i(:,:,k+1,np1)-ttmp(:,:,k,5)  !/dp(:,:,k)
         enddo
+
+#if 0
+        pi(:,:,nlevp)=elem(ie)%state%ps_v(:,:,np1)
+        pi_star(:,:,nlevp)=elem(ie)%state%ps_v(:,:,np1)
+        do k=nlev,1,-1
+           pi(:,:,k)=pi(:,:,k+1)-dp(:,:,k)
+           pi_star(:,:,k)=pi_star(:,:,k+1)-dp_star(:,:,k)
+        enddo
+        pi_star(:,:,1)=pi(:,:,1) ! avoid aroundoff
+
+        do k=1,nlev
+           do j=1,np
+              do i=1,np
+                 ! find k2 so that:   pi_star(k2) <= pi(k) <= pi_star(k2+1)
+                 pi_search = pi(i,j,k)
+                 kfind=0
+                 do k2=1,nlev
+                    if ( pi_star(i,j,k2) <= pi_search .and. pi_search <= pi_star(i,j,k2+1) ) then
+                       kfind=k2
+                       exit
+                    endif
+                 enddo
+                 if (kfind==0) then
+                    if (hybrid%masterthread) then
+                    print *,'error cant find point'
+                    do k2=1,nlevp
+                       print *,k2,pi_star(i,j,k2),pi_search
+                    enddo
+                    endif
+                 endif
+                 ! now interpolate 
+                 del = (pi_star(i,j,k2+1)-pi_star(i,j,k2))
+                 elem(ie)%sta te%phinh_i(i,j,k,np1)=&
+                      phi_ref(i,j,k2+1)*( bpi(i,j,k)-pi_star(i,j,k2) ) / del  + &
+                      phi_ref(i,j,k2)*( pi_star(i,j,k2+1)-pi(i,j,k) ) / del 
+              enddo
+           enddo
+        enddo
+#endif
+
+
+
 
         ! depends on theta, so do this after updating theta:
         call phi_from_eos(hvcoord,elem(ie)%state%phis,elem(ie)%state%vtheta_dp(:,:,:,np1),dp,phi_ref)
