@@ -245,7 +245,7 @@ contains
       call compute_andor_apply_rhs(np1,n0,np1,qn0,dt*a4,elem,hvcoord,hybrid,&
         deriv,nets,nete,.false.,eta_ave_w,1d0,ahat4/a4,1d0)
 
-
+!IF NOT ARKODE
 !==============================================================================================
     elseif (tstep_type == 7) then  ! imkg254, most robust of the methods
  
@@ -2085,8 +2085,6 @@ contains
         elem(ie)%state%v(:,:,2,nlev,np1) =  elem(ie)%state%v(:,:,2,nlev,np1) -&
              scale1*dt2*(dpnh_dp_i(:,:,nlevp)-1)*elem(ie)%derived%gradphis(:,:,2)/2
 
-
-        ! add in wh component 
         do k=2,nlev
            v_i(:,:,1,k) = (dp3d(:,:,k)*elem(ie)%state%v(:,:,1,k,n0) + &
                 dp3d(:,:,k-1)*elem(ie)%state%v(:,:,1,k-1,n0) ) / (2*dp3d_i(:,:,k))
@@ -2104,8 +2102,15 @@ contains
         do k=2,nlev
            wh_i(:,:,k)=(wh(:,:,k-1)+wh(:,:,k))/2
         enddo
-        elem(ie)%state%phinh_i(:,:,1:nlev,np1) = elem(ie)%state%phinh_i(:,:,1:nlev,np1) +&
-             dt2*g*(1-scale2)*wh_i(:,:,1:nlev)
+
+!        elem(ie)%state%phinh_i(:,:,1:nlev,np1) = elem(ie)%state%phinh_i(:,:,1:nlev,np1) +&
+!             dt2*g*(1-scale2)*wh_i(:,:,1:nlev)
+
+        wh_i(:,:,nlev) = (elem(ie)%state%v(:,:,1,k,n0)*elem(ie)%derived%gradphis(:,:,1) + &
+                          elem(ie)%state%v(:,:,2,k,n0)*elem(ie)%derived%gradphis(:,:,2))&
+                         *1.0/g
+        elem(ie)%state%phinh_i(:,:,nlev,np1) = elem(ie)%state%phinh_i(:,:,nlev,np1) +&
+             dt2*g*(1-scale2)*wh_i(:,:,nlev)
 
 
 #ifdef ENERGY_DIAGNOSTICS
@@ -2169,6 +2174,9 @@ contains
   ! It is assumed that un0 has the value of y and the computed value of gi is stored at
   ! unp1
   !===================================================================================
+
+  use physical_constants, only : p0, kappa, Rgas
+
   integer, intent(in) :: np1,qn0,nets,nete
   real*8, intent(in) :: dt2
   integer :: maxiter
@@ -2211,7 +2219,7 @@ contains
   integer :: i,j,k,l,ie,itercount,info(np,np),itercountmax
   integer :: nsafe
 
-
+  real (kind=real_kind) :: exnerpi(np,np,nlev), dpds(np,np,nlev), pi_i(np,np,nlevp), pi(np,np,nlev)
 
   itercountmax=0
   itererrmax=0.d0
@@ -2228,6 +2236,8 @@ contains
     phi_np1 => elem(ie)%state%phinh_i(:,:,:,np1)
     phis => elem(ie)%state%phis(:,:)
 
+
+
     do k=1,nlev
        wh(:,:,k) = (elem(ie)%state%v(:,:,1,k,np1)*elem(ie)%derived%gradphis(:,:,1) + &
                     elem(ie)%state%v(:,:,2,k,np1)*elem(ie)%derived%gradphis(:,:,2))&
@@ -2240,8 +2250,41 @@ contains
     enddo
     
     ! add in w_explicit to initial guess:
-    phi_np1(:,:,1:nlev) = phi_np1(:,:,1:nlev) + dt2*g*&
-         (elem(ie)%state%w_i(:,:,1:nlev,np1)-wh_i(:,:,1:nlev))
+!    phi_np1(:,:,1:nlev) = phi_np1(:,:,1:nlev) + dt2*g*&
+!         (elem(ie)%state%w_i(:,:,1:nlev,np1)-wh_i(:,:,1:nlev))
+
+    wh_i(:,:,nlev) = (elem(ie)%state%v(:,:,1,k,np1)*elem(ie)%derived%gradphis(:,:,1) + &
+                      elem(ie)%state%v(:,:,2,k,np1)*elem(ie)%derived%gradphis(:,:,2))&
+                     *1.0/g
+    phi_np1(:,:,nlev) = phi_np1(:,:,nlev) - dt2*g*wh_i(:,:,nlev)
+
+
+
+
+
+#if 1
+    ! hydrostatic pressure
+    pi_i(:,:,1)=hvcoord%hyai(1)*hvcoord%ps0
+    do k=1,nlev
+       pi_i(:,:,k+1)=pi_i(:,:,k) + dp3d(:,:,k)
+    enddo
+    do k=1,nlev
+       pi(:,:,k)=pi_i(:,:,k) + dp3d(:,:,k)/2
+    enddo
+
+    exnerpi = (pi/p0)**kappa
+    dpds =  Rgas * vtheta_dp * exnerpi / pi
+
+    do k=nlev,1,-1
+       phi_np1(:,:,k) = phi_np1(:,:,k+1) + dpds(:,:,k)
+    enddo
+#endif
+
+
+
+
+
+
 
     ! initial residual
     call pnh_and_exner_from_eos(hvcoord,vtheta_dp,dp3d,phi_np1,pnh,exner,dpnh_dp_i,caller='dirk1')
