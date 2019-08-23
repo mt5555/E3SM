@@ -73,7 +73,6 @@ contains
   end subroutine prim_advance_init1
 
 
-
 #ifndef ARKODE
   !_____________________________________________________________________
   subroutine prim_advance_exp(elem, deriv, hvcoord, hybrid,dt, tl,  nets, nete, compute_diagnostics)
@@ -271,30 +270,30 @@ contains
 
 
       call compute_andor_apply_rhs(np1,n0,n0,qn0,a1*dt,elem,hvcoord,hybrid,&
-        deriv,nets,nete,compute_diagnostics,0d0,1d0,0d0,1d0)
+        deriv,nets,nete,compute_diagnostics,0d0,1d0,0d0,1d0,tl)
       call compute_stage_value_dirk(np1,qn0,dhat1*dt,elem,hvcoord,hybrid,&
         deriv,nets,nete,maxiter,itertol)
 
       call compute_andor_apply_rhs(np1,n0,np1,qn0,a2*dt,elem,hvcoord,hybrid,&
-        deriv,nets,nete,.false.,0d0,1d0,ahat2/a2,1d0)
+        deriv,nets,nete,.false.,0d0,1d0,ahat2/a2,1d0,tl)
       call compute_stage_value_dirk(np1,qn0,dhat2*dt,elem,hvcoord,hybrid,&
         deriv,nets,nete,maxiter,itertol)
 
       call compute_andor_apply_rhs(np1,n0,np1,qn0,a3*dt,elem,hvcoord,hybrid,&
-        deriv,nets,nete,.false.,0d0,1d0,ahat3/a3,1d0)
+        deriv,nets,nete,.false.,0d0,1d0,ahat3/a3,1d0,tl)
       call compute_stage_value_dirk(np1,qn0,dhat3*dt,elem,hvcoord,hybrid,&
         deriv,nets,nete,maxiter,itertol)
 
       call compute_andor_apply_rhs(np1,n0,np1,qn0,a4*dt,elem,hvcoord,hybrid,&
-        deriv,nets,nete,.false.,0d0,1d0,ahat4/a4,1d0)
+        deriv,nets,nete,.false.,0d0,1d0,ahat4/a4,1d0,tl)
       call compute_stage_value_dirk(np1,qn0,dhat4*dt,elem,hvcoord,hybrid,&
         deriv,nets,nete,maxiter,itertol)
 #if 0
       call compute_andor_apply_rhs(np1,n0,np1,qn0,a5*dt,elem,hvcoord,hybrid,&
-        deriv,nets,nete,.false.,eta_ave_w,1d0,ahat5/a5,1d0)
+        deriv,nets,nete,.false.,eta_ave_w,1d0,ahat5/a5,1d0,tl)
 #else
       call compute_andor_apply_rhs(np1,n0,np1,qn0,a5*dt,elem,hvcoord,hybrid,&
-        deriv,nets,nete,.false.,eta_ave_w,1d0,0d0,1d0)
+        deriv,nets,nete,.false.,eta_ave_w,1d0,0d0,1d0,tl)
       call compute_stage_value_dirk(np1,qn0,dt,elem,hvcoord,hybrid,&
         deriv,nets,nete,maxiter,itertol)
 #endif
@@ -1439,7 +1438,7 @@ contains
 !============================ stiff and or non-stiff ============================================
 
  subroutine compute_andor_apply_rhs(np1,nm1,n0,qn0,dt2,elem,hvcoord,hybrid,&
-       deriv,nets,nete,compute_diagnostics,eta_ave_w,scale1,scale2,scale3)
+       deriv,nets,nete,compute_diagnostics,eta_ave_w,scale1,scale2,scale3,tl)
   ! ===================================
   ! compute the RHS, accumulate into u(np1) and apply DSS
   !
@@ -1463,6 +1462,9 @@ contains
   type (derivative_t),  intent(in) :: deriv
 
   real (kind=real_kind) :: eta_ave_w,scale1,scale2,scale3  ! weighting for eta_dot_dpdn mean flux, scale of unm1
+
+  type (TimeLevel_t)   , intent(in), optional            :: tl
+
 
   ! local
   real (kind=real_kind), pointer, dimension(:,:,:) :: phi_i
@@ -1517,9 +1519,11 @@ contains
   real (kind=real_kind) ::  temp(np,np,nlev)
   real (kind=real_kind) ::  vtemp(np,np,2,nlev)       ! generic gradient storage
   real (kind=real_kind), dimension(np,np) :: sdot_sum ! temporary field
-  real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn
+  real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn, minp, maxp
   real (kind=real_kind) :: wh(np,np,nlev),wh_i(np,np,nlevp)  ! w hydrostatic
   integer :: i,j,k,kptr,ie, nlyr_tot
+
+  real (kind=real_kind) :: geotens(np,np,nlevp), dphitens(np,np,nlev), dphiold(np,np,nlev)
 
   call t_startf('compute_andor_apply_rhs')
 
@@ -1739,6 +1743,11 @@ contains
         ! phi - tendency on interfaces
         v_gradphinh_i(:,:,k) = v_i(:,:,1,k)*gradphinh_i(:,:,1,k) &
              +v_i(:,:,2,k)*gradphinh_i(:,:,2,k) 
+
+!limit explicit tendency only? that is, phin0+dt*phitend (without gw part but
+!ugradphis part for the bottom?)?
+
+
         phi_tens(:,:,k) =  (-phi_vadv_i(:,:,k) - v_gradphinh_i(:,:,k))*scale1 &
           + scale2*g*elem(ie)%state%w_i(:,:,k,n0)
      end do
@@ -1991,6 +2000,61 @@ contains
 #endif
 
 
+#if 1
+
+     phi_tens(:,:,nlevp) = 0.0 !in case it wasnt set
+
+     wh_i(:,:,nlev) = (elem(ie)%state%v(:,:,1,k,n0)*elem(ie)%derived%gradphis(:,:,1) + &
+                        elem(ie)%state%v(:,:,2,k,n0)*elem(ie)%derived%gradphis(:,:,2))&
+                        *1.0/g
+     phi_tens(:,:,nlev) = phi_tens(:,:,nlev) + g*(1-scale2)*wh_i(:,:,nlev)
+
+
+     geotens(:,:,:) = elem(ie)%state%phinh_i(:,:,:,nm1) + dt2*phi_tens(:,:,:)
+     !now make dphi tens
+     dphitens(:,:,1:nlev) = geotens(:,:,1:nlev) - geotens(:,:,2:nlevp)
+     !make old dphi, too
+     dphiold(:,:,1:nlev) = elem(ie)%state%phinh_i(:,:,1:nlev,nm1)-elem(ie)%state%phinh_i(:,:,2:nlevp,nm1) 
+
+     do k=1,nlev
+
+minp = minval(dphiold(:,:,k))
+maxp = maxval(dphiold(:,:,k))
+
+#if 0
+if(elem(ie)%globalid == 4749 .and. k == 72 .and. tl%nstep > 9660) then
+print *, 'dphiold tendency before', dphiold(:,:,k)
+print *, 'min max from it ', minp, maxp
+print *, 'min max of dphitens', minval(dphitens(:,:,k)), maxval(dphitens(:,:,k))
+endif
+#endif
+
+do j=1,np; do i=1,np
+if(dphitens(i,j,k) < minp ) dphitens(i,j,k) = minp
+if(dphitens(i,j,k) > maxp ) dphitens(i,j,k) = maxp
+enddo; enddo
+
+#if 0
+if(elem(ie)%globalid == 4749 .and. k == 72 .and. tl%nstep > 9660) then
+print *, 'dphitens tendency after', dphitens(:,:,k)
+print *, 'min max of dphitens', minval(dphitens(:,:,k)), maxval(dphitens(:,:,k))
+endif
+#endif
+
+!call limiter_clip_and_sum2d( phi_tens(:,:,k), elem(ie)%spheremp(:,:) ,minp,
+!maxp, elem(ie)%state%dp3d(:,:,k,nm1))
+
+     enddo
+
+!now restore tendencies and then restore phi_tend
+     do k=nlev,1,-1
+        geotens(:,:,k) = geotens(:,:,k+1) + dphitens(:,:,k)
+     enddo
+
+     phi_tens(:,:,:) = (geotens(:,:,:) - elem(ie)%state%phinh_i(:,:,:,nm1))/dt2
+
+#endif
+
      do k=1,nlev
         elem(ie)%state%v(:,:,1,k,np1) = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%v(:,:,1,k,nm1) &
           + dt2*vtens1(:,:,k) )
@@ -2002,8 +2066,16 @@ contains
         if ( .not. theta_hydrostatic_mode ) then
            elem(ie)%state%w_i(:,:,k,np1)    = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%w_i(:,:,k,nm1)   &
                 + dt2*w_tens(:,:,k))
+
            elem(ie)%state%phinh_i(:,:,k,np1)   = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%phinh_i(:,:,k,nm1) & 
                 + dt2*phi_tens(:,:,k))
+
+!if(elem(ie)%globalid == 4749 .and. k == 72 .and. tl%nstep > 9660) then
+!print *, ' BEFORE PACKING', elem(ie)%state%phinh_i(:,:,k,np1) - elem(ie)%state%phinh_i(:,:,k+1,np1)
+!print *, 'min of it ', minval(elem(ie)%state%phinh_i(:,:,k,np1) -elem(ie)%state%phinh_i(:,:,k+1,np1))
+!print *, 'max of it ', maxval(elem(ie)%state%phinh_i(:,:,k,np1) -elem(ie)%state%phinh_i(:,:,k+1,np1))
+!endif
+
         endif
 
         elem(ie)%state%dp3d(:,:,k,np1) = &
@@ -2058,6 +2130,14 @@ contains
         if ( .not. theta_hydrostatic_mode ) then
            elem(ie)%state%w_i(:,:,k,np1)    =elem(ie)%rspheremp(:,:)*elem(ie)%state%w_i(:,:,k,np1)
            elem(ie)%state%phinh_i(:,:,k,np1)=elem(ie)%rspheremp(:,:)*elem(ie)%state%phinh_i(:,:,k,np1)
+
+!if(elem(ie)%globalid == 4749 .and. k == 72 .and. tl%nstep > 9660) then
+!print *, 'AFTER UNPACKING', elem(ie)%state%phinh_i(:,:,k,np1) -elem(ie)%state%phinh_i(:,:,k+1,np1)
+!print *, 'min of it ', minval(elem(ie)%state%phinh_i(:,:,k,np1)-elem(ie)%state%phinh_i(:,:,k+1,np1))
+!print *, 'max of it ', maxval(elem(ie)%state%phinh_i(:,:,k,np1)-elem(ie)%state%phinh_i(:,:,k+1,np1))
+!endif
+
+
         endif
         elem(ie)%state%v(:,:,1,k,np1)  =elem(ie)%rspheremp(:,:)*elem(ie)%state%v(:,:,1,k,np1)
         elem(ie)%state%v(:,:,2,k,np1)  =elem(ie)%rspheremp(:,:)*elem(ie)%state%v(:,:,2,k,np1)
@@ -2106,11 +2186,25 @@ contains
 !        elem(ie)%state%phinh_i(:,:,1:nlev,np1) = elem(ie)%state%phinh_i(:,:,1:nlev,np1) +&
 !             dt2*g*(1-scale2)*wh_i(:,:,1:nlev)
 
+!old way of doing it
+#if 0
         wh_i(:,:,nlev) = (elem(ie)%state%v(:,:,1,k,n0)*elem(ie)%derived%gradphis(:,:,1) + &
                           elem(ie)%state%v(:,:,2,k,n0)*elem(ie)%derived%gradphis(:,:,2))&
                          *1.0/g
         elem(ie)%state%phinh_i(:,:,nlev,np1) = elem(ie)%state%phinh_i(:,:,nlev,np1) +&
              dt2*g*(1-scale2)*wh_i(:,:,nlev)
+#endif 
+
+
+
+!if(elem(ie)%globalid == 4749 .and. tl%nstep > 9660) then
+!k=72
+!print *, 'AFTER ADDING a ugradphis term', elem(ie)%state%phinh_i(:,:,k,np1) - elem(ie)%state%phinh_i(:,:,k+1,np1)
+!print *, 'min of it ', minval(elem(ie)%state%phinh_i(:,:,k,np1) -elem(ie)%state%phinh_i(:,:,k+1,np1))
+!print *, 'max of it ', maxval(elem(ie)%state%phinh_i(:,:,k,np1) -elem(ie)%state%phinh_i(:,:,k+1,np1))
+!endif
+
+
 
 
 #ifdef ENERGY_DIAGNOSTICS
@@ -2143,6 +2237,9 @@ contains
               write(iulog,*) 'WARNING:CAAR after ADV, delta z < 1m. ie,i,j,k=',ie,i,j,k
               write(iulog,*) 'phi(i,j,k)=  ',elem(ie)%state%phinh_i(i,j,k,np1)
               write(iulog,*) 'phi(i,j,k+1)=',elem(ie)%state%phinh_i(i,j,k+1,np1)
+print *, 'global id is ', elem(ie)%globalid
+print *, 'timestep = ',   tl%nstep
+stop
            endif
         enddo
         enddo
@@ -2156,6 +2253,98 @@ contains
   end subroutine compute_andor_apply_rhs
 
 
+
+
+  subroutine limiter_clip_and_sum2d(ptens,sphweights,minp,maxp,dpmass)
+    ! Prototype limiter. This is perhaps the fastest limiter that (i) is assured
+    ! to find x in the constraint set if that set is not empty and (ii) is such
+    ! that the 1-norm of the update, norm(x*c - ptens*sphweights, 1), is
+    ! minimal. It does not require iteration. However, its solution quality is
+    ! not established.
+    use kinds         , only : real_kind
+    use dimensions_mod, only : np, np, nlev
+    implicit none
+
+    real (kind=real_kind), dimension(np,np), intent(inout) :: ptens
+    real (kind=real_kind), dimension(np,np),      intent(in)    :: sphweights
+    real (kind=real_kind),       intent(inout) :: minp, maxp
+    real (kind=real_kind), dimension(np,np), intent(in), optional :: dpmass
+
+    real (kind=real_kind), parameter :: zero = 0.0d0
+
+    integer :: k1, k, i, j
+    logical :: modified
+    real (kind=real_kind) :: addmass, mass, sumc, den
+    real (kind=real_kind) :: x(np*np),c(np*np),v(np*np)
+
+!    do k=1,nlev
+
+       k1 = 1
+       do j = 1, np
+          do i = 1, np
+             c(k1) = sphweights(i,j)*dpmass(i,j)
+             x(k1) = ptens(i,j)/dpmass(i,j)
+             k1 = k1+1
+          enddo
+       enddo
+
+       sumc = sum(c)
+       mass = sum(c*x)
+       ! This should never happen, but if it does, don't limit.
+!       if (sumc <= 0) cycle
+       ! Relax constraints to ensure limiter has a solution; this is only needed
+       ! if running with the SSP CFL>1 or due to roundoff errors.
+       if (mass < minp*sumc) then
+          minp = mass / sumc
+       endif
+       if (mass > maxp*sumc) then
+          maxp = mass / sumc
+       endif
+
+       addmass = zero
+
+       ! Clip.
+       modified = .false.
+       do k1 = 1, np*np
+          if (x(k1) > maxp) then
+             modified = .true.
+             addmass = addmass + (x(k1) - maxp)*c(k1)
+             x(k1) = maxp
+          elseif (x(k1) < minp) then
+             modified = .true.
+             addmass = addmass + (x(k1) - minp)*c(k1)
+             x(k1) = minp
+          end if
+       end do
+!       if (.not. modified) cycle
+
+
+if(modified) then
+       if (addmass /= zero) then
+          ! Determine weights.
+          if (addmass > zero) then
+             v(:) = maxp - x(:)
+          else
+             v(:) = x(:) - minp
+          end if
+          den = sum(v*c)
+          if (den > zero) then
+             ! Update.
+             x(:) = x(:) + (addmass/den)*v(:)
+          end if
+       end if
+
+       k1 = 1
+       do j = 1,np
+          do i = 1,np
+             ptens(i,j) = x(k1)*dpmass(i,j)
+             k1 = k1+1
+          end do
+       end do
+endif
+
+!    enddo
+  end subroutine limiter_clip_and_sum2d
 
 
  
