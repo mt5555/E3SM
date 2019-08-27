@@ -24,9 +24,9 @@
 #SBATCH --time=2:00:00
 
 set nlev=26
-set ndays = 1600
+set ndays = 500
 set nmax =  5       # no. of timesteps.  ignored, unless ndays=0
-set rfreq = 0       # no. of days, or n. of timesteps if ndays=0
+set rfreq = 500     # no. of days, or n. of timesteps if ndays=0
 
 # 0 = normal, 1=restart
 set runtype = 0
@@ -62,10 +62,11 @@ if ( $ne == 15 ) then
     set nu = 1e15       # 1.5e15 crashed, 1.6e15 ran
     set nu_div = 1e15
 
-    set topo = '/home/ccsm-data/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
+    #set topo = '/home/ccsm-data/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
     #set topo = '/projects/ccsm/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
     #set topo = '/lcrc/group/acme/taylorm/topodata/ne30/USGS-gtopo30_ne30np4_8xdel2.nc'
-    set toponame = 16xdel2-H-TOMsplit
+    set topo = '/lcrc/group/acme/taylorm/topodata/ne30/ne30np4_nc3000_Co060_Fi001_PF_nullRR_Nsw042_20171020.nc'
+    set toponame = ncar-H
  endif
  if ( $ne == 60 ) then
     # 0.5 degree     tbird 200 nodes, 560 days: 20h
