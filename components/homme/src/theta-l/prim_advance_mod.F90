@@ -26,7 +26,7 @@ module prim_advance_mod
   use edgetype_mod,       only: EdgeBuffer_t,  EdgeDescriptor_t, edgedescriptor_t
   use element_mod,        only: element_t
   use element_state,      only: max_itercnt_perstep,avg_itercnt,max_itererr_perstep, nu_scale_top, nlev_tom
-  use element_ops,        only: set_theta_ref, state0, get_R_star
+  use element_ops,        only: set_theta_ref, state0, get_R_star, get_phi
   use eos,                only: pnh_and_exner_from_eos,phi_from_eos,get_dirk_jacobian
   use hybrid_mod,         only: hybrid_t
   use hybvcoord_mod,      only: hvcoord_t
@@ -1088,11 +1088,11 @@ contains
   real (kind=real_kind) :: exner0(nlev)
   real (kind=real_kind) :: heating(np,np,nlev)
   real (kind=real_kind) :: exner(np,np,nlev)
-  real (kind=real_kind) :: pnh(np,np,nlevp)    
+  real (kind=real_kind) :: pnh(np,np,nlev)    
   real (kind=real_kind) :: temp(np,np,nlev)    
-  real (kind=real_kind) :: temp_i(np,np,nlevp)    
+  real (kind=real_kind) :: temp_i(np,np,nlevp),phi_i(np,np,nlevp),pi_i(np,np,nlevp)
   real (kind=real_kind) :: dt,xfac
-  real (kind=real_kind) :: ps_ref(np,np),vtheta_dp(np,np)
+  real (kind=real_kind) :: ps_ref(np,np),vtheta_dp(np,np),ex(np,np),T0,T1
 
   real (kind=real_kind) :: theta_ref(np,np,nlev,nets:nete)
   real (kind=real_kind) :: phi_ref(np,np,nlevp,nets:nete)
@@ -1135,20 +1135,53 @@ contains
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   do ie=nets,nete
      !ps_ref(:,:) = hvcoord%hyai(1)*hvcoord%ps0 + sum(elem(ie)%state%dp3d(:,:,:,nt),3)
-     !ps_ref(:,:) = hvcoord%ps0 * exp ( -elem(ie)%state%phis(:,:)/(Rgas*300))  ! 300K ref temperature
      ps_ref(:,:) = hvcoord%ps0 * exp ( -elem(ie)%state%phis(:,:)/(Rgas*TREF)) 
-     !ps_ref(:,:) = hvcoord%ps0 - 11.3*elem(ie)%state%phis(:,:)/g
+
      do k=1,nlev
         dp_ref(:,:,k,ie) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
              (hvcoord%hybi(k+1)-hvcoord%hybi(k))*ps_ref(:,:)
      enddo
-
 
      ! phi_ref,theta_ref depend only on ps:
      call set_theta_ref(hvcoord,dp_ref(:,:,:,ie),theta_ref(:,:,:,ie))
      temp(:,:,:)=theta_ref(:,:,:,ie)*dp_ref(:,:,:,ie) 
      call phi_from_eos(hvcoord,elem(ie)%state%phis,&
           temp(:,:,:),dp_ref(:,:,:,ie),phi_ref(:,:,:,ie))
+
+     theta_ref(:,:,:,ie) = 0
+
+     ! now recompute theta_ref using dp3d:
+     !call set_theta_ref(hvcoord,elem(ie)%state%dp3d(:,:,:,nt),theta_ref(:,:,:,ie))
+#if 0
+! new thetaref:
+    ! F(exner) = cp*(T0*log(exner) + T1*exner-T1) 
+    ! DF(exner) = cp*(T0/exner + T1)
+    ! solve F(exner)+phi = 0
+    ! exner = exner - (F+phi)/DF
+     ! option 4: solve to cancel PHI   .02
+     ! use TREF/1.5 so that newton converges
+     call  get_phi(elem(ie),temp,temp_i,hvcoord,nt)
+
+     T1 = .0065*TREF*Cp/g ! = 191
+     T0 = TREF-T1         ! = 97
+     do k=1,nlev
+        exner(:,:,k) =  exp( -kappa*temp(:,:,k)/(Rgas*TREF/1.5)) 
+        do i=1,5
+           exner(:,:,k) = exner(:,:,k) - &
+                (temp(:,:,k)/Cp + T0*log(exner(:,:,k))+T1*exner(:,:,k)-T1 ) &
+                / (T0/exner(:,:,k)+T1)
+        enddo
+     enddo
+     theta_ref(:,:,:,ie) = (T0/exner(:,:,:) + T1)
+#endif
+#if 0
+     call  get_phi(elem(ie),temp,temp_i,hvcoord,nt)
+     exner(:,:,:) =  exp( -kappa*temp(:,:,:)/(Rgas*TREF)) 
+     theta_ref(:,:,:,ie) = (T0/exner(:,:,:) + T1)
+#endif
+
+
+
 #if 0
      ! no reference state, for testing
      theta_ref(:,:,:,ie)=0
@@ -1645,6 +1678,14 @@ contains
   real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn
   integer :: i,j,k,kptr,ie, nlyr_tot
 
+#undef USE_REF_STATES
+#ifdef USE_REF_STATES
+  real (kind=real_kind) :: theta_ref(np,np,nlev),T0,T1
+  real (kind=real_kind) :: cpgradexner(np,np,2,nlev)
+  real (kind=real_kind) :: exner_ref(np,np,nlev)
+#endif
+
+
   call t_startf('compute_andor_apply_rhs')
 
   if (theta_hydrostatic_mode) then
@@ -1710,6 +1751,8 @@ contains
         v_i(:,:,2,k) = (dp3d(:,:,k)*elem(ie)%state%v(:,:,2,k,n0) + &
              dp3d(:,:,k-1)*elem(ie)%state%v(:,:,2,k-1,n0) ) / (2*dp3d_i(:,:,k))
      end do
+
+
      
      if (theta_hydrostatic_mode) then
         do k=nlev,1,-1          ! traditional Hydrostatic integral
@@ -1749,6 +1792,42 @@ contains
              elem(ie)%state%v(:,:,2,k,n0)*vtemp(:,:,2,k)
         omega(:,:,k) = (vgrad_p(:,:,k) - ( omega_i(:,:,k)+omega_i(:,:,k+1))/2) 
      enddo        
+
+
+
+#ifdef USE_REF_STATES
+#if 0
+     ! option 1, use current exner  (good)  .02
+     exner_ref = exner 
+     ! option 2  .02
+     !exner_ref(:,:,:) =  exp( -kappa*phi(:,:,:)/(Rgas*TREF)) 
+     theta_ref(:,:,:) = (T0/exner_ref(:,:,:) + T1)
+     temp(:,:,:)=Cp*(T0*log(exner_ref(:,:,:))+T1*exner_ref(:,:,:))
+#else
+     ! option 4: solve to cancel PHI   .02
+     ! use TREF/1.5 so that newton converges
+     T1 = .0065*TREF*Cp/g ! = 191
+     T0 = TREF-T1         ! = 97
+     do k=1,nlev
+        exner_ref(:,:,k) =  exp( -kappa*phi(:,:,k)/(Rgas*TREF/1.5)) 
+        do i=1,5
+           exner_ref(:,:,k) = exner_ref(:,:,k) - &
+                (phi(:,:,k)/Cp + T0*log(exner_ref(:,:,k))+T1*exner_ref(:,:,k)-T1 ) &
+                / (T0/exner_ref(:,:,k)+T1)
+        enddo
+     enddo
+     theta_ref(:,:,:) = (T0/exner_ref(:,:,:) + T1)
+     temp(:,:,:)=-phi(:,:,:)
+#endif
+     do k=1,nlev
+        cpgradexner(:,:,:,k)=gradient_sphere(temp(:,:,k), deriv, elem(ie)%Dinv) 
+        gradexner(:,:,:,k)=gradient_sphere(exner_ref(:,:,k), deriv, elem(ie)%Dinv) 
+        cpgradexner(:,:,1,k)=cpgradexner(:,:,1,k)-Cp*theta_ref(:,:,k)*gradexner(:,:,1,k) 
+        cpgradexner(:,:,2,k)=cpgradexner(:,:,2,k)-Cp*theta_ref(:,:,k)*gradexner(:,:,2,k) 
+     enddo
+#endif
+
+
 
      ! ==================================================
      ! Compute eta_dot_dpdn
@@ -1951,7 +2030,6 @@ contains
         mgrad(:,:,2,k) = (dpnh_dp_i(:,:,k)*gradphinh_i(:,:,2,k)+ &
               dpnh_dp_i(:,:,k+1)*gradphinh_i(:,:,2,k+1))/2
 
-
         do j=1,np
            do i=1,np
               v1     = elem(ie)%state%v(i,j,1,k,n0)
@@ -1969,6 +2047,13 @@ contains
                    - gradKE(i,j,2,k) - mgrad(i,j,2,k) &
                   -Cp*vtheta(i,j,k)*gradexner(i,j,2,k) &
                   -wvor(i,j,2,k) )*scale1
+
+#ifdef USE_REF_STATES
+              ! add in term::  -Cp*theta_ref*gradexner + grad( )
+              vtens1(i,j,k)=vtens1(i,j,k) -cpgradexner(i,j,1,k)
+              vtens2(i,j,k)=vtens2(i,j,k) -cpgradexner(i,j,2,k)
+#endif
+
            end do
         end do     
      end do 

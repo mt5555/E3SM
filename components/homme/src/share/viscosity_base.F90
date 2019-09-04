@@ -17,7 +17,8 @@ use dimensions_mod, only : np, nlev,qsize,nelemd
 use hybrid_mod, only : hybrid_t, hybrid_create
 use parallel_mod, only : parallel_t
 use element_mod, only : element_t
-use derivative_mod, only : derivative_t, laplace_sphere_wk, vlaplace_sphere_wk, vorticity_sphere, derivinit, divergence_sphere
+use derivative_mod, only : derivative_t, laplace_sphere_wk, vlaplace_sphere_wk, vorticity_sphere, derivinit,&
+     divergence_sphere, gradient_sphere, divergence_sphere_wk
 use edgetype_mod, only : EdgeBuffer_t, EdgeDescriptor_t
 use edge_mod, only : edgevpack, edgevunpack, edgevunpackmin, &
     edgevunpackmax, initEdgeBuffer, FreeEdgeBuffer, edgeSunpackmax, edgeSunpackmin,edgeSpack, &
@@ -526,8 +527,10 @@ subroutine neighbor_minmax_finish(hybrid,edgeMinMax,nets,nete,min_neigh,max_neig
 
 end subroutine neighbor_minmax_finish
 
-subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle)
+subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle,red)
   use control_mod, only : smooth_phis_nudt, hypervis_scaling
+  use reduction_mod,    only: reductionbuffer_ordered_1d_t
+  use solver_mod, only: invert_laplace, invert_laplace_strong
   implicit none
 
   integer :: nets,nete
@@ -537,18 +540,19 @@ subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle)
   type (derivative_t)  , intent(in) :: deriv
   real (kind=real_kind), intent(in)   :: minf
   integer,               intent(in) :: numcycle
+  type (ReductionBuffer_ordered_1d_t) :: red   ! reduction buffer
 
   ! local
   type (EdgeBuffer_t)          :: edgebuf
   real (kind=real_kind), dimension(np,np,nets:nete) :: pstens
+  real (kind=real_kind), dimension(np,np,2,nets:nete) :: gradps,gradps_tens
   real (kind=real_kind), dimension(nets:nete) :: pmin,pmax
   real (kind=real_kind) :: mx,mn
-  integer :: nt,ie,ic,i,j,order,order_max, iuse
-  logical :: use_var_coef
+  integer :: nt,ie,ic,i,j,order,iuse
 
 
   ! create edge buffer for 1 field
-  call initEdgeBuffer(hybrid%par,edgebuf,elem,1)
+  call initEdgeBuffer(hybrid%par,edgebuf,elem,4)
 
 
   ! compute local element neighbor min/max
@@ -579,47 +583,50 @@ subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle)
      pmax(ie)=maxval(pstens(:,:,ie))
   enddo
 
-  ! order = 1   grad^2 laplacian
-  ! order = 2   grad^4 (need to add a negative sign)
-  ! order = 3   grad^6
-  ! order = 4   grad^8 (need to add a negative sign)
-  order_max = 1
 
+  ! compute grad(phi) and smooth it also
+  do ie=nets,nete
+     gradps(:,:,:,ie)=gradient_sphere(phis(:,:,ie),deriv,elem(ie)%Dinv)
+     gradps(:,:,1,ie)=gradps(:,:,1,ie)*elem(ie)%spheremp(:,:)
+     gradps(:,:,2,ie)=gradps(:,:,2,ie)*elem(ie)%spheremp(:,:)
+     call edgeVpack(edgebuf,gradps(:,:,:,ie),2,0,ie)
+  enddo
+  call bndry_exchangeV(hybrid,edgebuf)
+  do ie=nets,nete
+     call edgeVunpack(edgebuf,gradps(:,:,:,ie),2,0,ie)
+     gradps(:,:,1,ie)=gradps(:,:,1,ie)*elem(ie)%rspheremp(:,:)
+     gradps(:,:,2,ie)=gradps(:,:,2,ie)*elem(ie)%rspheremp(:,:)
+  enddo
 
-  use_var_coef=.true.
-  if (hypervis_scaling/=0) then
-     ! for tensorHV option, we turn off the tensor except for *last* laplace operator
-     use_var_coef=.false.
-     if (hypervis_scaling>=3) then
-        ! with a 3.2 or 4 scaling, assume hyperviscosity
-        order_max = 2
-     endif
-  endif
 
 
   do ic=1,numcycle
-     pstens=phis
 
-     do order=1,order_max-1
-
-        do ie=nets,nete
-           pstens(:,:,ie)=laplace_sphere_wk(pstens(:,:,ie),deriv,elem(ie),var_coef=use_var_coef)
-           call edgeVpack(edgebuf,pstens(:,:,ie),1,0,ie)
-        enddo
-
-        call t_startf('smooth_phis_bexchV3')
-        call bndry_exchangeV(hybrid,edgebuf)
-        call t_stopf('smooth_phis_bexchV3')
-
-        do ie=nets,nete
-           call edgeVunpack(edgebuf, pstens(:,:,ie), 1, 0, ie)
-           pstens(:,:,ie)=pstens(:,:,ie)*elem(ie)%rspheremp(:,:)
-        enddo
-     enddo
+     ! weak laplace
      do ie=nets,nete
-        pstens(:,:,ie)=laplace_sphere_wk(pstens(:,:,ie),deriv,elem(ie),var_coef=.true.)
+        pstens(:,:,ie)=laplace_sphere_wk(phis(:,:,ie),deriv,elem(ie),var_coef=.true.)
+        pstens(:,:,ie)=pstens(:,:,ie)/elem(ie)%spheremp(:,:)
+
+        gradps_tens(:,:,:,ie)=vlaplace_sphere_wk(gradps(:,:,:,ie),deriv,elem(ie),var_coef=.true.)
+        gradps_tens(:,:,1,ie)=gradps_tens(:,:,1,ie)/elem(ie)%spheremp(:,:)
+        gradps_tens(:,:,2,ie)=gradps_tens(:,:,2,ie)/elem(ie)%spheremp(:,:)
      enddo
-     if (mod(order_max,2)==0) pstens=-pstens
+
+     ! strong laplace
+     do ie=nets,nete
+        gradps(:,:,:,ie)=gradient_sphere(phis(:,:,ie),deriv,elem(ie)%Dinv)
+        gradps(:,:,1,ie)=gradps(:,:,1,ie)*elem(ie)%spheremp(:,:)
+        gradps(:,:,2,ie)=gradps(:,:,2,ie)*elem(ie)%spheremp(:,:)
+        call edgeVpack(edgebuf,gradps(:,:,:,ie),2,0,ie)
+     enddo
+     call bndry_exchangeV(hybrid,edgebuf)
+     do ie=nets,nete
+        call edgeVunpack(edgebuf,gradps(:,:,:,ie),2,0,ie)
+        gradps(:,:,1,ie)=gradps(:,:,1,ie)*elem(ie)%rspheremp(:,:)
+        gradps(:,:,2,ie)=gradps(:,:,2,ie)*elem(ie)%rspheremp(:,:)
+        pstens(:,:,ie)=divergence_sphere(gradps(:,:,:,ie),deriv,elem(ie))
+     enddo
+     
 
      do ie=nets,nete
         !  ps(t+1) = ps(t) + Minv * DSS * M * RHS
@@ -627,14 +634,15 @@ subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle)
         ! but output of biharminc_wk is of the form M*RHS.  rewrite as:
         !  ps(t+1) = Minv * DSS * M [ ps(t) +  M*RHS/M ]
         ! so we can apply limiter to ps(t) +  (M*RHS)/M
-#if 1
+#if 0
         mn=pmin(ie)
         mx=pmax(ie)
         iuse = numcycle+1  ! always apply min/max limiter
+#else
+        iuse = 0  ! disable limiter
 #endif
-        phis(:,:,ie)=phis(:,:,ie) + &
-           smooth_phis_nudt*pstens(:,:,ie)/elem(ie)%spheremp(:,:)
-
+        phis(:,:,ie)=phis(:,:,ie) + smooth_phis_nudt*pstens(:,:,ie)
+        gradps(:,:,:,ie)=gradps(:,:,:,ie) + smooth_phis_nudt*gradps_tens(:,:,:,ie)
 
         ! remove new extrema.  could use conservative reconstruction from advection
         ! but no reason to conserve mean PHI.
@@ -647,28 +655,65 @@ subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle)
         enddo
         endif
 
-
-        ! user specified minimum
-        do i=1,np
-        do j=1,np
-           if (phis(i,j,ie)<minf) phis(i,j,ie)=minf
-        enddo
-        enddo
-
         phis(:,:,ie)=phis(:,:,ie)*elem(ie)%spheremp(:,:)
         call edgeVpack(edgebuf,phis(:,:,ie),1,0,ie)
-
+        gradps(:,:,1,ie)=gradps(:,:,1,ie)*elem(ie)%spheremp(:,:)
+        gradps(:,:,2,ie)=gradps(:,:,2,ie)*elem(ie)%spheremp(:,:)
+        call edgeVpack(edgebuf,gradps(:,:,:,ie),2,1,ie)
      enddo
-
-     call t_startf('smooth_phis_bexchV4')
      call bndry_exchangeV(hybrid,edgebuf)
-     call t_stopf('smooth_phis_bexchV4')
-
      do ie=nets,nete
         call edgeVunpack(edgebuf, phis(:,:,ie), 1, 0, ie)
         phis(:,:,ie)=phis(:,:,ie)*elem(ie)%rspheremp(:,:)
+        call edgeVunpack(edgebuf,gradps(:,:,:,ie),2,1,ie)
+        gradps(:,:,1,ie)=gradps(:,:,1,ie)*elem(ie)%rspheremp(:,:)
+        gradps(:,:,2,ie)=gradps(:,:,2,ie)*elem(ie)%rspheremp(:,:)
      enddo
+
   enddo
+#if 1
+     ! compute gradient
+     do ie=nets,nete
+        gradps(:,:,:,ie)=gradient_sphere(phis(:,:,ie),deriv,elem(ie)%Dinv)
+        gradps(:,:,1,ie)=gradps(:,:,1,ie)*elem(ie)%spheremp(:,:)
+        gradps(:,:,2,ie)=gradps(:,:,2,ie)*elem(ie)%spheremp(:,:)
+        call edgeVpack(edgebuf,gradps(:,:,:,ie),2,0,ie)
+     enddo
+     call bndry_exchangeV(hybrid,edgebuf)
+     do ie=nets,nete
+        call edgeVunpack(edgebuf,gradps(:,:,:,ie),2,0,ie)
+        gradps(:,:,1,ie)=gradps(:,:,1,ie)*elem(ie)%rspheremp(:,:)
+        gradps(:,:,2,ie)=gradps(:,:,2,ie)*elem(ie)%rspheremp(:,:)
+     enddo
+
+     do ie=nets,nete
+        pstens(:,:,ie)=divergence_sphere(gradps(:,:,:,ie),deriv,elem(ie))
+     enddo
+     !call invert_laplace_strong(phis,pstens,red,elem,hybrid,deriv,nets,nete,1)
+     call invert_laplace(phis,pstens,red,elem,hybrid,deriv,nets,nete,1)
+#endif
+
+     
+     ! compute gradient for output
+     do ie=nets,nete
+        gradps(:,:,:,ie)=gradient_sphere(phis(:,:,ie),deriv,elem(ie)%Dinv)
+        gradps(:,:,1,ie)=gradps(:,:,1,ie)*elem(ie)%spheremp(:,:)
+        gradps(:,:,2,ie)=gradps(:,:,2,ie)*elem(ie)%spheremp(:,:)
+        call edgeVpack(edgebuf,gradps(:,:,:,ie),2,0,ie)
+     enddo
+     call bndry_exchangeV(hybrid,edgebuf)
+     do ie=nets,nete
+        call edgeVunpack(edgebuf,gradps(:,:,:,ie),2,0,ie)
+        
+        gradps(:,:,1,ie)=gradps(:,:,1,ie)*elem(ie)%rspheremp(:,:)
+        gradps(:,:,2,ie)=gradps(:,:,2,ie)*elem(ie)%rspheremp(:,:)
+        
+        ! output the gradient in v
+        elem(ie)%state%v(:,:,:,1,1)=gradps(:,:,:,ie)
+        elem(ie)%state%v(:,:,:,1,2)=gradps(:,:,:,ie)
+        elem(ie)%state%v(:,:,:,1,3)=gradps(:,:,:,ie)
+     enddo
+     
 
   call FreeEdgeBuffer(edgebuf) 
 

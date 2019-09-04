@@ -238,7 +238,7 @@ contains
        end if
        if(nlev_file/=nlev .and. nlev_file/=-1) then
           print *,'nlev, nlev_file',nlev,nlev_file
-          call abortmp('The variable nlev in Params.inc must be the same as that of the file, you will need to recompile.')
+          !call abortmp('The variable nlev in Params.inc must be the same as that of the file, you will need to recompile.')
        end if
        if(np_file/=np .and. np_file/=-1) then
           print *,'np, np_file',np,np_file

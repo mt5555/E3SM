@@ -59,9 +59,13 @@ end setvalues
 ; "ls ~/scratch1/topodata/USGS-gtopo30_ne120np4_latlon.nc; "\
  "ls ~/scratch1/topodata/ne30/USGS-gtopo30_ne30np4_latlon.nc; "\
 +"ls ~/scratch1/topodata/fv_0.9x1.25_nc3000_Nsw042_Nrs008_Co060_Fi001_ZR_sgh30_24km_GRNL_c170103.nc;"\
-+"ls ~/scratch1/topodata/ne30/USGS-gtopo30_ne30np4_7xdel2_latlon.nc; "\
-+"ls ~/scratch1/topodata/ne30/USGS-gtopo30_ne30np4_8xdel2_latlon.nc; "\
-+"ls ~/scratch1/topodata/ne30/USGS-gtopo30_ne30np4_16xdel2_latlon.nc; "\
+;+"ls ~/scratch1/topodata/ne30/USGS-gtopo30_ne30np4_7xdel2_latlon.nc; "\
+;+"ls ~/scratch1/topodata/ne30/USGS-gtopo30_ne30np4_8xdel2_latlon.nc; "\
+;+"ls ~/scratch1/topodata/ne30/USGS-gtopo30_ne30np4_16xdel2_latlon.nc; "\
+;+"ls ~/scratch1/preqx/template/USGS-gtopo30_ne30np4_16xdel2-nolim-latlon.nc; "\
++"ls ~/scratch1/preqx/template/USGS-gtopo30_ne30np4_8xwk1-nolim-latlon.nc; "\
+;+"ls ~/scratch1/preqx/template/USGS-gtopo30_ne30np4_8xlap1-nolim-latlon.nc; "\
++"ls ~/scratch1/preqx/template/USGS-gtopo30_ne30np4_8xdel2-nolim-latlon.nc; "\
 ;+"ls ~/scratch1/topodata/ne120/USGS-gtopo30_ne120np4_224xdel2_latlon.nc; "\
 ;+"ls ~/scratch1/topodata/ne120/USGS-gtopo30_ne120np4_384xdel2_latlon.nc; "\
 );
@@ -109,6 +113,10 @@ spc_all = spc_all@_FillValue
 spc_all!0 = "wavenumber"
 x = new ( (/nlat_max/), "double", 1d-99 )
 x = x@_FillValue
+
+  resxy=True
+  resxy@xyLineColors = (/"black","purple","blue","green","orange","red3","cyan","brown"/)
+
 
 do fn=0,fcnt-1
   f1=f[fn]
@@ -198,6 +206,7 @@ do fn=0,fcnt-1
 
   print("name = "+f1name+" field="+field)
   print ("min/max = "+min(var(:,:))+", "+max(var(:,:)) )
+  print("color = "+resxy@xyLineColors(fn))
       
   res@tiMainString        = f1name
   contour = gsn_csm_contour_map(wks,var(:,:),res)     ; Draw a contour plot.  ;
@@ -241,7 +250,6 @@ do fn=0,fcnt-1
     athick=4
     lthick=2
     
-    resxy=True
                                 ;res@gsLineThicknessF = 3.0
     resxy@xyXStyle ="Log"
     resxy@xyYStyle ="Log"
@@ -279,7 +287,6 @@ do fn=0,fcnt-1
 end do 
 
 if ( plot_spectra) then
-  resxy@xyLineColors = (/"black","purple","blue","green","orange","red3","cyan","brown"/)
 
   resxy@trXMinF = 1       
   resxy@trXMaxF = 1e3

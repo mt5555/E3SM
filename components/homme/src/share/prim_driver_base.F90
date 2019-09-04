@@ -1659,7 +1659,7 @@ contains
     minf=-9e9
     if (hybrid%masterthread) &
        write(iulog,*) "Applying hyperviscosity smoother to PHIS"
-    call smooth_phis(phis,elem,hybrid,deriv1,nets,nete,minf,smooth_phis_numcycle)
+    call smooth_phis(phis,elem,hybrid,deriv1,nets,nete,minf,smooth_phis_numcycle,red)
 
 
     do ie=nets,nete

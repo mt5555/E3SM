@@ -1,10 +1,8 @@
 #!/bin/tcsh -f 
+#SBATCH -p acme-centos6
+#SBATCH --account=condo
 #SBATCH -N 1
-#SBATCH --account=FY127788
-#SBATCH --time=0:10:00
-#PBS -l walltime=0:30:00
-#PBS -l nodes=10
-#PBS -q acme
+#SBATCH --time=2:00:00
 
 #
 # Mark Taylor 2018
@@ -38,13 +36,16 @@ set ne = 30  ; set meshfile=none
 #    16 for uniform grids (with regular del2 smoothing)
 #    12 for RRM grids using tensor del2 smoothing
 #
-set smooth_phis_numcycle=7
+set smooth_phis_numcycle=8
 #
 # set the input and output file names:
 #
 set topo = '/lcrc/group/acme/taylorm/topodata/ne30/USGS-gtopo30_ne30np4.nc'
 #set topo = '/lcrc/group/acme/taylorm/topodata/ne120/ne120np4_x0.nc'
-set topoout = "USGS-gtopo30_ne${ne}np${NPTS}_${smooth_phis_numcycle}xdel2.nc"
+#set topoout = "USGS-gtopo30_ne${ne}np${NPTS}_${smooth_phis_numcycle}xdel2-nolim.nc"
+#set topoout = "USGS-gtopo30_ne${ne}np${NPTS}_${smooth_phis_numcycle}xdivgrad-nolim.nc"
+#set topoout = "USGS-gtopo30_ne${ne}np${NPTS}_${smooth_phis_numcycle}xwk1-nolim.nc"
+set topoout = "USGS-gtopo30_ne${ne}np${NPTS}_${smooth_phis_numcycle}xlapw1-nolim.nc"
 #
 #  end of user settings.  
 #
@@ -104,6 +105,7 @@ set qsize = 0
 
 cd $bld
 if (!( -f CMakeCache.txt )) then
+    rm -Rf CMake*
     cmake -C $MACH -DPREQX_PLEV=$nlev -DPREQX_USE_PIO=TRUE  -DPREQX_NP=$NPTS  $HOMME 
     make -j4 clean
     make -j4 preqx
@@ -137,7 +139,7 @@ if ( $status ) exit
 
 # the GLL interpIC template (and paraview metadata)
 set echo
-ncks -O -v geos,lat,lon movies/held_suarez01.nc  $topoout   # extract goes
+ncks -O -v u,v,geos,lat,lon movies/held_suarez01.nc  $topoout   # extract goes
 #ncwa -O -v geos -a time temp.nc           # remove time dimension
 ncrename -v geos,PHIS $topoout                   # rename
 

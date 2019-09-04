@@ -47,7 +47,7 @@ if (isfilevar(fuv,"omega")) then
     var  = vinth2p(varlev,fuv->hyam,fuv->hybm,pnew,fuv->ps(n,:,:),interp,P0mb,1,extrap)          
     omegap(:,:) = omegap(:,:) + (/ var(0,:,:) /)/ntimes
   end do
-  print("writing omega500")
+  print("writing omega500  min/max="+min(omegap)+" "+max(omegap))
   ncdf->omega500=omegap
 
   print("INTERPOLATING omega to 850mb")

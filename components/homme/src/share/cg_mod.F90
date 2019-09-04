@@ -40,7 +40,7 @@ module cg_mod
      real (kind=real_kind), dimension(:),     pointer :: gammam1   ! gamma norm at iter-1
      real (kind=real_kind), dimension(:),     pointer :: sigmam1   ! gamma norm at iter-1
      real (kind=real_kind), dimension(:),     pointer :: rhs_norm  ! rhs norm <b,b>
-     real (kind=real_kind), dimension(:),     pointer :: l2_norm   ! rhs norm <r_k,r_k>
+!     real (kind=real_kind), dimension(:),     pointer :: l2_norm   ! rhs norm <r_k,r_k>
      logical,               dimension(:),     pointer :: converged ! convergence mask
      integer debug_level                                       ! debug_level
 

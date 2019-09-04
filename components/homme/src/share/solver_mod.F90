@@ -24,7 +24,7 @@ module solver_mod
   end type blkjac_t
 
 
-  public  :: solver_test
+  public  :: solver_test,invert_laplace, invert_laplace_strong
 
 #ifdef TRILINOS
   public  :: solver_test_ml
@@ -233,14 +233,6 @@ contains
   
  !~ elem,edge1,red,hybrid,deriv,nets,nete,vecIn)
     use dimensions_mod, only : nlev, np,npsq
-!    use element_mod, only : element_t
-!    use derivative_mod, only : derivative_t, laplace_sphere_wk
-!    use control_mod, only : maxits, while_iter, tol, precon_method
-
-!    use physical_constants, only : rrearth, dd_pi, rearth, omega
-!    use bndry_mod, only : bndry_exchangeV
-!    use parallel_mod, only : haltmp
-!    use hybrid_mod, only : hybrid_t
     use derived_type_mod, only :derived_type
     implicit none
     integer(c_int), intent(in),value :: ie 
@@ -309,7 +301,6 @@ contains
     use edge_mod, only : edgevpack, edgevunpack
     use edgetype_mod, only : edgebuffer_t
     use derivative_mod, only : derivative_t, laplace_sphere_wk
-    use control_mod, only : maxits, tol, precon_method
     use physical_constants, only : rrearth, dd_pi, rearth, omega
     use bndry_mod, only : bndry_exchangeV
     use parallel_mod, only : haltmp
@@ -407,8 +398,8 @@ contains
     integer linVecndx
 
 
-    integer lenx
-    real (kind=real_kind) pmean,dt
+    integer lenx,maxits
+    real (kind=real_kind) pmean,dt,tol
     type (TimeLevel_t) tl
     lenx=0
     pmean=0.0d0
@@ -803,7 +794,6 @@ tol=1.e-12
     use edge_mod, only : edgevpack, edgevunpack
     use edgetype_mod, only : edgebuffer_t
     use derivative_mod, only : derivative_t, laplace_sphere_wk
-    use control_mod, only : maxits, tol, precon_method
     use physical_constants, only : rrearth, dd_pi, rearth, omega
     use bndry_mod, only : bndry_exchangeV
     use parallel_mod, only : haltmp
@@ -833,8 +823,8 @@ tol=1.e-12
     integer :: i,j,k
     integer :: kptr
     integer :: iptr
-    integer :: ieptr
-    real (kind=real_kind) :: snlat,cslat,cslon,snlon,xc,yc,zc, res, res_sol
+    integer :: ieptr, maxits
+    real (kind=real_kind) :: snlat,cslat,cslon,snlon,xc,yc,zc, res, res_sol,tol
 
     if (hybrid%masterthread) print *,'creating manufactured solution'
     do ie=nets,nete
@@ -1108,7 +1098,357 @@ tol=1.e-12
     if (hybrid%masterthread) print *,'normalized linf error= ',res
 
 
+    
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! VERSION 3.
+    ! same as version 2, but use invers_laplace()
+    ! rhs = laplace_sphere_wk(sol)
+    ! solve laplace_sphere_wk(x) = RHS
+    ! compute || x - sol ||
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    if (hybrid%masterthread) print *,'test 3: test of invert_laplace()'
+    do ie=nets,nete
+    do k=1,nlev
+       RHS(:,:,k,ie)=laplace_sphere_wk(sol(:,:,k,ie),deriv,elem(ie),var_coef=.false.)&
+            / elem(ie)%spheremp(:,:)
+    enddo
+    enddo
+    call invert_laplace(lhs,rhs,red,elem,hybrid,deriv,nets,nete,nlev)
+    ! ===============================
+    ! Converged! compute actual error (not residual computed in solver)
+    ! ===============================
+    do ie=nets,nete
+       ieptr=ie-nets+1
+       do k=1,nlev
+          iptr=1
+          do j=1,np
+             do i=1,np
+                LHS(i,j,k,ie) = cg%state(ieptr)%x(iptr,k)
+                iptr=iptr+1
+             enddo
+          enddo
+       enddo
+    enddo
+    res = l2_snorm(elem,LHS,sol,hybrid,np,nets,nete) 
+    if (hybrid%masterthread) print *,'normalized l2 error= ',res
+    if (res > 100*tol) call abortmp('ERROR: DG solver test failed')
+    res = linf_snorm(LHS,sol,hybrid,np,nets,nete) 
+    if (hybrid%masterthread) print *,'normalized linf error= ',res
+
+
   end subroutine solver_test
+
+
+
+  subroutine invert_laplace(lhs,rhs,red,elem,hybrid,deriv,nets,nete,klev)
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! solve for x:  < PHI, lap(x) > = < PHI, DSS(RHS) >  
+    ! Note: since < PHI, DSS(RHS)>= < PHI, RHS>, this is the same as solving
+    ! < PHI, lap(x) > = < PHI, RHS>
+    !
+    ! so this version works if RHS is or is not DSS'd.
+    !
+    ! ONE ISSUE:  tolerence is based on <RHS,RHS>, which is not 
+    ! computed correctly (and will always be larger than <DSS(RHS),DSS(RHS)>
+    !
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    use dimensions_mod, only : np,npsq
+    use element_mod, only : element_t
+    use reduction_mod, only : reductionbuffer_ordered_1d_t
+    use cg_mod, only : cg_t, congrad, cg_create
+    use edge_mod, only : edgevpack_nlyr, edgevunpack_nlyr, edge_g
+    use edgetype_mod, only : edgebuffer_t
+    use derivative_mod, only : derivative_t, laplace_sphere_wk
+    use control_mod, only : maxits, tol
+    use physical_constants, only : rrearth, dd_pi, rearth, omega
+    use bndry_mod, only : bndry_exchangeV
+    use hybrid_mod, only : hybrid_t
+
+
+    real (kind=real_kind) :: LHS(np,np,klev,nets:nete)
+    real (kind=real_kind) :: RHS(np,np,klev,nets:nete)
+    type (ReductionBuffer_ordered_1d_t)  :: red         ! CG reduction buffer   (shared memory)
+    type(element_t), intent(in) :: elem(:)
+    type (hybrid_t)             :: hybrid
+    type (derivative_t), intent(in) :: deriv          ! non staggered derivative struct     (private)
+    type (EdgeBuffer_t)               :: edge1          ! Laplacian divergence edge buffer (shared memory)
+    integer, intent(in)  :: nets,nete,klev
+
+    ! local
+    type (cg_t)                       :: cg             ! conjugate gradient    (private)
+    real (kind=real_kind) :: x(np,np)
+    integer :: ie,k,i,j,iptr,ieptr
+    real (kind=real_kind) :: solver_wts(npsq,nete-nets+1)
+
+    do ie=nets,nete
+       iptr=1
+       do j=1,np
+          do i=1,np
+             solver_wts(iptr,ie-nets+1) = elem(ie)%spheremp(i,j)
+             iptr=iptr+1
+          end do
+       end do
+    end do
+    call cg_create(cg, npsq, klev, nete-nets+1, hybrid, 0, solver_wts)
+    cg%debug_level = 2
+
+
+    do ie=nets,nete
+       !  Initialize CG solver:  set %r = residual from initial guess
+       !  if initial guess = 0, then we take %r=RHS
+       !  to use initial guess, take %r = RHS - laplace(x)
+       ieptr=ie-nets+1
+       do k=1,klev
+          iptr=1
+          do j=1,np
+             do i=1,np
+                cg%state(ieptr)%r(iptr,k) = rhs(i,j,k,ie)
+                iptr=iptr+1
+             enddo
+          enddo
+       enddo
+    enddo
+    
+
+    maxits = 500
+    tol=1d-7
+    do while (congrad(cg,red,maxits,tol))
+       do ie=nets,nete
+          ieptr=ie-nets+1
+          do k=1,klev
+             ! apply preconditioner here: (note: r is not C0)
+             cg%state(ieptr)%z(:,k) = cg%state(ieptr)%r(:,k)
+             
+             !reshape(cg%state(ieptr)%z(:,k),(/np,np/))
+             iptr=1
+             do j=1,np
+                do i=1,np
+                   x(i,j) = cg%state(ieptr)%z(iptr,k)
+                   iptr=iptr+1
+                enddo
+             enddo
+             
+             ! DSS x to make it C0.  use LHS for storage:
+             LHS(:,:,k,ie)=x(:,:)*elem(ie)%spheremp(:,:)
+             
+          end do
+          call edgeVpack_nlyr(edge_g, elem(ie)%desc, LHS(1,1,1,ie), klev, 0, klev)
+       end do
+       call bndry_exchangeV(hybrid,edge_g)
+       do ie=nets,nete
+          ! unpack LHS
+          call edgeVunpack_nlyr(edge_g, elem(ie)%desc, LHS(1,1,1,ie), klev, 0, klev)
+          do k=1,klev
+             LHS(:,:,k,ie)=LHS(:,:,k,ie)*elem(ie)%rspheremp(:,:)
+          enddo
+
+          ieptr=ie-nets+1
+          do k=1,klev
+             x(:,:)=LHS(:,:,k,ie) ! x() is now C0
+
+             ! compute LHS(x) = laplace(x)
+             LHS(:,:,k,ie)=laplace_sphere_wk(x,deriv,elem(ie),var_coef=.false.)&
+                  /elem(ie)%spheremp(:,:)
+
+             iptr=1
+             do j=1,np
+                do i=1,np
+                   cg%state(ieptr)%s(iptr,k) = LHS(i,j,k,ie)    ! new LHS, DG
+                   cg%state(ieptr)%z(iptr,k) = x(i,j)           ! z must be C0
+                   iptr=iptr+1
+                end do
+             end do
+          enddo
+       enddo
+    if (hybrid%masterthread) print *,'solver CG iter = ',cg%iter
+    end do  ! CG solver while loop
+
+
+    ! ===============================
+    ! Converged! compute actual error (not residual computed in solver)
+    ! ===============================
+    do ie=nets,nete
+       ieptr=ie-nets+1
+       do k=1,klev
+          iptr=1
+          do j=1,np
+             do i=1,np
+                LHS(i,j,k,ie) = cg%state(ieptr)%x(iptr,k)
+                iptr=iptr+1
+             enddo
+          enddo
+       enddo
+    enddo
+    end subroutine
+
+
+
+  subroutine invert_laplace_strong(lhs,rhs,red,elem,hybrid,deriv,nets,nete,klev)
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! solve for x:  < PHI, lap(x) > = < PHI, DSS(RHS) >  
+    ! Note: since < PHI, DSS(RHS)>= < PHI, RHS>, this is the same as solving
+    ! < PHI, lap(x) > = < PHI, RHS>
+    !
+    ! so this version works if RHS is or is not DSS'd.
+    !
+    ! ONE ISSUE:  tolerence is based on <RHS,RHS>, which is not 
+    ! computed correctly (and will always be larger than <DSS(RHS),DSS(RHS)>
+    !
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    use dimensions_mod, only : np,npsq
+    use element_mod, only : element_t
+    use reduction_mod, only : reductionbuffer_ordered_1d_t
+    use cg_mod, only : cg_t, congrad, cg_create
+    use edge_mod, only : edgevpack_nlyr, edgevunpack_nlyr, edge_g
+    use edgetype_mod, only : edgebuffer_t
+    use derivative_mod, only : derivative_t, laplace_sphere_wk, gradient_sphere,divergence_sphere
+    use control_mod, only : maxits, tol
+    use physical_constants, only : rrearth, dd_pi, rearth, omega
+    use bndry_mod, only : bndry_exchangeV
+    use hybrid_mod, only : hybrid_t
+
+
+    real (kind=real_kind) :: LHS(np,np,klev,nets:nete)
+    real (kind=real_kind) :: RHS(np,np,klev,nets:nete)
+    type (ReductionBuffer_ordered_1d_t)  :: red         ! CG reduction buffer   (shared memory)
+    type(element_t), intent(in) :: elem(:)
+    type (hybrid_t)             :: hybrid
+    type (derivative_t), intent(in) :: deriv          ! non staggered derivative struct     (private)
+    type (EdgeBuffer_t)               :: edge1          ! Laplacian divergence edge buffer (shared memory)
+    integer, intent(in)  :: nets,nete,klev
+
+    ! local
+    type (cg_t)                       :: cg             ! conjugate gradient    (private)
+    real (kind=real_kind) :: x(np,np)
+    integer :: ie,k,i,j,iptr,ieptr
+    real (kind=real_kind) :: solver_wts(npsq,nete-nets+1)
+    real (kind=real_kind) :: gradx(np,np,2,klev,nets:nete)
+
+    do ie=nets,nete
+       iptr=1
+       do j=1,np
+          do i=1,np
+             solver_wts(iptr,ie-nets+1) = elem(ie)%spheremp(i,j)
+             iptr=iptr+1
+          end do
+       end do
+    end do
+    call cg_create(cg, npsq, klev, nete-nets+1, hybrid, 0, solver_wts)
+    cg%debug_level = 2
+
+
+    do ie=nets,nete
+       !  Initialize CG solver:  set %r = residual from initial guess
+       !  if initial guess = 0, then we take %r=RHS
+       !  to use initial guess, take %r = RHS - laplace(x)
+#if 1
+       do k=1,klev
+       enddo
+#endif
+
+       ieptr=ie-nets+1
+       do k=1,klev
+          iptr=1
+          do j=1,np
+             do i=1,np
+                cg%state(ieptr)%r(iptr,k) = rhs(i,j,k,ie)
+                iptr=iptr+1
+             enddo
+          enddo
+       enddo
+    enddo
+    
+
+    maxits = 100
+    tol=1d-7
+    do while (congrad(cg,red,maxits,tol))
+       do ie=nets,nete
+          ieptr=ie-nets+1
+          do k=1,klev
+             ! apply preconditioner here: (note: r is not C0)
+             cg%state(ieptr)%z(:,k) = cg%state(ieptr)%r(:,k)
+             
+             !reshape(cg%state(ieptr)%z(:,k),(/np,np/))
+             iptr=1
+             do j=1,np
+                do i=1,np
+                   x(i,j) = cg%state(ieptr)%z(iptr,k)
+                   iptr=iptr+1
+                enddo
+             enddo
+             
+             ! DSS x to make it C0.  use LHS for storage:
+             LHS(:,:,k,ie)=x(:,:)*elem(ie)%spheremp(:,:)
+             
+          end do
+          call edgeVpack_nlyr(edge_g, elem(ie)%desc, LHS(1,1,1,ie), klev, 0, klev)
+       end do
+       call bndry_exchangeV(hybrid,edge_g)
+       do ie=nets,nete
+          ! unpack LHS
+          call edgeVunpack_nlyr(edge_g, elem(ie)%desc, LHS(1,1,1,ie), klev, 0, klev)
+          do k=1,klev
+             LHS(:,:,k,ie)=LHS(:,:,k,ie)*elem(ie)%rspheremp(:,:)
+          enddo
+       enddo
+
+       do ie=nets,nete
+          do k=1,klev
+             ! compute  laplace(x)
+             gradx(:,:,:,k,ie)=gradient_sphere(LHS(:,:,k,ie),deriv,elem(ie)%Dinv)
+             gradx(:,:,1,k,ie)=gradx(:,:,1,k,ie)*elem(ie)%spheremp(:,:)
+             gradx(:,:,2,k,ie)=gradx(:,:,2,k,ie)*elem(ie)%spheremp(:,:)
+          enddo
+          call edgeVpack_nlyr(edge_g, elem(ie)%desc, gradx(1,1,1,1,ie), 2*klev, 0, 2*klev)
+       enddo
+       call bndry_exchangeV(hybrid,edge_g)
+       do ie=nets,nete
+          call edgeVunpack_nlyr(edge_g, elem(ie)%desc, gradx(1,1,1,1,ie), 2*klev, 0, 2*klev)
+          do k=1,klev
+             gradx(:,:,1,k,ie)=gradx(:,:,1,k,ie)*elem(ie)%rspheremp(:,:)
+             gradx(:,:,2,k,ie)=gradx(:,:,2,k,ie)*elem(ie)%rspheremp(:,:)
+          enddo
+       enddo
+
+       do ie=nets,nete
+          ieptr=ie-nets+1
+          do k=1,klev
+             x(:,:)=LHS(:,:,k,ie)
+             LHS(:,:,k,ie)=divergence_sphere(gradx(:,:,:,k,ie),deriv,elem(ie))
+             !LHS(:,:,k,ie)=laplace_sphere_wk(x,deriv,elem(ie),var_coef=.false.)&
+             !     /elem(ie)%spheremp(:,:)
+
+
+             iptr=1
+             do j=1,np
+                do i=1,np
+                   cg%state(ieptr)%s(iptr,k) = LHS(i,j,k,ie)    ! new LHS, DG
+                   cg%state(ieptr)%z(iptr,k) = x(i,j)           ! z must be C0
+                   iptr=iptr+1
+                end do
+             end do
+          enddo
+       enddo
+    if (hybrid%masterthread) print *,'solver CG iter = ',cg%iter
+    end do  ! CG solver while loop
+
+
+    ! ===============================
+    ! Converged! compute actual error (not residual computed in solver)
+    ! ===============================
+    do ie=nets,nete
+       ieptr=ie-nets+1
+       do k=1,klev
+          iptr=1
+          do j=1,np
+             do i=1,np
+                LHS(i,j,k,ie) = cg%state(ieptr)%x(iptr,k)
+                iptr=iptr+1
+             enddo
+          enddo
+       enddo
+    enddo
+    end subroutine
 
 
 
