@@ -1950,7 +1950,9 @@ contains
      ! k =nlevp case, all terms in the imex methods are treated explicitly at the boundary
      k =nlevp 
     ! compute gradphi at interfaces and then average to levels
+
     gradphinh_i(:,:,:,k)   = gradient_sphere(phi_i(:,:,k),deriv,elem(ie)%Dinv)
+
     gradw_i(:,:,:,k)   = gradient_sphere(elem(ie)%state%w_i(:,:,k,n0),deriv,elem(ie)%Dinv)
     v_gradw_i(:,:,k) = v_i(:,:,1,k)*gradw_i(:,:,1,k) + v_i(:,:,2,k)*gradw_i(:,:,2,k)
     ! w - tendency on interfaces
@@ -2052,6 +2054,16 @@ contains
               ! add in term::  -Cp*theta_ref*gradexner + grad( )
               vtens1(i,j,k)=vtens1(i,j,k) -cpgradexner(i,j,1,k)
               vtens2(i,j,k)=vtens2(i,j,k) -cpgradexner(i,j,2,k)
+#endif
+
+#undef USE_SGRAD
+#ifdef USE_SGRAD
+              ! other tweak:
+              ! replace grad(phis(nlevp) with smoothed gradphis              
+              vtens1(i,j,k)=vtens1(i,j,k) - ( &
+                   elem(ie)%derived%gradphis(i,j,1)-gradphinh_i(i,j,1,nlevp) )
+              vtens2(i,j,k)=vtens2(i,j,k) - ( &
+                   elem(ie)%derived%gradphis(i,j,2)-gradphinh_i(i,j,2,nlevp) )
 #endif
 
            end do

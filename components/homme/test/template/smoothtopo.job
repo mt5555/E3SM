@@ -36,16 +36,17 @@ set ne = 30  ; set meshfile=none
 #    16 for uniform grids (with regular del2 smoothing)
 #    12 for RRM grids using tensor del2 smoothing
 #
-set smooth_phis_numcycle=8
+set smooth_phis_numcycle=8192
 #
 # set the input and output file names:
 #
 set topo = '/lcrc/group/acme/taylorm/topodata/ne30/USGS-gtopo30_ne30np4.nc'
 #set topo = '/lcrc/group/acme/taylorm/topodata/ne120/ne120np4_x0.nc'
 #set topoout = "USGS-gtopo30_ne${ne}np${NPTS}_${smooth_phis_numcycle}xdel2-nolim.nc"
+set topoout = "USGS-gtopo30_ne${ne}np${NPTS}_${smooth_phis_numcycle}xdel2-smoothgrad-nolim.nc"
 #set topoout = "USGS-gtopo30_ne${ne}np${NPTS}_${smooth_phis_numcycle}xdivgrad-nolim.nc"
 #set topoout = "USGS-gtopo30_ne${ne}np${NPTS}_${smooth_phis_numcycle}xwk1-nolim.nc"
-set topoout = "USGS-gtopo30_ne${ne}np${NPTS}_${smooth_phis_numcycle}xlapw1-nolim.nc"
+#set topoout = "USGS-gtopo30_ne${ne}np${NPTS}_${smooth_phis_numcycle}xlapw1-nolim.nc"
 #
 #  end of user settings.  
 #

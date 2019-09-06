@@ -612,6 +612,7 @@ subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle,red)
         gradps_tens(:,:,2,ie)=gradps_tens(:,:,2,ie)/elem(ie)%spheremp(:,:)
      enddo
 
+#if 0
      ! strong laplace
      do ie=nets,nete
         gradps(:,:,:,ie)=gradient_sphere(phis(:,:,ie),deriv,elem(ie)%Dinv)
@@ -626,6 +627,7 @@ subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle,red)
         gradps(:,:,2,ie)=gradps(:,:,2,ie)*elem(ie)%rspheremp(:,:)
         pstens(:,:,ie)=divergence_sphere(gradps(:,:,:,ie),deriv,elem(ie))
      enddo
+#endif
      
 
      do ie=nets,nete
@@ -671,7 +673,7 @@ subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle,red)
      enddo
 
   enddo
-#if 1
+#if 0
      ! compute gradient
      do ie=nets,nete
         gradps(:,:,:,ie)=gradient_sphere(phis(:,:,ie),deriv,elem(ie)%Dinv)
@@ -693,8 +695,8 @@ subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle,red)
      call invert_laplace(phis,pstens,red,elem,hybrid,deriv,nets,nete,1)
 #endif
 
-     
-     ! compute gradient for output
+#if 1
+     ! ouput grad PHIS (no smoothing)
      do ie=nets,nete
         gradps(:,:,:,ie)=gradient_sphere(phis(:,:,ie),deriv,elem(ie)%Dinv)
         gradps(:,:,1,ie)=gradps(:,:,1,ie)*elem(ie)%spheremp(:,:)
@@ -707,12 +709,23 @@ subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle,red)
         
         gradps(:,:,1,ie)=gradps(:,:,1,ie)*elem(ie)%rspheremp(:,:)
         gradps(:,:,2,ie)=gradps(:,:,2,ie)*elem(ie)%rspheremp(:,:)
-        
-        ! output the gradient in v
+     enddo
+#else
+    ! output the smoothed gradps instead
+#endif
+
+     do ie=nets,nete        
+        ! output the gradient in v. store in all timelevels, not sure which is correct
         elem(ie)%state%v(:,:,:,1,1)=gradps(:,:,:,ie)
         elem(ie)%state%v(:,:,:,1,2)=gradps(:,:,:,ie)
         elem(ie)%state%v(:,:,:,1,3)=gradps(:,:,:,ie)
+#ifdef  MODEL_THETA_L
+        ! also, overwrite grad_phis with smoothed version
+        !elem(ie)%derived%gradphis(:,:,:) = gradps(:,:,:,ie)
+        !if (ie==nets .and. hybrid%masterthread) print *,'NOTE: derived%gradphis = smoothed gradient'
+#endif
      enddo
+
      
 
   call FreeEdgeBuffer(edgebuf) 
