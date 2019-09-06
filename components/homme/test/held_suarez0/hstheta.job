@@ -21,7 +21,7 @@
 #SBATCH -p acme-centos6
 #SBATCH --account=condo
 #SBATCH -N 20
-#SBATCH --time=1:30:00
+#SBATCH --time=1:00:00
 
 set nlev=26
 set ndays = 500
@@ -70,7 +70,7 @@ if ( $ne == 15 ) then
     set topo = '/lcrc/group/acme/taylorm/preqx/template/USGS-gtopo30_ne30np4_8xdel2-nolim.nc'
     #set topo = '/lcrc/group/acme/taylorm/preqx/template/USGS-gtopo30_ne30np4_8xlapw1-nolim.nc'
 
-    set toponame = 8xdel2-nolim-cpref1c-debug-H
+    set toponame = 8xdel2-nolim-cpref4-H
     #set toponame = ncar-cpref1c-H
  endif
  if ( $ne == 60 ) then

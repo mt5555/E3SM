@@ -1174,9 +1174,11 @@ contains
      enddo
      theta_ref(:,:,:,ie) = (T0/exner(:,:,:) + T1)
 #endif
-#if 0
+#if 1
      call  get_phi(elem(ie),temp,temp_i,hvcoord,nt)
      exner(:,:,:) =  exp( -kappa*temp(:,:,:)/(Rgas*TREF)) 
+     T1 = .0065*TREF*Cp/g ! = 191
+     T0 = TREF-T1         ! = 97
      theta_ref(:,:,:,ie) = (T0/exner(:,:,:) + T1)
 #endif
 
@@ -1678,7 +1680,7 @@ contains
   real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn
   integer :: i,j,k,kptr,ie, nlyr_tot
 
-#undef USE_REF_STATES
+#define USE_REF_STATES
 #ifdef USE_REF_STATES
   real (kind=real_kind) :: theta_ref(np,np,nlev),T0,T1
   real (kind=real_kind) :: cpgradexner(np,np,2,nlev)
@@ -1796,6 +1798,8 @@ contains
 
 
 #ifdef USE_REF_STATES
+     T1 = .0065*TREF*Cp/g ! = 191
+     T0 = TREF-T1         ! = 97
 #if 0
      ! option 1, use current exner  (good)  .02
      exner_ref = exner 
@@ -1806,8 +1810,6 @@ contains
 #else
      ! option 4: solve to cancel PHI   .02
      ! use TREF/1.5 so that newton converges
-     T1 = .0065*TREF*Cp/g ! = 191
-     T0 = TREF-T1         ! = 97
      do k=1,nlev
         exner_ref(:,:,k) =  exp( -kappa*phi(:,:,k)/(Rgas*TREF/1.5)) 
         do i=1,5
