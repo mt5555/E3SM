@@ -21,14 +21,14 @@ runtype       = RUNTYPE
 tstep         = TSTEP
 integration   = "explicit"
 nu            = NU1
-nu_s          = NU1
-nu_p          = NU1
-nu_q          = NU1
+nu_s          = NU3
+nu_p          = NUP
+nu_q          = NU3
 nu_div        = NU2
 !nu_top = 2.5e5
 nu_top = 0
 hypervis_order = 2
-hypervis_subcycle = 2
+hypervis_subcycle = 3
 se_ftype=0
 /
 &vert_nl

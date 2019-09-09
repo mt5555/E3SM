@@ -18,8 +18,8 @@
 #SBATCH --job-name HS
 #XXSBATCH -p batch,short
 #XXSBATCH --account=FY150001
-#SBATCH -p acme-centos6
-#SBATCH --account=condo
+#XXSBATCH -p acme-centos6
+#SBATCH --account=e3sm
 #SBATCH -N 20
 #SBATCH --time=1:00:00
 
@@ -56,22 +56,27 @@ if ( $ne == 15 ) then
  endif
  if ( $ne == 30 ) then
     # 1 degree    H model, 20 nodes, 30min for 1600days
-    #set tstep = 300  # H model
-    set tstep = 200  # H model
-    #set tstep = 72  # NH model. edit namelist to turn on NH
-    set nu = 1e15       # 1.5e15 crashed, 1.6e15 ran
+    set tstep = 300  # H model
+    #set tstep = 200  # H model
+    #set tstep = 150  # NH model. edit namelist to turn on NH
+    set nu = .5e15       # 1.5e15 crashed, 1.6e15 ran
     set nu_div = 1e15
+    set nu_other = 1e15
+    set nu_p = 1e15
 
     #set topo = '/home/ccsm-data/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
     #set topo = '/projects/ccsm/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
+    #set topo = '/compyfs/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
     #set topo = '/lcrc/group/acme/taylorm/topodata/ne30/USGS-gtopo30_ne30np4_8xdel2.nc'
-    #set topo = '/lcrc/group/acme/taylorm/topodata/ne30np4_nc3000_Co060_Fi001_PF_nullRR_Nsw042_20171020.nc'
+    set topo = '/compyfs/tayl519/topodata/ne30np4_nc3000_Co060_Fi001_PF_nullRR_Nsw042_20171020.nc'
     #set topo = '/lcrc/group/acme/taylorm/preqx/template/USGS-gtopo30_ne30np4_16xdel2-nolim.nc'
-    set topo = '/lcrc/group/acme/taylorm/preqx/template/USGS-gtopo30_ne30np4_8xdel2-nolim.nc'
+    #set topo = '/lcrc/group/acme/taylorm/preqx/template/USGS-gtopo30_ne30np4_8xdel2-nolim.nc'
+    #set topo = '/compyfs/tayl519/preqx/template/USGS-gtopo30_ne30np4_8xdel2-nolim.nc'
+    #set topo = '/compyfs/tayl519/preqx/template/USGS-gtopo30_ne30np4_16xdel2-nolim.nc'
     #set topo = '/lcrc/group/acme/taylorm/preqx/template/USGS-gtopo30_ne30np4_8xlapw1-nolim.nc'
 
-    set toponame = 8xdel2-nolim-cpref4-H
-    #set toponame = ncar-cpref1c-H
+    #set toponame = 8xdel2-nolim-cpref1g-hyper5-H
+    set toponame = ncar-cpref1g-H
  endif
  if ( $ne == 60 ) then
     # 0.5 degree     tbird 200 nodes, 560 days: 20h
@@ -112,13 +117,17 @@ if ( $ne == 15 ) then
  set HOMME = ~/codes/acme/components/homme
  set wdir = ~/scratch1/preqx
 
- set MACH = $HOMME/cmake/machineFiles/anvil.cmake
+ set MACH = $HOMME/cmake/machineFiles/compy-intel18.cmake
  set input = $HOMME/test/held_suarez0
  set bld = $wdir/bld
  #set exe = preqx
  set exe = theta-l
 
- set name = hs${toponame}-$exe-ne${ne}-nu${nu}-${nu_div}
+if ( $nu_other == $nu ) then
+   set name = hs${toponame}-$exe-ne${ne}-nu${nu}-${nu_div}
+else
+   set name = hs${toponame}-$exe-ne${ne}-nu${nu}-${nu_div}-${nu_other}
+endif
  echo $name
 
  mkdir -p $bld
@@ -174,6 +183,8 @@ if ( $ne == 15 ) then
  sed s/R0001/$rname/ | sed s/RUNTYPE/$runtype/ |\
  sed s/NU1/$nu/ |\
  sed s/NU2/$nu_div/ |\
+ sed s/NU3/$nu_other/ |\
+ sed s/NUP/$nu_p/ |\
 sed s:infilenames.\*:"infilenames = '$topo'": |\
 sed s/\ndays.\*/"$RUNLEN"/ |\
 sed s/restartfreq.\*/"restartfreq = $rfreq"/ |\
@@ -191,7 +202,8 @@ cat  $wdir/input.nl
 ############################################################
 date
 set echo
-srun -c 1 -N $SLURM_NNODES   $bld/src/$exe/$exe < $wdir/input.nl 
+#srun -c 1 -N $SLURM_NNODES   $bld/src/$exe/$exe < $wdir/input.nl 
+mpirun   $bld/src/$exe/$exe < $wdir/input.nl
 date
 
 # save timing data

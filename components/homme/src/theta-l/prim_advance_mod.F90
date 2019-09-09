@@ -1088,6 +1088,7 @@ contains
   real (kind=real_kind) :: exner0(nlev)
   real (kind=real_kind) :: heating(np,np,nlev)
   real (kind=real_kind) :: exner(np,np,nlev)
+  real (kind=real_kind) :: exner_i(np,np,nlevp)
   real (kind=real_kind) :: pnh(np,np,nlev)    
   real (kind=real_kind) :: temp(np,np,nlev)    
   real (kind=real_kind) :: temp_i(np,np,nlevp),phi_i(np,np,nlevp),pi_i(np,np,nlevp)
@@ -1134,8 +1135,8 @@ contains
 ! compute reference states
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   do ie=nets,nete
-     !ps_ref(:,:) = hvcoord%hyai(1)*hvcoord%ps0 + sum(elem(ie)%state%dp3d(:,:,:,nt),3)
-     ps_ref(:,:) = hvcoord%ps0 * exp ( -elem(ie)%state%phis(:,:)/(Rgas*TREF)) 
+     ps_ref(:,:) = hvcoord%hyai(1)*hvcoord%ps0 + sum(elem(ie)%state%dp3d(:,:,:,nt),3)
+     !ps_ref(:,:) = hvcoord%ps0 * exp ( -elem(ie)%state%phis(:,:)/(Rgas*TREF)) 
 
      do k=1,nlev
         dp_ref(:,:,k,ie) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
@@ -1148,10 +1149,6 @@ contains
      call phi_from_eos(hvcoord,elem(ie)%state%phis,&
           temp(:,:,:),dp_ref(:,:,:,ie),phi_ref(:,:,:,ie))
 
-     theta_ref(:,:,:,ie) = 0
-
-     ! now recompute theta_ref using dp3d:
-     !call set_theta_ref(hvcoord,elem(ie)%state%dp3d(:,:,:,nt),theta_ref(:,:,:,ie))
 #if 0
 ! new thetaref:
     ! F(exner) = cp*(T0*log(exner) + T1*exner-T1) 
@@ -1174,12 +1171,53 @@ contains
      enddo
      theta_ref(:,:,:,ie) = (T0/exner(:,:,:) + T1)
 #endif
-#if 1
+#if 0
+     call  get_phi(elem(ie),temp,temp_i,hvcoord,nt)
+
+     T1 = .0065*TREF*Cp/g ! = 191
+     T0 = TREF-T1         ! = 97
+     do k=1,nlevp
+        exner_i(:,:,k) =  exp( -kappa*temp_i(:,:,k)/(Rgas*TREF/1.5)) 
+        do i=1,5
+           exner_i(:,:,k) = exner_i(:,:,k) - &
+                (temp_i(:,:,k)/Cp + T0*log(exner_i(:,:,k))+T1*exner_i(:,:,k)-T1 ) &
+                / (T0/exner_i(:,:,k)+T1)
+        enddo
+        pi_i(:,:,k)= p0*( exner_i(:,:,k)**(1/kappa) )
+     enddo
+     do k=1,nlev
+        dp_ref(:,:,k,ie) = pi_i(:,:,k+1)-pi_i(:,:,k)
+     enddo
+#endif
+#if 0
      call  get_phi(elem(ie),temp,temp_i,hvcoord,nt)
      exner(:,:,:) =  exp( -kappa*temp(:,:,:)/(Rgas*TREF)) 
      T1 = .0065*TREF*Cp/g ! = 191
      T0 = TREF-T1         ! = 97
      theta_ref(:,:,:,ie) = (T0/exner(:,:,:) + T1)
+     !pi_i(:,:,:) =  hvcoord%ps0 *exp( -temp_i(:,:,:)/(Rgas*TREF)) 
+     !do k=1,nlev
+     !   dp_ref(:,:,k,ie)=pi_i(:,:,k+1)-pi_i(:,:,k)
+     !enddo
+#endif
+#if 1
+    ! use Newton for surface pressure
+     T1 = .0065*TREF*Cp/g ! = 191
+     T0 = TREF-T1         ! = 97
+     ! for phi at surface, this initial guess is better
+     exner(:,:,1) =  exp( -kappa*elem(ie)%state%phis(:,:)/(Rgas*TREF)) 
+     do i=1,5
+        exner(:,:,1) = exner(:,:,1) - &
+             (elem(ie)%state%phis(:,:)/Cp + T0*log(exner(:,:,1))+T1*exner(:,:,1)-T1 ) &
+             / (T0/exner(:,:,1)+T1)
+     enddo
+     
+     ps_ref(:,:) = (exner(:,:,1)**(1/kappa)) / p0
+     do k=1,nlev
+        dp_ref(:,:,k,ie) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
+             (hvcoord%hybi(k+1)-hvcoord%hybi(k))*ps_ref(:,:)
+     enddo
+     theta_ref(:,:,:,ie) = 0
 #endif
 
 
@@ -1236,8 +1274,8 @@ contains
         do k=1,nlev
            vtens(:,:,:,k,ie)=-nu  *vtens(:,:,:,k,ie) ! u,v
            stens(:,:,k,1,ie)=-nu_p*stens(:,:,k,1,ie) ! dp3d
-           stens(:,:,k,2,ie)=-nu  *stens(:,:,k,2,ie) ! theta
-           stens(:,:,k,3,ie)=-nu  *stens(:,:,k,3,ie) ! w
+           stens(:,:,k,2,ie)=-nu_s*stens(:,:,k,2,ie) ! theta
+           stens(:,:,k,3,ie)=-nu_s*stens(:,:,k,3,ie) ! w
            stens(:,:,k,4,ie)=-nu_s*stens(:,:,k,4,ie) ! phi
         enddo
         if (nu_top>0 .and. hypervis_subcycle_tom==0) then
@@ -1680,7 +1718,7 @@ contains
   real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn
   integer :: i,j,k,kptr,ie, nlyr_tot
 
-#define USE_REF_STATES
+#undef  USE_REF_STATES
 #ifdef USE_REF_STATES
   real (kind=real_kind) :: theta_ref(np,np,nlev),T0,T1
   real (kind=real_kind) :: cpgradexner(np,np,2,nlev)
@@ -1800,11 +1838,9 @@ contains
 #ifdef USE_REF_STATES
      T1 = .0065*TREF*Cp/g ! = 191
      T0 = TREF-T1         ! = 97
-#if 0
+#if 1
      ! option 1, use current exner  (good)  .02
      exner_ref = exner 
-     ! option 2  .02
-     !exner_ref(:,:,:) =  exp( -kappa*phi(:,:,:)/(Rgas*TREF)) 
      theta_ref(:,:,:) = (T0/exner_ref(:,:,:) + T1)
      temp(:,:,:)=Cp*(T0*log(exner_ref(:,:,:))+T1*exner_ref(:,:,:))
 #else
