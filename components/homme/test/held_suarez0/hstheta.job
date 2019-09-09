@@ -59,24 +59,25 @@ if ( $ne == 15 ) then
     set tstep = 300  # H model
     #set tstep = 200  # H model
     #set tstep = 150  # NH model. edit namelist to turn on NH
-    set nu = .5e15       # 1.5e15 crashed, 1.6e15 ran
+    set nu = 1e15       # 1.5e15 crashed, 1.6e15 ran
     set nu_div = 1e15
     set nu_other = 1e15
     set nu_p = 1e15
 
     #set topo = '/home/ccsm-data/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
     #set topo = '/projects/ccsm/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
-    #set topo = '/compyfs/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
+    set topo = '/compyfs/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
     #set topo = '/lcrc/group/acme/taylorm/topodata/ne30/USGS-gtopo30_ne30np4_8xdel2.nc'
-    set topo = '/compyfs/tayl519/topodata/ne30np4_nc3000_Co060_Fi001_PF_nullRR_Nsw042_20171020.nc'
+    #set topo = '/compyfs/tayl519/topodata/ne30np4_nc3000_Co060_Fi001_PF_nullRR_Nsw042_20171020.nc'
     #set topo = '/lcrc/group/acme/taylorm/preqx/template/USGS-gtopo30_ne30np4_16xdel2-nolim.nc'
     #set topo = '/lcrc/group/acme/taylorm/preqx/template/USGS-gtopo30_ne30np4_8xdel2-nolim.nc'
     #set topo = '/compyfs/tayl519/preqx/template/USGS-gtopo30_ne30np4_8xdel2-nolim.nc'
     #set topo = '/compyfs/tayl519/preqx/template/USGS-gtopo30_ne30np4_16xdel2-nolim.nc'
     #set topo = '/lcrc/group/acme/taylorm/preqx/template/USGS-gtopo30_ne30np4_8xlapw1-nolim.nc'
 
-    #set toponame = 8xdel2-nolim-cpref1g-hyper5-H
-    set toponame = ncar-cpref1g-H
+    #set toponame = 16xdel2-nolim-cpref1g-H
+    set toponame = 16xdel2-cpref1g-H
+    #set toponame = ncar-cpref1g-H
  endif
  if ( $ne == 60 ) then
     # 0.5 degree     tbird 200 nodes, 560 days: 20h
