@@ -9,7 +9,7 @@ module dcmip12_wrapper
 
 ! Implementation of the dcmip2012 dycore tests for the preqx dynamics target
 
-use control_mod,          only: test_case, dcmip4_moist, dcmip4_X
+use control_mod,          only: test_case, dcmip4_moist, dcmip4_X, hcoord
 use dcmip2012_test1_2_3,  only: test1_advection_deformation, test1_advection_hadley, test1_advection_orography, &
                                 test2_steady_state_mountain, test2_schaer_mountain,test3_gravity_wave
 use dcmip2012_test4,      only: test4_baroclinic_wave 
@@ -497,7 +497,7 @@ subroutine dcmip2012_test3(elem,hybrid,hvcoord,nets,nete)
   type(hvcoord_t),    intent(inout)         :: hvcoord                  ! hybrid vertical coordinates
   integer,            intent(in)            :: nets,nete                ! start, end element index
 
-  integer,  parameter :: zcoords = 0                                    ! we are not using z coords
+  integer  :: zcoords 
   logical,  parameter :: use_eta = .true.                               ! we are using hybrid eta coords
 
   real(rl), parameter ::    &                                           ! parameters needed to get eta from z
@@ -511,6 +511,7 @@ subroutine dcmip2012_test3(elem,hybrid,hvcoord,nets,nete)
   real(rl):: p,z,phis,u,v,w,T,T_mean,phis_ps,ps,rho,rho_mean,q(1),dp    ! pointwise field values
 
   if (hybrid%masterthread) write(iulog,*) 'initializing dcmip2012 test 3-0: nonhydrostatic gravity waves'
+  zcoords = hcoord  
 
   ! set analytic vertical coordinates
   call get_evenly_spaced_z(zi,zm, 0.0_rl,ztop)                                   ! get evenly spaced z levels
@@ -518,18 +519,23 @@ subroutine dcmip2012_test3(elem,hybrid,hvcoord,nets,nete)
   call set_hybrid_coefficients(hvcoord,hybrid,  hvcoord%etai(1), 1.0_rl)! set hybrid A and B from eta levels
   call set_layer_locations(hvcoord, .true., hybrid%masterthread)
 
+
   ! set initial conditions
   do ie = nets,nete
      do k=1,nlev; do j=1,np; do i=1,np
         call get_coordinates(lat,lon,hyam,hybm, i,j,k,elem(ie),hvcoord)
-        call test3_gravity_wave(lon,lat,p,z,zcoords,use_eta,hyam,hybm,u,v,w,T,T_mean,phis,ps,rho,rho_mean,q(1))
-        dp = pressure_thickness(ps,k,hvcoord)
+        call test3_gravity_wave(lon,lat,p,zm(k),zcoords,use_eta,hyam,hybm,u,v,w,T,T_mean,phis,ps,rho,rho_mean,q(1))
+        if (zcoords==0) then
+           dp = pressure_thickness(ps,k,hvcoord)
+        else
+           dp = -rho*g*(zi(k+1)-zi(k))
+        endif
         call set_state(u,v,w,T,ps,phis,p,dp,zm(k),g, i,j,k,elem(ie),1,nt)
         call set_tracers(q,qsize, dp,i,j,k,lat,lon,elem(ie))
      enddo; enddo; enddo; 
      do k=1,nlevp; do j=1,np; do i=1,np
         call get_coordinates(lat,lon,hyai,hybi, i,j,k,elem(ie),hvcoord)
-        call test3_gravity_wave(lon,lat,p,z,zcoords,use_eta,hyai,hybi,u,v,w,T,T_mean,phis,ps,rho,rho_mean,q(1))
+        call test3_gravity_wave(lon,lat,p,zi(k),zcoords,use_eta,hyai,hybi,u,v,w,T,T_mean,phis,ps,rho,rho_mean,q(1))
         call set_state_i(u,v,w,T,ps,phis,p,zi(k),g, i,j,k,elem(ie),1,nt)
      enddo; enddo; enddo; 
      call tests_finalize(elem(ie),hvcoord)
@@ -675,6 +681,8 @@ real(rl) function pressure_thickness(ps,k,hv)
   real(rl),         intent(in) :: ps
   integer,          intent(in) :: k
   type(hvcoord_t),  intent(in) :: hv
+
+  if (hcoord==1) call abortmp('ERROR: cant use pressure_thickness with height coords')
   pressure_thickness = (hv%hyai(k+1)-hv%hyai(k))*p0 + (hv%hybi(k+1)-hv%hybi(k))*ps
 
 end function

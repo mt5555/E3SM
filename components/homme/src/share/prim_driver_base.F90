@@ -1288,7 +1288,7 @@ contains
     !do nothing
   elseif (ftype==0) then
     do ie = nets,nete
-       call applyCAMforcing_tracers (elem(ie),hvcoord,n0,n0qdp,dt_remap,.false.)
+!       call applyCAMforcing_tracers (elem(ie),hvcoord,n0,n0qdp,dt_remap,.false.)
     enddo
     call applyCAMforcing_dynamics(elem,hvcoord,n0,dt_remap,nets,nete)
   elseif (ftype==1) then

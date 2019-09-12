@@ -86,7 +86,9 @@ module namelist_mod
     debug_level,   &
     theta_advect_form,   &
     vert_remap_q_alg, &
-    se_fv_phys_remap_alg
+    se_fv_phys_remap_alg, &
+    hcoord
+
 
 #ifndef CAM
   use control_mod, only:              &
@@ -862,7 +864,9 @@ module namelist_mod
       endif
     endif
 
-
+    if (theta_hydrostatic_mode .and. hcoord==1) then
+       call abortmp('height coordinate only runs in theta-l NH model')
+    endif
     ftype = se_ftype
 
 #ifdef _PRIM

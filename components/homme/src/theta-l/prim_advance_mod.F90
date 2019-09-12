@@ -17,7 +17,7 @@ module prim_advance_mod
   use bndry_mod,          only: bndry_exchangev
   use control_mod,        only: dcmip16_mu, dcmip16_mu_s, hypervis_order, hypervis_subcycle,&
     integration, nu, nu_div, nu_p, nu_s, nu_top, prescribed_wind, qsplit, rsplit, test_case,&
-    theta_hydrostatic_mode, tstep_type, theta_advect_form, hypervis_subcycle_tom
+    theta_hydrostatic_mode, tstep_type, theta_advect_form, hypervis_subcycle_tom, hcoord
   use derivative_mod,     only: derivative_t, divergence_sphere, gradient_sphere, laplace_sphere_wk,&
     laplace_z, vorticity_sphere, vlaplace_sphere_wk 
   use derivative_mod,     only: subcell_div_fluxes, subcell_dss_fluxes
@@ -192,7 +192,7 @@ contains
                   - elem(ie)%state%dp3d(:,:,:,n0) )/4
           elem(ie)%state%w_i(:,:,1:nlevp,nm1)= (5*elem(ie)%state%w_i(:,:,1:nlevp,nm1) &
                   - elem(ie)%state%w_i(:,:,1:nlevp,n0) )/4
-          elem(ie)%state%phinh_i(:,:,1:nlev,nm1)= (5*elem(ie)%state%phinh_i(:,:,1:nlev,nm1) &
+               elem(ie)%state%phinh_i(:,:,1:nlev,nm1)= (5*elem(ie)%state%phinh_i(:,:,1:nlev,nm1) &
                   - elem(ie)%state%phinh_i(:,:,1:nlev,n0) )/4
        enddo
        ! u5 = (5*u1/4 - u0/4) + 3dt/4 RHS(u4)
@@ -491,6 +491,14 @@ contains
        call t_stopf("prim_diag")
     endif
     call t_stopf('prim_advance_exp')
+
+!    do ie=nets,nete
+!       print *,'phi top min/max',minval(elem(ie)%state%phinh_i(:,:,1,tl%np1)),&
+!            maxval(elem(ie)%state%phinh_i(:,:,1,tl%np1))
+!    enddo
+
+
+
   end subroutine prim_advance_exp
 
 
@@ -1145,10 +1153,17 @@ contains
 
 
      ! phi_ref,theta_ref depend only on ps:
-     call set_theta_ref(hvcoord,dp_ref(:,:,:,ie),theta_ref(:,:,:,ie))
-     temp(:,:,:)=theta_ref(:,:,:,ie)*dp_ref(:,:,:,ie) 
-     call phi_from_eos(hvcoord,elem(ie)%state%phis,&
-          temp(:,:,:),dp_ref(:,:,:,ie),phi_ref(:,:,:,ie))
+     if (hcoord==1) then
+        phi_ref(:,:,:,ie)=0    ! should use reference coordinates
+        dp_ref(:,:,:,ie)=0  ! for now. what to do here?
+     else
+        call set_theta_ref(hvcoord,dp_ref(:,:,:,ie),theta_ref(:,:,:,ie))
+        temp(:,:,:)=theta_ref(:,:,:,ie)*dp_ref(:,:,:,ie) 
+        call phi_from_eos(hvcoord,elem(ie)%state%phis,&
+             temp(:,:,:),dp_ref(:,:,:,ie),phi_ref(:,:,:,ie))
+     endif
+     theta_ref(:,:,:,ie)=0  ! we should use 0 in both coordinates.  
+
 #if 0
      ! no reference state, for testing
      theta_ref(:,:,:,ie)=0
@@ -1259,7 +1274,7 @@ contains
            
            elem(ie)%state%dp3d(:,:,k,nt)=elem(ie)%state%dp3d(:,:,k,nt) &
                 +stens(:,:,k,1,ie)
-           
+
            elem(ie)%state%phinh_i(:,:,k,nt)=elem(ie)%state%phinh_i(:,:,k,nt) &
                 +stens(:,:,k,4,ie)
         enddo
@@ -1352,8 +1367,8 @@ contains
         if (.not.theta_hydrostatic_mode) then
            kptr=kptr+nlev_tom
            call edgeVpack_nlyr(edge_g,elem(ie)%desc,stens(:,:,:,3,ie),nlev_tom,kptr,nlyr_tom)
-           kptr=kptr+nlev_tom
-           call edgeVpack_nlyr(edge_g,elem(ie)%desc,stens(:,:,:,4,ie),nlev_tom,kptr,nlyr_tom)
+              kptr=kptr+nlev_tom
+              call edgeVpack_nlyr(edge_g,elem(ie)%desc,stens(:,:,:,4,ie),nlev_tom,kptr,nlyr_tom)
         endif
      enddo
      
@@ -1372,8 +1387,8 @@ contains
         if (.not.theta_hydrostatic_mode) then
            kptr=kptr+nlev_tom
            call edgeVunpack_nlyr(edge_g,elem(ie)%desc,stens(:,:,:,3,ie),nlev_tom,kptr,nlyr_tom)
-           kptr=kptr+nlev_tom
-           call edgeVunpack_nlyr(edge_g,elem(ie)%desc,stens(:,:,:,4,ie),nlev_tom,kptr,nlyr_tom)
+              kptr=kptr+nlev_tom
+              call edgeVunpack_nlyr(edge_g,elem(ie)%desc,stens(:,:,:,4,ie),nlev_tom,kptr,nlyr_tom)
         endif
         
         
@@ -1646,12 +1661,12 @@ contains
   integer :: i,j,k,kptr,ie, nlyr_tot
 
   call t_startf('compute_andor_apply_rhs')
-
   if (theta_hydrostatic_mode) then
      nlyr_tot=4*nlev        ! dont bother to dss w_i and phinh_i
   else
      nlyr_tot=5*nlev+nlevp  ! total amount of data for DSS
   endif
+
      
   do ie=nets,nete
      dp3d  => elem(ie)%state%dp3d(:,:,:,n0)
@@ -1736,19 +1751,26 @@ contains
      enddo
 
      ! Compute omega =  Dpi/Dt   Used only as a DIAGNOSTIC
-     pi_i(:,:,1)=hvcoord%hyai(1)*hvcoord%ps0
-     omega_i(:,:,1)=0
-     do k=1,nlev
-        pi_i(:,:,k+1)=pi_i(:,:,k) + dp3d(:,:,k)
-        omega_i(:,:,k+1)=omega_i(:,:,k)+divdp(:,:,k)
-     enddo
-     do k=1,nlev
-        pi(:,:,k)=pi_i(:,:,k) + dp3d(:,:,k)/2
-        vtemp(:,:,:,k) = gradient_sphere( pi(:,:,k), deriv, elem(ie)%Dinv);
-        vgrad_p(:,:,k) = elem(ie)%state%v(:,:,1,k,n0)*vtemp(:,:,1,k)+&
-             elem(ie)%state%v(:,:,2,k,n0)*vtemp(:,:,2,k)
-        omega(:,:,k) = (vgrad_p(:,:,k) - ( omega_i(:,:,k)+omega_i(:,:,k+1))/2) 
-     enddo        
+     if (hcoord==1) then
+        ! approximation -g w rho  = g w dphi/dpi
+        omega(:,:,k)=g*( phi_i(:,:,k+1)-phi_i(:,:,k))/dp3d(:,:,k) *&
+             ( elem(ie)%state%w_i(:,:,k+1,n0)+elem(ie)%state%w_i(:,:,k,n0))/2
+     else
+        pi_i(:,:,1)=hvcoord%hyai(1)*hvcoord%ps0
+        omega_i(:,:,1)=0
+        do k=1,nlev
+           pi_i(:,:,k+1)=pi_i(:,:,k) + dp3d(:,:,k)
+           omega_i(:,:,k+1)=omega_i(:,:,k)+divdp(:,:,k)
+        enddo
+        do k=1,nlev
+           pi(:,:,k)=pi_i(:,:,k) + dp3d(:,:,k)/2
+           vtemp(:,:,:,k) = gradient_sphere( pi(:,:,k), deriv, elem(ie)%Dinv);
+           vgrad_p(:,:,k) = elem(ie)%state%v(:,:,1,k,n0)*vtemp(:,:,1,k)+&
+                elem(ie)%state%v(:,:,2,k,n0)*vtemp(:,:,2,k)
+           omega(:,:,k) = (vgrad_p(:,:,k) - ( omega_i(:,:,k)+omega_i(:,:,k+1))/2) 
+        enddo
+     endif
+
 
      ! ==================================================
      ! Compute eta_dot_dpdn
@@ -1783,6 +1805,25 @@ contains
            eta_dot_dpdn(:,:,k+1) = hvcoord%hybi(k+1)*sdot_sum(:,:) - eta_dot_dpdn(:,:,k+1)
         end do
 
+        if (hcoord==1) then
+           ! z coordinate version:
+           ! eta_dot_dpdn  dp3d_i * sdot
+           ! u_i*grad(phi_i) + sdot dphi/ds - w_i = 0
+           ! sdot = (w_i - u_i*grad(phi_i) ) / dphi/ds
+           ! eta_dot_dpdn = dp3d_i*(w_i - u_i*grad(phi_i) ) / 
+           ! code copies from below (ineffiiciet)
+           do k=2,nlev
+              gradphinh_i(:,:,:,k)   = gradient_sphere(phi_i(:,:,k),deriv,elem(ie)%Dinv)   
+              v_gradphinh_i(:,:,k) = v_i(:,:,1,k)*gradphinh_i(:,:,1,k) &
+                   +v_i(:,:,2,k)*gradphinh_i(:,:,2,k) 
+
+              eta_dot_dpdn(:,:,k) = &
+                (g*elem(ie)%state%w_i(:,:,k,n0)-v_gradphinh_i(:,:,k))*dp3d_i(:,:,k) / &
+                (phi(:,:,k)-phi(:,:,k-1))
+
+           enddo
+
+        endif
         eta_dot_dpdn(:,:,1     ) = 0
         eta_dot_dpdn(:,:,nlevp)  = 0
         vtheta_i(:,:,1) =       0
@@ -1810,7 +1851,6 @@ contains
 #endif           
 
 
-
         do k=1,nlev
            ! average interface quantity to midpoints:
            temp(:,:,k) = (( eta_dot_dpdn(:,:,k)+eta_dot_dpdn(:,:,k+1))/2)*&
@@ -1835,6 +1875,15 @@ contains
         phi_vadv_i=phi_vadv_i/dp3d_i
      endif
 
+
+
+     if (hcoord==1) then
+        ! height coordinate we require phi_i(1)=constant, which implies w=0
+        ! and thus w equation determines dpnh_dp_i(1):
+        dpnh_dp_i(:,:,1)=1 + w_vadv_i(:,:,1)/g
+        ! boundary condition at surface is same in height and z coordinates, treated below
+     endif
+     
 
      ! ================================
      ! accumulate mean vertical flux:
@@ -1882,9 +1931,22 @@ contains
      +v_i(:,:,2,k)*gradphinh_i(:,:,2,k)
     phi_tens(:,:,k) =  (-phi_vadv_i(:,:,k) - v_gradphinh_i(:,:,k))*scale1 &
     + scale1*g*elem(ie)%state%w_i(:,:,k,n0)
-    
-
-
+#if 1    
+     if (rsplit==0 .and. hcoord==1 ) then
+        ! debug eta_dot_dpdn code 
+        do k=1,nlevp
+           if  ( maxval(abs(phi_tens(:,:,k))) > 1e-10) then
+              print *,ie,k,'max abs phi_tens=',maxval(abs(phi_tens(:,:,k))),&
+                   maxval(abs(elem(ie)%state%w_i(:,:,k,n0))),&
+                   maxval(abs(gradphinh_i(:,:,:,k))),&
+                   maxval(abs(phi_vadv_i(:,:,k)))
+           endif
+           if  ( maxval(abs(gradphinh_i(:,:,:,k))) > 1e-10) then
+              print *,ie,k,'max abs gradphi=',maxval(abs(gradphinh_i(:,:,:,k)))
+           endif
+        enddo
+     endif
+#endif
 
 
      ! ================================================                                                                 
@@ -2046,7 +2108,7 @@ contains
                
                !  Form IEvert1
                elem(ie)%accum%IEvert1(i,j)=elem(ie)%accum%IEvert1(i,j)      &
-                    -exner(i,j,k)*theta_vadv(i,j,k)                        
+                    -cp*exner(i,j,k)*theta_vadv(i,j,k)                        
                ! Form IEvert2 
                ! here use of dpnh_dp_i on boundry (with incorrect data)
                ! is harmess becuase eta_dot_dpdn=0
@@ -2058,6 +2120,8 @@ contains
                !  Form PEhoriz1
                elem(ie)%accum%PEhoriz1(i,j)=(elem(ie)%accum%PEhoriz1(i,j))  &
                     -phi(i,j,k)*divdp(i,j,k) 
+
+
                !  Form PEhoriz2
                elem(ie)%accum%PEhoriz2(i,j)=elem(ie)%accum%PEhoriz2(i,j)    &
                     -dp3d(i,j,k)* &
@@ -2095,6 +2159,15 @@ contains
 
       ! these terms are better easier to compute by summing interfaces
       do k=2,nlev
+!        elem(ie)%accum%IEvert1(:,:)=elem(ie)%accum%IEvert1(:,:)      &
+!           +(exner(i,j,k)-exner(i,j,k-1))*eta_dot_dpdn(:,:,k)*vtheta_i(:,:,k)
+
+!         elem(ie)%accum%IEvert2(:,:)=elem(ie)%accum%IEvert2(:,:)      &
+!              +  dpnh_dp_i(:,:,k)*eta_dot_dpdn(:,:,k) *(phi(:,:,k)-phi(:,:,k-1))
+!         print *,elem(ie)%accum%IEvert2(1,1),&
+!               dpnh_dp_i(1,1,k)*eta_dot_dpdn(1,1,k) *(phi(1,1,k)-phi(1,1,k-1))
+
+
          elem(ie)%accum%T2(:,:)=elem(ie)%accum%T2(:,:)+                &
               (g*elem(ie)%state%w_i(:,:,k,n0)-v_gradphinh_i(:,:,k)) &
                * dpnh_dp_i(:,:,k)*dp3d_i(:,:,k)
@@ -2126,8 +2199,8 @@ contains
         if ( .not. theta_hydrostatic_mode ) then
            elem(ie)%state%w_i(:,:,k,np1)    = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%w_i(:,:,k,nm1)   &
                 + dt2*w_tens(:,:,k))
-           elem(ie)%state%phinh_i(:,:,k,np1)   = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%phinh_i(:,:,k,nm1) & 
-                + dt2*phi_tens(:,:,k))
+              elem(ie)%state%phinh_i(:,:,k,np1)   = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%phinh_i(:,:,k,nm1) & 
+                   + dt2*phi_tens(:,:,k))
         endif
 
         elem(ie)%state%dp3d(:,:,k,np1) = &
@@ -2149,9 +2222,9 @@ contains
      if (.not. theta_hydrostatic_mode) then
         kptr=kptr+nlev
         call edgeVpack_nlyr(edge_g,elem(ie)%desc,elem(ie)%state%w_i(:,:,:,np1),nlevp,kptr,nlyr_tot)
-        kptr=kptr+nlevp
-        call edgeVpack_nlyr(edge_g,elem(ie)%desc,elem(ie)%state%phinh_i(:,:,:,np1),nlev,kptr,nlyr_tot)
-     endif
+           kptr=kptr+nlevp
+           call edgeVpack_nlyr(edge_g,elem(ie)%desc,elem(ie)%state%phinh_i(:,:,:,np1),nlev,kptr,nlyr_tot)
+        endif
 
    end do ! end do for the ie=nets,nete loop
 
@@ -2169,8 +2242,8 @@ contains
      if (.not. theta_hydrostatic_mode) then
         kptr=kptr+nlev
         call edgeVunpack_nlyr(edge_g,elem(ie)%desc,elem(ie)%state%w_i(:,:,:,np1),nlevp,kptr,nlyr_tot)
-        kptr=kptr+nlevp
-        call edgeVunpack_nlyr(edge_g,elem(ie)%desc,elem(ie)%state%phinh_i(:,:,:,np1),nlev,kptr,nlyr_tot)
+           kptr=kptr+nlevp
+           call edgeVunpack_nlyr(edge_g,elem(ie)%desc,elem(ie)%state%phinh_i(:,:,:,np1),nlev,kptr,nlyr_tot)
      endif
       
      ! ====================================================
@@ -2181,7 +2254,7 @@ contains
         elem(ie)%state%vtheta_dp(:,:,k,np1)=elem(ie)%rspheremp(:,:)*elem(ie)%state%vtheta_dp(:,:,k,np1)
         if ( .not. theta_hydrostatic_mode ) then
            elem(ie)%state%w_i(:,:,k,np1)    =elem(ie)%rspheremp(:,:)*elem(ie)%state%w_i(:,:,k,np1)
-           elem(ie)%state%phinh_i(:,:,k,np1)=elem(ie)%rspheremp(:,:)*elem(ie)%state%phinh_i(:,:,k,np1)
+              elem(ie)%state%phinh_i(:,:,k,np1)=elem(ie)%rspheremp(:,:)*elem(ie)%state%phinh_i(:,:,k,np1)
         endif
         elem(ie)%state%v(:,:,1,k,np1)  =elem(ie)%rspheremp(:,:)*elem(ie)%state%v(:,:,1,k,np1)
         elem(ie)%state%v(:,:,2,k,np1)  =elem(ie)%rspheremp(:,:)*elem(ie)%state%v(:,:,2,k,np1)
@@ -2194,7 +2267,7 @@ contains
      ! now we can compute the correct dphn_dp_i() at the surface:
      if (.not. theta_hydrostatic_mode) then
         ! solve for (dpnh_dp_i-1)
-        dpnh_dp_i(:,:,nlevp) = 1 + (  &
+        dpnh_dp_i(:,:,nlevp) = 0 + (  &
              ((elem(ie)%state%v(:,:,1,nlev,np1)*elem(ie)%derived%gradphis(:,:,1) + &
              elem(ie)%state%v(:,:,2,nlev,np1)*elem(ie)%derived%gradphis(:,:,2))/g - &
              elem(ie)%state%w_i(:,:,nlevp,np1)) / &
@@ -2203,17 +2276,19 @@ contains
         
         ! update solution with new dpnh_dp_i value:
         elem(ie)%state%w_i(:,:,nlevp,np1) = elem(ie)%state%w_i(:,:,nlevp,np1) +&
-             scale1*dt2*g*(dpnh_dp_i(:,:,nlevp)-1)
+             scale1*dt2*g*(dpnh_dp_i(:,:,nlevp)-0)
         elem(ie)%state%v(:,:,1,nlev,np1) =  elem(ie)%state%v(:,:,1,nlev,np1) -&
-             scale1*dt2*(dpnh_dp_i(:,:,nlevp)-1)*elem(ie)%derived%gradphis(:,:,1)/2
+             scale1*dt2*(dpnh_dp_i(:,:,nlevp)-0)*elem(ie)%derived%gradphis(:,:,1)/2
         elem(ie)%state%v(:,:,2,nlev,np1) =  elem(ie)%state%v(:,:,2,nlev,np1) -&
-             scale1*dt2*(dpnh_dp_i(:,:,nlevp)-1)*elem(ie)%derived%gradphis(:,:,2)/2
+             scale1*dt2*(dpnh_dp_i(:,:,nlevp)-0)*elem(ie)%derived%gradphis(:,:,2)/2
+
+
 
 #ifdef ENERGY_DIAGNOSTICS
         ! add in boundary term to T2 and S2 diagnostics:
         if (compute_diagnostics) then
            elem(ie)%accum%T2(:,:)=elem(ie)%accum%T2(:,:)+                &
-                elem(ie)%accum%T2_nlevp_term(:,:)*(dpnh_dp_i(:,:,nlevp)-1)
+                elem(ie)%accum%T2_nlevp_term(:,:)*(dpnh_dp_i(:,:,nlevp)-0)
            elem(ie)%accum%S2(:,:)=-elem(ie)%accum%T2(:,:)      
         endif
 
@@ -2230,6 +2305,17 @@ contains
            endif
         enddo
         enddo
+
+        if (hcoord==1) then
+        do j=1,np
+        do i=1,np
+           if ( abs(elem(ie)%state%w_i(i,j,1,np1)) >1e-10) then
+              write(iulog,*) 'WARNING: w(1) does not satisfy b.c.',ie,i,j,k
+              write(iulog,*) 'val2 = ',elem(ie)%state%w_i(i,j,nlevp,np1)
+           endif
+        enddo
+        enddo
+        endif
 
         ! check for layer spacing <= 1m
         do k=1,nlev

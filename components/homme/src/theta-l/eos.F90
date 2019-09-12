@@ -23,7 +23,7 @@ module eos
   use kinds,          only: real_kind
   use parallel_mod,   only: abortmp
   use physical_constants, only : p0, kappa, g, Rgas
-  use control_mod,    only: theta_hydrostatic_mode
+  use control_mod,    only: theta_hydrostatic_mode,hcoord
   implicit none
 
 
@@ -101,17 +101,18 @@ implicit none
      enddo
   endif
 
-  ! hydrostatic pressure
-  pi_i(:,:,1)=hvcoord%hyai(1)*hvcoord%ps0
-  do k=1,nlev
-     pi_i(:,:,k+1)=pi_i(:,:,k) + dp3d(:,:,k)
-  enddo
-  do k=1,nlev
-     pi(:,:,k)=pi_i(:,:,k) + dp3d(:,:,k)/2
-  enddo
 
 
   if (theta_hydrostatic_mode) then
+     ! hydrostatic pressure
+     pi_i(:,:,1)=hvcoord%hyai(1)*hvcoord%ps0
+     do k=1,nlev
+        pi_i(:,:,k+1)=pi_i(:,:,k) + dp3d(:,:,k)
+     enddo
+     do k=1,nlev
+        pi(:,:,k)=pi_i(:,:,k) + dp3d(:,:,k)/2
+     enddo
+
      ! hydrostatic pressure
      exner  = (pi/p0)**kappa
      pnh = pi ! copy hydrostatic pressure into output variable
@@ -132,14 +133,19 @@ implicit none
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ! boundary terms
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!  
-   pnh_i(:,:,1) = pi_i(:,:,1)   ! hydrostatic ptop    
-   ! surface boundary condition pnh_i determined by w equation to enforce
-   ! w b.c.  This is computed in the RHS calculation.  Here, we use
-   ! an approximation (hydrostatic) so that dpnh/dpi = 1
-   pnh_i(:,:,nlevp) = pnh(:,:,nlev) + dp3d(:,:,nlev)/2
-   ! extrapolote NH perturbation:
-   !pnh_i(:,:,nlevp) = pi_i(:,:,nlevp) + (3*(pnh(:,:,nlev)-pi(:,:,nlev)) - (pnh(:,:,nlev-1)-pi(:,:,nlev-1)) )/2
-
+  if (hcoord==1) then
+     ! use hydrostatic approximation so that dpnh/dpi=1
+     ! this is correct at TOM.  AT surface, correct values must be computed in 
+     ! RHS calculation
+     pnh_i(:,:,1) = pnh(:,:,1) - dp3d(:,:,1)/2    
+     pnh_i(:,:,nlevp) = pnh(:,:,nlev) + dp3d(:,:,nlev)/2  
+  else
+     pnh_i(:,:,1) = hvcoord%hyai(1)*hvcoord%ps0  ! hydrostatic ptop    
+     ! surface boundary condition pnh_i determined by w equation to enforce
+     ! w b.c.  This is computed in the RHS calculation.  Here, we use
+     ! an approximation (hydrostatic) so that dpnh/dpi = 1
+     pnh_i(:,:,nlevp) = pnh(:,:,nlev) + dp3d(:,:,nlev)/2
+  endif
 
    ! compute d(pnh)/d(pi) at interfaces
    ! use one-sided differences at boundaries
@@ -204,7 +210,8 @@ implicit none
 
   integer :: k
 
-  ! compute pressure on interfaces                                                                                   
+  ! compute pressure on interfaces
+  ! in height coord model (hcoord=1) we would never call this subroutine, so assume:
   p_i(:,:,1)=hvcoord%hyai(1)*hvcoord%ps0
   do k=1,nlev
      p_i(:,:,k+1)=p_i(:,:,k) + dp(:,:,k)

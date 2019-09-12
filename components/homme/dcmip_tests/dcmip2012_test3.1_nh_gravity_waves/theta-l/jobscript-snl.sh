@@ -5,11 +5,10 @@
 #SBATCH -J d31-theta          # job name
 #SBATCH -N 4                  # total number of mpi tasks requested
 #SBATCH -p ec                 # queue (partition) -- normal, development, etc.
-#SBATCH -t 00:10:00           # run time (hh:mm:ss)
 #SBATCH --account=FY150001
-#PBS -q acme
-#PBS -l walltime=10:00                                                                                           
-#PBS -l nodes=4    
+#SBATCH -p acme-centos6
+#SBATCH --account=condo
+#SBATCH -t 00:10:00           # run time (hh:mm:ss)
 
 set OMP_NUM_THREADS = 1
 set NCPU = 40

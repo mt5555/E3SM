@@ -22,7 +22,7 @@ module model_init_mod
   use element_state,      only: timelevels, nu_scale_top, nlev_tom
   use viscosity_mod,      only: make_c0_vector
   use kinds,              only: real_kind,iulog
-  use control_mod,        only: qsplit,theta_hydrostatic_mode
+  use control_mod,        only: qsplit,theta_hydrostatic_mode, hcoord
   use time_mod,           only: timelevel_qdp, timelevel_t
   use physical_constants, only: g
  
@@ -66,7 +66,7 @@ contains
 
 
     ! unit test for analytic jacobian used by IMEX methods
-    if (.not. theta_hydrostatic_mode) &
+    if (.not. theta_hydrostatic_mode .and. hcoord==0) &
          call test_imex_jacobian(elem,hybrid,hvcoord,tl,nets,nete)
 
 

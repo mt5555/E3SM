@@ -58,7 +58,7 @@ module element_ops
   use perf_mod,       only: t_startf, t_stopf, t_barrierf, t_adj_detailf ! _EXTERNAL
   use parallel_mod,   only: abortmp
   use physical_constants, only : p0, Cp, Rgas, Rwater_vapor, Cpwater_vapor, kappa, g, dd_pi, TREF
-  use control_mod,    only: use_moisture, theta_hydrostatic_mode
+  use control_mod,    only: use_moisture, theta_hydrostatic_mode, hcoord
   use eos,            only: pnh_and_exner_from_eos, phi_from_eos
   implicit none
   private
@@ -587,31 +587,33 @@ contains
   real(real_kind), dimension(np,np,nlev) :: pi
 
   real(real_kind), dimension(np,np,nlev) :: pnh,exner
-  real(real_kind), dimension(np,np,nlevp) :: dpnh_dp_i,phi_i
+  real(real_kind), dimension(np,np,nlevp) :: dpnh_dp_i,phi_i,pi_i
 
   tl=1
 
-  call phi_from_eos(hvcoord,elem%state%phis,elem%state%vtheta_dp(:,:,:,tl),&
-       elem%state%dp3d(:,:,:,tl),elem%state%phinh_i(:,:,:,tl))
+  if (hcoord==0) then
+     ! given dp3d and vtheta_dp, set phinh_i based on EOS
+     call phi_from_eos(hvcoord,elem%state%phis,elem%state%vtheta_dp(:,:,:,tl),&
+          elem%state%dp3d(:,:,:,tl),elem%state%phinh_i(:,:,:,tl))
 
-  ! verify discrete hydrostatic balance
-  call pnh_and_exner_from_eos(hvcoord,elem%state%vtheta_dp(:,:,:,tl),&
-       elem%state%dp3d(:,:,:,tl),elem%state%phinh_i(:,:,:,tl),pnh,exner,dpnh_dp_i)
-  do k=1,nlev
-     pi(:,:,k) = hvcoord%hyam(k)*hvcoord%ps0 + hvcoord%hybm(k)*elem%state%ps_v(:,:,tl)
-     if (maxval(abs(1-dpnh_dp_i(:,:,k))) > 1e-10) then
-        write(iulog,*)'WARNING: hydrostatic inverse FAILED!'
-        write(iulog,*)k,minval(dpnh_dp_i(:,:,k)),maxval(dpnh_dp_i(:,:,k))
-        write(iulog,*) 'pnh',pi(1,1,k),pnh(1,1,k)
-     endif
-  enddo
-  
+     ! verify discrete hydrostatic balance
+     call pnh_and_exner_from_eos(hvcoord,elem%state%vtheta_dp(:,:,:,tl),&
+          elem%state%dp3d(:,:,:,tl),elem%state%phinh_i(:,:,:,tl),pnh,exner,dpnh_dp_i)
+     do k=1,nlev
+        pi(:,:,k) = hvcoord%hyam(k)*hvcoord%ps0 + hvcoord%hybm(k)*elem%state%ps_v(:,:,tl)
+        if (maxval(abs(1-dpnh_dp_i(:,:,k))) > 1e-10) then
+           write(iulog,*)'WARNING: hydrostatic inverse FAILED!'
+           write(iulog,*)k,minval(dpnh_dp_i(:,:,k)),maxval(dpnh_dp_i(:,:,k))
+           write(iulog,*) 'pnh',pi(1,1,k),pnh(1,1,k)
+        endif
+     enddo
+  endif
+
   do tl = 2,timelevels
     call copy_state(elem,1,tl)
   enddo
 
   if(present(ie)) call save_initial_state(elem%state,ie)
-
 
   end subroutine tests_finalize
 
@@ -642,6 +644,7 @@ contains
   T1 = .0065*TREF*Cp/g ! = 191
   T0 = TREF-T1         ! = 97
 
+  ! hcoord=1 this routine is not used
   p_i(:,:,1) =  hvcoord%hyai(1)*hvcoord%ps0   
   do k=1,nlev
      p_i(:,:,k+1) = p_i(:,:,k) + dp(:,:,k)

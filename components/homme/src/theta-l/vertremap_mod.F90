@@ -37,7 +37,7 @@ contains
   !
   use kinds,          only: real_kind
   use hybvcoord_mod,  only: hvcoord_t
-  use control_mod,    only: rsplit
+  use control_mod,    only: rsplit,hcoord
   use hybrid_mod,     only: hybrid_t
   use physical_constants, only : Cp,g
 
@@ -170,10 +170,12 @@ contains
      endif
 
      ! reinitialize dp3d after remap
-     do k=1,nlev    
-        elem(ie)%state%dp3d(:,:,:,np1)=dp(:,:,:)
-     enddo
-
+     ! in eulerian rsplit=0 case, also do this just to keep dp3d /ps consistent
+     if (hcoord==0) then
+        do k=1,nlev    
+           elem(ie)%state%dp3d(:,:,:,np1)=dp(:,:,:)
+        enddo
+     endif
   enddo
   call t_stopf('vertical_remap')
   end subroutine vertical_remap
