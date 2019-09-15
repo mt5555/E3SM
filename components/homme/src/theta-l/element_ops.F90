@@ -484,9 +484,13 @@ contains
     v   = elem%state%v   (:,:,2,:,nt)
     ps  = elem%state%ps_v(:,:,  nt)
     phi_i = elem%state%phinh_i(:,:,:,nt)
+    dp    = elem%state%dp3d(:,:,:,nt)
 
     do k=1,nlev
-       dp(:,:,k)=(hvcoord%hyai(k+1)-hvcoord%hyai(k))*hvcoord%ps0 +(hvcoord%hybi(k+1)-hvcoord%hybi(k))*ps(:,:)
+       if (hcoord==0) then
+          ! REMOVE THIS LINE - but check if BFB first
+          dp(:,:,k)=(hvcoord%hyai(k+1)-hvcoord%hyai(k))*hvcoord%ps0 +(hvcoord%hybi(k+1)-hvcoord%hybi(k))*ps(:,:)
+       endif
        w(:,:,k) = (elem%state%w_i(:,:,k,nt) + elem%state%w_i(:,:,k+1,nt))/2
     end do
 

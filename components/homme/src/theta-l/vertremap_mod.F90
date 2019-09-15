@@ -76,19 +76,31 @@ contains
   !    (dp_star(k)-dp(k))/dt_q = (eta_dot_dpdn(i,j,k+1) - eta_dot_dpdn(i,j,k) )
   !
    do ie=nets,nete
-     ! update final ps_v
-     elem(ie)%state%ps_v(:,:,np1) = hvcoord%hyai(1)*hvcoord%ps0 + &
-          sum(elem(ie)%state%dp3d(:,:,:,np1),3)
-     do k=1,nlev
-        dp(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
-             ( hvcoord%hybi(k+1) - hvcoord%hybi(k) )*elem(ie)%state%ps_v(:,:,np1)
-        if (rsplit==0) then
-           dp_star(:,:,k) = dp(:,:,k) + dt*(elem(ie)%derived%eta_dot_dpdn(:,:,k+1) -&
-                elem(ie)%derived%eta_dot_dpdn(:,:,k))
-        else
-           dp_star(:,:,k) = elem(ie)%state%dp3d(:,:,k,np1)
-        endif
-     enddo
+      ! update final ps_v
+      elem(ie)%state%ps_v(:,:,np1) = hvcoord%hyai(1)*hvcoord%ps0 + &
+           sum(elem(ie)%state%dp3d(:,:,:,np1),3)
+      do k=1,nlev
+         if (hcoord==1) then
+            dp(:,:,k) = elem(ie)%state%dp3d(:,:,k,np1)  ! rsplit=0 case
+            ! rsplit=1  we will remap dp3d based on PHI*
+            ! dz       = dz of reference levels
+            ! dz_star  = d(phinh_i) = current level dz
+            ! call remap1(dp3d,np,5,dz_star,dz)   
+            ! then use remap(dp3d) and dp_start to remap everything else
+         else
+            dp(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
+              ( hvcoord%hybi(k+1) - hvcoord%hybi(k) )*elem(ie)%state%ps_v(:,:,np1)
+         endif
+         if (rsplit==0) then
+            dp_star(:,:,k) = dp(:,:,k) + dt*(elem(ie)%derived%eta_dot_dpdn(:,:,k+1) -&
+                 elem(ie)%derived%eta_dot_dpdn(:,:,k))
+         else
+            dp_star(:,:,k) = elem(ie)%state%dp3d(:,:,k,np1)
+         endif
+      enddo
+
+   
+
      if (minval(dp_star)<0) then
         do k=1,nlev
         do i=1,np
@@ -106,9 +118,6 @@ contains
      endif
 
      if (rsplit>0) then
-        !removing theta_ref does not help much and will not conserve theta*dp
-        !call set_theta_ref(hvcoord,dp_star,theta_ref)
-
         ! remove hydrostatic phi befor remap
         call phi_from_eos(hvcoord,elem(ie)%state%phis,elem(ie)%state%vtheta_dp(:,:,:,np1),dp_star,phi_ref)
         elem(ie)%state%phinh_i(:,:,:,np1)=&
@@ -117,7 +126,7 @@ contains
         !  REMAP u,v,T from levels in dp3d() to REF levels
         ttmp(:,:,:,1)=elem(ie)%state%v(:,:,1,:,np1)*dp_star
         ttmp(:,:,:,2)=elem(ie)%state%v(:,:,2,:,np1)*dp_star
-        ttmp(:,:,:,3)=elem(ie)%state%vtheta_dp(:,:,:,np1)   ! - theta_ref*dp_star*Cp
+        ttmp(:,:,:,3)=elem(ie)%state%vtheta_dp(:,:,:,np1)  
         do k=1,nlev
            ttmp(:,:,k,4)=elem(ie)%state%phinh_i(:,:,k+1,np1)-&
                 elem(ie)%state%phinh_i(:,:,k,np1) 
@@ -131,10 +140,9 @@ contains
         call remap1(ttmp,np,5,dp_star,dp)
         call t_stopf('vertical_remap1_1')
 
-        !call set_theta_ref(hvcoord,dp,theta_ref)
         elem(ie)%state%v(:,:,1,:,np1)=ttmp(:,:,:,1)/dp
         elem(ie)%state%v(:,:,2,:,np1)=ttmp(:,:,:,2)/dp
-        elem(ie)%state%vtheta_dp(:,:,:,np1)=ttmp(:,:,:,3) ! + theta_ref*dp*Cp
+        elem(ie)%state%vtheta_dp(:,:,:,np1)=ttmp(:,:,:,3)
       
         
         do k=nlev,1,-1
