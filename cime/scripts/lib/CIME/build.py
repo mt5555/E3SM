@@ -34,6 +34,9 @@ def get_standard_cmake_args(case, shared_lib=False):
     for var in _CMD_ARGS_FOR_BUILD:
         cmake_args += xml_to_make_variable(case, var, cmake=True)
 
+    # Disable compiler checks
+    cmake_args += " -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_CXX_COMPILER_WORKS=1 -DCMAKE_Fortran_COMPILER_WORKS=1"
+
     return cmake_args
 
 def xml_to_make_variable(case, varname, cmake=False):
@@ -314,7 +317,7 @@ def _build_libraries(case, exeroot, sharedpath, caseroot, cimeroot, libroot, lid
 
 ###############################################################################
 def _build_model_thread(config_dir, compclass, compname, caseroot, libroot, bldroot, incroot, file_build,
-                        thread_bad_results, smp, compiler, case):
+                        thread_bad_results, smp, compiler, _): # (case not used yet)
 ###############################################################################
     logger.info("Building {} with output to {}".format(compclass, file_build))
     t1 = time.time()
@@ -325,21 +328,11 @@ def _build_model_thread(config_dir, compclass, compname, caseroot, libroot, bldr
         cmd = os.path.join(config_dir, "buildlib")
         expect(os.path.isfile(cmd), "Could not find buildlib for {}".format(compname))
 
-    # Add to this list as components are converted to python/cmake
-    if compname in ["cam"] and get_model() == "e3sm":
-        try:
-            stat = 0
-            run_sub_or_cmd(cmd, [caseroot, libroot, bldroot], "buildlib",
-                           [bldroot, libroot, case], logfile=file_build)
-        except Exception:
-            stat = 1
-
-    else:
-        with open(file_build, "w") as fd:
-            stat = run_cmd("MODEL={} SMP={} {} {} {} {} "
-                           .format(compclass, stringify_bool(smp), cmd, caseroot, libroot, bldroot),
-                           from_dir=bldroot,  arg_stdout=fd,
-                           arg_stderr=subprocess.STDOUT)[0]
+    with open(file_build, "w") as fd:
+        stat = run_cmd("MODEL={} SMP={} {} {} {} {} "
+                       .format(compclass, stringify_bool(smp), cmd, caseroot, libroot, bldroot),
+                       from_dir=bldroot,  arg_stdout=fd,
+                       arg_stderr=subprocess.STDOUT)[0]
 
     analyze_build_log(compclass, file_build, compiler)
 

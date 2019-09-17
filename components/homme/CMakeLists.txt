@@ -40,6 +40,16 @@ IF (${HOMME_BUILD_EXECS})
   ENDIF()
 ENDIF()
 
+#option to build without pio and any netcdf in homme (no mesh runs either),
+#by default is not on.
+IF(NOT DEFINED BUILD_HOMME_WITHOUT_PIOLIBRARY)
+  SET(BUILD_HOMME_WITHOUT_PIOLIBRARY FALSE CACHE BOOL "")
+ENDIF()
+IF(BUILD_HOMME_WITHOUT_PIOLIBRARY)
+  ADD_DEFINITIONS(-DHOMME_WITHOUT_PIOLIBRARY)
+  MESSAGE(STATUS "This configuration builds without PIO library and NetCDF calls")
+ENDIF()
+
 # Add the cmake/CMakeLists.txt file
 SET (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -89,7 +99,6 @@ OPTION(BUILD_HOMME_PREQX "Primitive equations FEM" ON)
 OPTION(BUILD_HOMME_THETA "SB81 NH model with theta and Exner pressure" ON)
 OPTION(BUILD_HOMME_PREQX_ACC "Primitive equations FEM with OpenACC" ON)
 OPTION(BUILD_HOMME_PREQX_KOKKOS "Primitive equations FEM with Kokkos" OFF)
-OPTION(BUILD_HOMME_PESE  "Primitive equations with vertical spectral elements" OFF)
 OPTION(BUILD_HOMME_SWIM  "Shallow water equations implicit" OFF)
 OPTION(BUILD_HOMME_PRIM  "Primitive equations implicit" OFF)
 OPTION(HOMME_ENABLE_COMPOSE "Build COMPOSE semi-Lagrangian tracer transport code" ON)
@@ -287,6 +296,8 @@ SET (CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/utils/cime/src/externals/pio
 # necessyar PIO variables:
 #
 ADD_DEFINITIONS(-D_NO_MPI_RSEND)
+
+if(NOT BUILD_HOMME_WITHOUT_PIOLIBRARY)
 SET(NetCDF_PATH ${NETCDF_DIR})
 SET(PnetCDF_PATH ${PNETCDF_DIR})
 message("** Configuring PIO with:")
@@ -299,7 +310,7 @@ message("-- PnetCDF_C_PATH = ${PnetCDF_C_PATH}")
 # pio needs cime/externals/genf90/genf90.pl
 SET(GENF90_PATH ${CMAKE_CURRENT_SOURCE_DIR}/utils/cime/src/externals/genf90)
 ADD_SUBDIRECTORY(utils/cime/src/externals/pio1)
-
+ENDIF()
 
 
 # CPRNC locations
@@ -315,22 +326,28 @@ IF (CPRNC_DIR)
   ENDIF ()
 ENDIF ()
 
-IF (NOT (CPRNC_DIR))
-  # compile CPRNC from CIME source code. Requires CIME support for machine
-  message("-- CPRNC_BINARY = will compile from source")
-  message("-- If cmake aborts, set CPRNC_DIR to location of external cprnc executable")
+#compile cprnc only if pio is built
+if(NOT BUILD_HOMME_WITHOUT_PIOLIBRARY)
+  IF (NOT (CPRNC_DIR))
+    # compile CPRNC from CIME source code. Requires CIME support for machine
+    message("-- CPRNC_BINARY = will compile from source")
+    message("-- If cmake aborts, set CPRNC_DIR to location of external cprnc executable")
 
-  # cprnc's cmake wont search for netcdf, so we have to find it first:
-  FIND_PACKAGE(NetCDF "4.0" COMPONENTS C Fortran)
-  set(NETCDF_LIBRARIES ${NetCDF_Fortran_LIBRARIES})
-  set(NETCDF_INCLUDE_DIR ${NetCDF_Fortran_INCLUDE_DIRS})
+    # cprnc's cmake wont search for netcdf, so we have to find it first:
+    FIND_PACKAGE(NetCDF "4.0" COMPONENTS C Fortran)
+    set(NETCDF_LIBRARIES ${NetCDF_Fortran_LIBRARIES})
+    set(NETCDF_INCLUDE_DIR ${NetCDF_Fortran_INCLUDE_DIRS})
 
-  # needed for CPRNC build system
-  file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/utils/cime/tools/cprnc/Macros.cmake" "#dummy Macros file for non-CIME machines")
+    # needed for CPRNC build system
+    set (cprnc_dummy_file "${CMAKE_CURRENT_SOURCE_DIR}/utils/cime/tools/cprnc/Macros.cmake")
+    if (NOT EXISTS "${cprnc_dummy_file}")
+      file(WRITE "${cprnc_dummy_file}" "#dummy Macros file for non-CIME machines")
+    endif ()
 
-  SET (CPRNC_INSTALL_DIR ${HOMME_BINARY_DIR}/utils/cime/tools/cprnc)
-  SET (CPRNC_BINARY ${HOMME_BINARY_DIR}/utils/cime/tools/cprnc/cprnc)
-  ADD_SUBDIRECTORY(utils/cime/tools/cprnc)
+    SET (CPRNC_INSTALL_DIR ${HOMME_BINARY_DIR}/utils/cime/tools/cprnc)
+    SET (CPRNC_BINARY ${HOMME_BINARY_DIR}/utils/cime/tools/cprnc/cprnc)
+    ADD_SUBDIRECTORY(utils/cime/tools/cprnc)
+  ENDIF ()
 ENDIF ()
 
 IF (${HOMME_USE_KOKKOS})
@@ -362,7 +379,6 @@ IF(${BUILD_HOMME_PREQX})
 ENDIF()
 
 IF(${BUILD_HOMME_THETA})
-  ADD_SUBDIRECTORY(src/theta)
   ADD_SUBDIRECTORY(src/theta-l)
 ENDIF()
 
@@ -372,10 +388,6 @@ ENDIF()
 
 IF(${BUILD_HOMME_PREQX_KOKKOS})
   ADD_SUBDIRECTORY(src/preqx_kokkos)
-ENDIF()
-
-IF(${BUILD_HOMME_PESE})
-  ADD_SUBDIRECTORY(src/pese)
 ENDIF()
 
 IF(${BUILD_HOMME_SWIM})

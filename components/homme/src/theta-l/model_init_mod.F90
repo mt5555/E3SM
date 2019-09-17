@@ -19,7 +19,7 @@ module model_init_mod
   use hybrid_mod,         only: hybrid_t
   use dimensions_mod,     only: np,nlev,nlevp
   use eos          ,      only: pnh_and_exner_from_eos,get_dirk_jacobian
-  use element_state,      only: timelevels, nu_scale_top
+  use element_state,      only: timelevels, nu_scale_top, nlev_tom
   use viscosity_mod,      only: make_c0_vector
   use kinds,              only: real_kind,iulog
   use control_mod,        only: qsplit,theta_hydrostatic_mode
@@ -75,45 +75,46 @@ contains
     ! compute scaling of sponge layer damping 
     !
     if (hybrid%masterthread) write(iulog,*) "sponge layer nu_top viscosity scaling factor"
+    nlev_tom=0
     do k=1,nlev
        !press = (hvcoord%hyam(k)+hvcoord%hybm(k))*hvcoord%ps0
        !ptop  = hvcoord%hyai(1)*hvcoord%ps0
        ! sponge layer starts at p=4*ptop 
        ! 
        ! some test cases have ptop=200mb
-       ptop_over_press = hvcoord%etai(1) / hvcoord%etam(k)  ! pure sigma coordinates has etai(1)=0
+       if (hvcoord%etai(1)==0) then
+          ! pure sigma coordinates could have etai(1)=0
+          ptop_over_press = hvcoord%etam(1) / hvcoord%etam(k)  
+       else
+          ptop_over_press = hvcoord%etai(1) / hvcoord%etam(k)  
+       endif
 
-       ! active for p<4*ptop (following cd_core.F90 in CAM-FV)
-       ! CAM 26L and 30L:  top 2 levels
-       ! E3SM 72L:  top 4 levels
+       ! active for p<10*ptop (following cd_core.F90 in CAM-FV)
+       ! CAM 26L and 30L:  top 3 levels 
+       ! E3SM 72L:  top 6 levels
        nu_scale_top(k) = 8*(1+tanh(log(ptop_over_press))) ! active for p<4*ptop
+       if (nu_scale_top(k)<0.15d0) nu_scale_top(k)=0
 
-       ! active for p<7*ptop 
-       ! CAM 26L and 30L:  top 3 levels
-       ! E3SM 72L:  top 5 levels
        !nu_scale_top(k) = 8*(1+.911*tanh(log(ptop_over_press))) ! active for p<6.5*ptop
+       !if (nu_scale_top(k)<1d0) nu_scale_top(k)=0
+
+       ! original CAM3/preqx formula
+       !if (k==1) nu_scale_top(k)=4
+       !if (k==2) nu_scale_top(k)=2
+       !if (k==3) nu_scale_top(k)=1
+       !if (k>3) nu_scale_top(k)=0
+
+       if (nu_scale_top(k)>0) nlev_tom=k
 
        if (hybrid%masterthread) then
-          if (nu_scale_top(k)>1) write(iulog,*) "  nu_scale_top ",k,nu_scale_top(k)
+          if (nu_scale_top(k)>0) write(iulog,*) "  nu_scale_top ",k,nu_scale_top(k)
        end if
     end do
-    
+    if (hybrid%masterthread) then
+       write(iulog,*) "  nlev_tom ",nlev_tom
+    end if
+
   end subroutine 
-
-
-
-  subroutine vertical_mesh_init2(elem, nets, nete, hybrid, hvcoord)
-
-    ! additional solver specific initializations (called from prim_init2)
-
-    type (element_t),			intent(inout), target :: elem(:)! array of element_t structures
-    integer,				intent(in) :: nets,nete		! start and end element indices
-    type (hybrid_t),			intent(in) :: hybrid		! mpi/omp data struct
-    type (hvcoord_t),			intent(inout)	:: hvcoord	! hybrid vertical coord data struct
-
-
-  end subroutine vertical_mesh_init2
-
 
 
   subroutine test_imex_jacobian(elem,hybrid,hvcoord,tl,nets,nete)
@@ -132,6 +133,7 @@ contains
   
   real (kind=real_kind) :: dp3d(np,np,nlev), phis(np,np)
   real (kind=real_kind) :: phi_i(np,np,nlevp)
+  real (kind=real_kind) :: dphi(np,np,nlev)
   real (kind=real_kind) :: vtheta_dp(np,np,nlev)
   real (kind=real_kind) :: dpnh_dp_i(np,np,nlevp)
   real (kind=real_kind) :: exner(np,np,nlev)
@@ -156,7 +158,10 @@ contains
          
      dt=100.0
           
-     call get_dirk_jacobian(JacL,JacD,JacU,dt,dp3d,phi_i,pnh,1)
+     do k=1,nlev
+        dphi(:,:,k)=phi_i(:,:,k+1)-phi_i(:,:,k)
+     enddo
+     call get_dirk_jacobian(JacL,JacD,JacU,dt,dp3d,dphi,pnh,1)
          
     ! compute infinity norm of the initial Jacobian 
      norminfJ0=0.d0
@@ -189,7 +194,10 @@ contains
         ! that the sweetspot where the finite difference error is minimized is
         ! =================================================================
         epsie=10.d0/(10.d0)**(j+1)
-        call get_dirk_jacobian(Jac2L,Jac2D,Jac2U,dt,dp3d,phi_i,pnh,0,&
+        do k=1,nlev
+           dphi(:,:,k)=phi_i(:,:,k+1)-phi_i(:,:,k)
+        enddo
+        call get_dirk_jacobian(Jac2L,Jac2D,Jac2U,dt,dp3d,dphi,pnh,0,&
            epsie,hvcoord,dpnh_dp_i,vtheta_dp)
     
         if (maxval(abs(JacD(:,:,:)-Jac2D(:,:,:))) > jacerrorvec(j)) then 
