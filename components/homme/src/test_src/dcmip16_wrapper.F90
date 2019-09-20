@@ -119,8 +119,8 @@ subroutine dcmip2016_test1(elem,hybrid,hvcoord,nets,nete)
         else
            ! init z using a point far from the perturbation (lon=pi/9, lat=2pi/9)
            ! so that every level is on constant z
-           lat=-2*pi/90
-           lon=pi/9 + pi
+           lat=0
+           lon=pi/9 - pi
         endif
 
         w_i(i,j,k)   = 0.0d0

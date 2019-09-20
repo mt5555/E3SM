@@ -1943,7 +1943,6 @@ contains
            endif
            if  ( maxval(abs(gradphinh_i(:,:,:,k))) > 1e-10) then
               print *,ie,k,'max abs gradphi=',maxval(abs(gradphinh_i(:,:,:,k)))
-              stop
            endif
         enddo
      endif

@@ -600,18 +600,40 @@ contains
      call phi_from_eos(hvcoord,elem%state%phis,elem%state%vtheta_dp(:,:,:,tl),&
           elem%state%dp3d(:,:,:,tl),elem%state%phinh_i(:,:,:,tl))
 
-     ! verify discrete hydrostatic balance
-     call pnh_and_exner_from_eos(hvcoord,elem%state%vtheta_dp(:,:,:,tl),&
-          elem%state%dp3d(:,:,:,tl),elem%state%phinh_i(:,:,:,tl),pnh,exner,dpnh_dp_i)
+  else
+     ! given dp3d and phinh_i, set vtheta_dp based on EOS
+     !pi_i(:,:,1)=hvcoord%hyai(1)*hvcoord%ps0
+     !do k=1,nlev  ! SCAN
+     !   pi_i(:,:,k+1)=pi_i(:,:,k) + elem%state%dp3d(:,:,k,tl)
+     !enddo
+     pi_i(:,:,nlevp)=elem%state%ps_v(:,:,tl)
+     do k=nlev,1,-1  ! SCAN
+        pi_i(:,:,k)=pi_i(:,:,k+1) - elem%state%dp3d(:,:,k,tl)
+     enddo
      do k=1,nlev
-        pi(:,:,k) = hvcoord%hyam(k)*hvcoord%ps0 + hvcoord%hybm(k)*elem%state%ps_v(:,:,tl)
-        if (maxval(abs(1-dpnh_dp_i(:,:,k))) > 1e-10) then
-           write(iulog,*)'WARNING: hydrostatic inverse FAILED!'
-           write(iulog,*)k,minval(dpnh_dp_i(:,:,k)),maxval(dpnh_dp_i(:,:,k))
-           write(iulog,*) 'pnh',pi(1,1,k),pnh(1,1,k)
-        endif
+        pi(:,:,k)=(pi_i(:,:,k) + pi_i(:,:,k+1))/2
+     enddo
+     exner=(pi/p0)**kappa
+     ! dphi/ds = -R Thetadp exner/p
+     do k=1,nlev
+        elem%state%vtheta_dp(:,:,k,tl)= &
+             -(elem%state%phinh_i(:,:,k+1,tl)-elem%state%phinh_i(:,:,k,tl)) * &
+             pi(:,:,k)/(Rgas*exner(:,:,k))
      enddo
   endif
+
+  ! verify discrete hydrostatic balance
+  call pnh_and_exner_from_eos(hvcoord,elem%state%vtheta_dp(:,:,:,tl),&
+       elem%state%dp3d(:,:,:,tl),elem%state%phinh_i(:,:,:,tl),pnh,exner,dpnh_dp_i)
+  do k=1,nlev
+     pi(:,:,k) = hvcoord%hyam(k)*hvcoord%ps0 + hvcoord%hybm(k)*elem%state%ps_v(:,:,tl)
+     if (maxval(abs(1-dpnh_dp_i(:,:,k))) > 1e-10) then
+        write(iulog,*)'WARNING: hydrostatic inverse FAILED!'
+        write(iulog,*)k,minval(dpnh_dp_i(:,:,k)),maxval(dpnh_dp_i(:,:,k))
+        write(iulog,*) 'pnh',pi(1,1,k),pnh(1,1,k)
+     endif
+  enddo
+  
 
   do tl = 2,timelevels
     call copy_state(elem,1,tl)
