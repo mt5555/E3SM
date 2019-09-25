@@ -2239,6 +2239,9 @@ contains
   real (kind=real_kind) :: wh_i(np,np,nlevp)  ! w hydrostatic
   real (kind=real_kind) :: v_i(np,np,2,nlevp)  ! w hydrostatic
 
+  real (kind=real_kind) :: addw(np,np,nlev)  ! w hydrostatic
+  real (kind=real_kind) :: addp(np,np,nlev)  ! w hydrostatic
+
   real (kind=real_kind) :: Jac2D(nlev,np,np)  , Jac2L(nlev-1,np,np)
   real (kind=real_kind) :: Jac2U(nlev-1,np,np)
 
@@ -2269,19 +2272,36 @@ contains
 
   do ie=nets,nete
 
+    addp = 0.0
+    addw = 0.0
     if (alphadt.ne.0d0) then ! add dt*alpha*s(un0) to the initial guess and rhs
       call pnh_and_exner_from_eos(hvcoord,elem(ie)%state%vtheta_dp(:,:,:,n0), &
         elem(ie)%state%dp3d(:,:,:,n0),elem(ie)%state%phinh_i(:,:,:,n0),pnh,   &
-        exner,dpnh_dp_i,caller='CAORS')
-      elem(ie)%state%w_i(:,:,1:nlev,np1)     = elem(ie)%state%w_i(:,:,1:nlev,np1) + &
-                                            alphadt*g*(dpnh_dp_i(:,:,1:nlev)-1d0)
-      elem(ie)%state%phinh_i(:,:,1:nlev,np1) = elem(ie)%state%phinh_i(:,:,1:nlev,np1) + &
-                                            alphadt*g*elem(ie)%state%w_i(:,:,1:nlev,n0)
-    end if
+        exner,dpnh_dp_i,caller='dirk0')
+
+      addw = alphadt*(dpnh_dp_i(:,:,1:nlev)-1d0)
+
+      addp = alphadt*elem(ie)%state%w_i(:,:,1:nlev,n0)
+
+      dp3d  => elem(ie)%state%dp3d(:,:,:,n0)
+      v_i(:,:,1:2,1) = elem(ie)%state%v(:,:,1:2,1,n0)
+      do k=2,nlev
+        v_i(:,:,1,k) = (dp3d(:,:,k)*elem(ie)%state%v(:,:,1,k,n0) + &
+            dp3d(:,:,k-1)*elem(ie)%state%v(:,:,1,k-1,n0) ) / (dp3d(:,:,k)+dp3d(:,:,k-1))
+        v_i(:,:,2,k) = (dp3d(:,:,k)*elem(ie)%state%v(:,:,2,k,n0) + &
+            dp3d(:,:,k-1)*elem(ie)%state%v(:,:,2,k-1,n0) ) / (dp3d(:,:,k)+dp3d(:,:,k-1))
+      end do
+
+      do k=1,nlev
+        addp(:,:,k) = addp(:,:,k) - &
+                 alphadt*(v_i(:,:,1,k)*elem(ie)%derived%gradphis(:,:,1) + &
+                 v_i(:,:,2,k)*elem(ie)%derived%gradphis(:,:,2))*hvcoord%hybi(k) / g
+      enddo
+    endif
 
     w_n0 = elem(ie)%state%w_i(:,:,:,np1)
+    w_n0(:,:,1:nlev) = w_n0(:,:,1:nlev) + g*addw
     wgdtmax=max(1d0,maxval(abs(w_n0)))*abs(dt2)*g
-
     ! approximate the initial error of f(x) \approx 0
     dp3d  => elem(ie)%state%dp3d(:,:,:,np1)
     vtheta_dp  => elem(ie)%state%vtheta_dp(:,:,:,np1)
@@ -2289,6 +2309,8 @@ contains
     do k=1,nlev
        dphi_n0(:,:,k)=phi_np1(:,:,k+1)-phi_np1(:,:,k)
     enddo
+
+    phi_np1 = phi_np1 + g*addp
 
     do k=2,nlev
        v_i(:,:,1,k) = (dp3d(:,:,k)*elem(ie)%state%v(:,:,1,k,np1) + &
@@ -2300,12 +2322,14 @@ contains
     wh_i(:,:,nlevp)=elem(ie)%state%w_i(:,:,nlevp,np1)
     do k=2,nlev
        wh_i(:,:,k) = (v_i(:,:,1,k)*elem(ie)%derived%gradphis(:,:,1) + &
-            v_i(:,:,2,k)*elem(ie)%derived%gradphis(:,:,2))&
-            *hvcoord%hybi(k)/g  
+            v_i(:,:,2,k)*elem(ie)%derived%gradphis(:,:,2))*hvcoord%hybi(k)/g  
     enddo
 
 #if 1
-    dphi = dphi_n0  ! initial guess
+!    dphi = dphi_n0  ! initial guess
+    do k=1,nlev
+       dphi(:,:,k)=phi_np1(:,:,k+1)-phi_np1(:,:,k)
+    enddo
 #else
     ! use hydrostatic for initial guess
     call phi_from_eos(hvcoord,elem(ie)%state%phis,vtheta_dp,dp3d,phi_np1)
@@ -2313,7 +2337,6 @@ contains
        dphi(:,:,k)=phi_np1(:,:,k+1)-phi_np1(:,:,k)
     enddo
 #endif
-    
     do k=1,nlev
        do j=1,np
           do i=1,np
@@ -2329,7 +2352,7 @@ contains
     ! initial residual
     call pnh_and_exner_from_eos2(hvcoord,vtheta_dp,dp3d,dphi,pnh,exner,dpnh_dp_i,'dirk1')
     elem(ie)%state%w_i(:,:,1:nlev,np1) = w_n0(:,:,1:nlev) - g*dt2 * &
-         (1.0-dpnh_dp_i(:,:,1:nlev))
+         (1.0-dpnh_dp_i(:,:,1:nlev)) 
     do k=nlev,1,-1 ! scan
        delta_phi(:,:,k) = delta_phi(:,:,k+1) - ( dphi(:,:,k)-dphi_n0(:,:,k))
     enddo
