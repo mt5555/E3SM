@@ -450,6 +450,38 @@ contains
         deriv,nets,nete,maxiter,itertol)
 
 
+!===================================================================================
+    elseif (tstep_type == 12 ) then ! imkg233 - final stage implicit
+
+      a1 = 0.5d0
+      a2 = 0.5d0
+      a3 = 1d0
+   
+      ahat1 = 1d0/3d0
+      dhat1 = -1d0/1d0
+
+      ahat2 = 1d0/6d0
+      dhat2 = 1d0/3d0
+      
+      aphat = 1d0/3d0
+      ahat3 = 1d0/3d0
+      dhat3 = 1d0/3d0
+
+      call compute_andor_apply_rhs(np1,n0,n0,qn0,a1*dt,elem,hvcoord,hybrid,&
+        deriv,nets,nete,compute_diagnostics,0d0,1d0,ahat1/a1,1d0) !   aphat/ap,1d0)               
+
+      call compute_stage_value_dirk(n0,np1,0d0,qn0,dhat1*dt,elem,hvcoord,hybrid,&
+        deriv,nets,nete,maxiter,itertol)
+
+      call compute_andor_apply_rhs(np1,n0,np1,qn0,a2*dt,elem,hvcoord,hybrid,&
+        deriv,nets,nete,compute_diagnostics,0d0,1d0,ahat2/a2,1d0)
+      call compute_stage_value_dirk(n0,np1,0d0,qn0,dhat2*dt,elem,hvcoord,hybrid,&
+        deriv,nets,nete,maxiter,itertol)
+
+      call compute_andor_apply_rhs(np1,n0,np1,qn0,a3*dt,elem,hvcoord,hybrid,&
+           deriv,nets,nete,compute_diagnostics,0d0,1d0,ahat3/a3,1d0)
+      call compute_stage_value_dirk(n0,np1,aphat*dt,qn0,dhat3*dt,elem,hvcoord,hybrid,&
+        deriv,nets,nete,maxiter,itertol)
     else
        call abortmp('ERROR: bad choice of tstep_type')
     endif
