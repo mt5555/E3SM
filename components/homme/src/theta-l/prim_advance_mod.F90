@@ -453,19 +453,35 @@ contains
 !===================================================================================
     elseif (tstep_type == 12 ) then ! imkg233 - final stage implicit
 
-      a1 = 0.5d0
-      a2 = 0.5d0
-      a3 = 1d0
+  !    a1 = 0.5d0
+  !    a2 = 0.5d0
+  !    a3 = 1d0
    
-      ahat1 = 1d0/3d0
-      dhat1 = -1d0/1d0
+  !    ahat1 = 1d0/3d0
+  !    dhat1 = -1d0/6d0
 
-      ahat2 = 1d0/6d0
-      dhat2 = 1d0/3d0
+  !    ahat2 = 1d0/6d0
+  !    dhat2 = 1d0/3d0
       
-      aphat = 1d0/3d0
-      ahat3 = 1d0/3d0
-      dhat3 = 1d0/3d0
+  !    aphat = 1d0/3d0
+  !    ahat3 = 1d0/3d0
+  !    dhat3 = 1d0/3d0
+
+      ! FREE PARAMETERS YOU CAN CHANGE
+      dhat2 = 1d0/3d0; dhat3 = 1d0/3d0;
+
+      ! THE UPDATE IS SOMETHING LIKE aphat*s(t0) + ahat3*s(t+1/2) + dhat3*s(t+1)
+
+      !  DONT CHAGE THESE
+      ap = 0d0
+      a3 = 1d0 
+      a2 = 1d0/2d0
+      a1 = 1d0/2d0
+      ahat2 = 1d0/2d0-dhat2
+      ahat3 = 1d0-2d0*dhat3;
+      aphat = 1d0-dhat3-ahat3;
+      dhat1 = (ahat2*ahat3  - aphat*dhat2)/(ahat3+aphat-dhat2)
+      ahat1 = -aphat*dhat1*dhat2/(ahat2*ahat3)
 
       call compute_andor_apply_rhs(np1,n0,n0,qn0,a1*dt,elem,hvcoord,hybrid,&
         deriv,nets,nete,compute_diagnostics,0d0,1d0,ahat1/a1,1d0) !   aphat/ap,1d0)               
