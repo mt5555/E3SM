@@ -92,7 +92,11 @@ contains
     real (kind=real_kind) :: dt2, time, dt_vis, x, eta_ave_w
     real (kind=real_kind) :: itertol,a1,a2,a3,a4,a5,a6,ahat1,ahat2
     real (kind=real_kind) :: ahat3,ahat4,ahat5,ahat6,dhat1,dhat2,dhat3,dhat4
-    real (kind=real_kind) ::  gamma,delta,ap,aphat,dhat5
+    real (kind=real_kind) ::  gamma,delta,ap,aphat,dhat5,offcentering,centering
+
+    real (kind=real_kind) :: pnh(np,np,nlev)     ! nh (nonydro) pressure                                   
+    real (kind=real_kind) :: dpnh_dp_i(np,np,nlevp)
+    real (kind=real_kind) :: exner(np,np,nlev)  
 
     integer :: ie,nm1,n0,np1,nstep,qsplit_stage,k, qn0
     integer :: n,i,j,maxiter
@@ -498,6 +502,64 @@ contains
            deriv,nets,nete,compute_diagnostics,0d0,1d0,ahat3/a3,1d0)
       call compute_stage_value_dirk(n0,np1,aphat*dt,qn0,dhat3*dt,elem,hvcoord,hybrid,&
         deriv,nets,nete,maxiter,itertol)
+!=====================================================================================
+    elseif (tstep_type == 13 ) then ! imkg233 - final stage implicit                                       
+
+      ! feel free to change change these                                                        
+      offcentering = 1d-2
+      centering = 1d0/3d0
+      dhat2 = centering
+      dhat3 = centering+offcentering
+
+      a3 = centering/(2d0*(1d0/2d0-dhat3))
+      ap = 1d0-a3
+      a2 = 1d0/(2d0*a3)
+      a1 = 1d0/2d0
+
+      ! don't mess with these                                                                      
+      ahat2 = a2-dhat2
+      ahat3 = (1d0/2d0-dhat3)/a2
+      aphat = 1d0-dhat3-ahat3
+      dhat1 = (ahat2*ahat3  - aphat*dhat2)/(ahat3+aphat-dhat2)
+      ahat1 = -aphat*dhat1*dhat2/(ahat2*ahat3)
+
+
+      call compute_andor_apply_rhs(nm1,n0,n0,qn0,a1*dt,elem,hvcoord,hybrid,&
+        deriv,nets,nete,compute_diagnostics,0d0,1d0,ahat1/a1,1d0) ! aphat/ap,1d0)                   
+      call compute_stage_value_dirk(n0,nm1,0d0,qn0,dhat1*dt,elem,hvcoord,hybrid,&
+        deriv,nets,nete,maxiter,itertol)
+
+      call compute_andor_apply_rhs(np1,n0,nm1,qn0,a2*dt,elem,hvcoord,hybrid,&
+        deriv,nets,nete,compute_diagnostics,0d0,1d0,ahat2/a2,1d0)
+      call compute_stage_value_dirk(n0,np1,0d0,qn0,dhat2*dt,elem,hvcoord,hybrid,&
+        deriv,nets,nete,maxiter,itertol)
+
+      call compute_andor_apply_rhs(np1,n0,np1,qn0,a3*dt,elem,hvcoord,hybrid,&
+           deriv,nets,nete,compute_diagnostics,0d0,1d0,ahat3/a3,1d0)
+ !     print *, "HEY"                                                                                      
+      do ie=nets,nete
+        call pnh_and_exner_from_eos(hvcoord,elem(ie)%state%vtheta_dp(:,:,:,n0), &
+          elem(ie)%state%dp3d(:,:,:,n0),elem(ie)%state%phinh_i(:,:,:,n0),pnh,   &
+          exner,dpnh_dp_i,caller='CAORS')
+
+        elem(ie)%state%v(:,:,:,:,np1) = elem(ie)%state%v(:,:,:,:,np1)+ &
+          ap*(elem(ie)%state%v(:,:,:,:,nm1) - elem(ie)%state%v(:,:,:,:,n0) )/a1
+        elem(ie)%state%vtheta_dp(:,:,:,np1) = elem(ie)%state%vtheta_dp(:,:,:,np1) + &
+          ap*(elem(ie)%state%vtheta_dp(:,:,:,nm1) - elem(ie)%state%vtheta_dp(:,:,:,n0) )/a1
+        elem(ie)%state%dp3d(:,:,:,np1) = elem(ie)%state%dp3d(:,:,:,np1) + &
+          ap*(elem(ie)%state%dp3d(:,:,:,nm1) - elem(ie)%state%dp3d(:,:,:,n0) )/a1
+        elem(ie)%state%w_i(:,:,1:nlevp,np1) = elem(ie)%state%w_i(:,:,1:nlevp,np1) + &
+          ap*(elem(ie)%state%w_i(:,:,1:nlevp,nm1) - elem(ie)%state%w_i(:,:,1:nlevp,n0) &
+          - dt2*ahat1*g*(dpnh_dp_i(:,:,1:nlevp)-1d0))/a1
+        elem(ie)%state%phinh_i(:,:,1:nlev,np1)= elem(ie)%state%phinh_i(:,:,1:nlev,np1) + &
+          ap*(elem(ie)%state%phinh_i(:,:,1:nlev,nm1) - elem(ie)%state%phinh_i(:,:,1:nlev,n0) &
+          -dt2*ahat1*g*elem(ie)%state%w_i(:,:,1:nlev,n0))/a1
+
+     end do
+
+
+      call compute_stage_value_dirk(n0,np1,aphat*dt,qn0,dhat3*dt,elem,hvcoord,hybrid,&
+        deriv,nets,nete,maxiter,itertol)
     else
        call abortmp('ERROR: bad choice of tstep_type')
     endif
@@ -561,7 +623,7 @@ contains
     real (kind=real_kind) :: itertol,a1,a2,a3,a4,a5,a6,ahat1,ahat2
     real (kind=real_kind) :: ahat3,ahat4,ahat5,ahat6,dhat1,dhat2,dhat3,dhat4
     real (kind=real_kind) ::  gamma,delta
-
+ 
     integer :: ie,nm1,n0,np1,nstep,qsplit_stage,k, qn0
     integer :: n,i,j,maxiter,sumiter
  
