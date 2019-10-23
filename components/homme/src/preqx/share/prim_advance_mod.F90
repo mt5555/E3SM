@@ -945,6 +945,8 @@ contains
   real (kind=real_kind) ::  cp2,cp_ratio,E,de,Qt,v1,v2
   real (kind=real_kind) ::  glnps1,glnps2,gpterm
   integer :: i,j,k,kptr,ie
+  real (kind=real_kind) ::  mindp3d
+  real (kind=real_kind), dimension(np,np,nlevp) :: phip
 
   call t_startf('compute_and_apply_rhs')
   do ie=nets,nete
@@ -1399,6 +1401,58 @@ contains
         elem(ie)%state%dp3d(:,:,k,np1)= elem(ie)%rspheremp(:,:)*elem(ie)%state%dp3d(:,:,k,np1)
      enddo
   end do
+
+
+!checks for dp and phi
+!copy from theta
+  do ie=nets,nete
+     dp  => elem(ie)%state%dp3d(:,:,:,np1)
+     do k=1,nlev
+        mindp3d = minval(dp(:,:,k))
+        if ( mindp3d < 0.125*hvcoord%dp0(k) ) then
+           write(iulog,*) 'WARNING:CAAR: dp3d too small.',k,mindp3d,hvcoord%dp0(k),&
+elem(ie)%spherep(1,1)%lon,elem(ie)%spherep(1,1)%lat
+        endif
+     enddo
+     do k=1,nlev
+        do j=1,np
+           do i=1,np
+              Qt = elem(ie)%state%Qdp(i,j,k,1,qn0)/dp(i,j,k)
+              T_v(i,j,k) = Virtual_Temperature(elem(ie)%state%T(i,j,k,np1),Qt)
+           end do
+        end do
+     end do
+     p(:,:,1)=hvcoord%hyai(1)*hvcoord%ps0 + dp(:,:,1)/2
+     do k=2,nlev
+        p(:,:,k)=p(:,:,k-1) + (dp(:,:,k-1) + dp(:,:,k))/2
+     enddo
+     call preq_hydrostatic(phi,elem(ie)%state%phis,T_v,p,dp)
+
+     !now make dphi
+     phip(:,:,1:nlev) = phi
+     phip(:,:,nlevp) = elem(ie)%state%phis
+     phi(:,:,1:nlev) = phip(:,:,1:nlev) - phip(:,:,2:nlevp)
+
+     do k=1,nlev
+        mindp3d = minval(phi(:,:,k))
+        if ( mindp3d < 10 ) then
+           write(iulog,*) 'WARNING:CAAR: dphi too small.',k,mindp3d,elem(ie)%spherep(1,1)%lon,&
+elem(ie)%spherep(1,1)%lat
+        endif
+     enddo
+     ! last check sign of T
+     do k=1,nlev
+        mindp3d = minval(elem(ie)%state%T(:,:,k,np1))
+        if ( mindp3d < 170 ) then
+           write(iulog,*) 'WARNING:CAAR: T too small.',k,mindp3d,elem(ie)%spherep(1,1)%lon,&
+elem(ie)%spherep(1,1)%lat
+        endif
+     enddo
+  enddo
+
+
+
+
 
 #ifdef DEBUGOMP
 #if (defined HORIZ_OPENMP)
