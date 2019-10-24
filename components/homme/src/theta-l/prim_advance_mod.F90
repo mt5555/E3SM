@@ -26,7 +26,7 @@ module prim_advance_mod
   use edgetype_mod,       only: EdgeBuffer_t,  EdgeDescriptor_t, edgedescriptor_t
   use element_mod,        only: element_t
   use element_state,      only: nu_scale_top, nlev_tom, max_itercnt, max_deltaerr,max_reserr
-  use element_ops,        only: set_theta_ref, state0, get_R_star
+  use element_ops,        only: set_theta_ref, state0, get_R_star, get_temperature
   use eos,                only: pnh_and_exner_from_eos,pnh_and_exner_from_eos2,phi_from_eos,&
                                 get_dirk_jacobian
   use hybrid_mod,         only: hybrid_t
@@ -1485,7 +1485,7 @@ contains
   real (kind=real_kind) ::  temp(np,np,nlev)
   real (kind=real_kind) ::  vtemp(np,np,2,nlev)       ! generic gradient storage
   real (kind=real_kind), dimension(np,np) :: sdot_sum ! temporary field
-  real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn, mindp3d
+  real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn, mindp3d, dphi(np,np,nlev)
   integer :: i,j,k,kptr,ie, nlyr_tot
 
   call t_startf('compute_andor_apply_rhs')
@@ -2101,31 +2101,55 @@ contains
 
 !     call limiter_dp3d_k(elem(ie)%state%dp3d(:,:,:,np1),elem(ie)%state%vtheta_dp(:,:,:,np1),&
 !          elem(ie)%spheremp,hvcoord%dp0)
-  end do
+
+  end do !ie
 
 
 !checks
   do ie=nets,nete
 !dp check
      dp3d  => elem(ie)%state%dp3d(:,:,:,np1)
+     vtheta_dp  => elem(ie)%state%vtheta_dp(:,:,:,np1)
      do k=1,nlev
         mindp3d = minval(dp3d(:,:,k))
-!print *, mindp3d
         if ( mindp3d < 0.125*hvcoord%dp0(k) ) then
            write(iulog,*) 'W:CAAR: dp3d small.',k,mindp3d,hvcoord%dp0(k),&
 elem(ie)%spherep(1,1)%lon,elem(ie)%spherep(1,1)%lat
         endif
      enddo
 
+!dphi check
+     call pnh_and_exner_from_eos(hvcoord,vtheta_dp,dp3d,phi_i,pnh,exner,dpnh_dp_i,caller='CAAR')
+
+     dphi(:,:,1:nlev) = Rgas*vtheta_dp(:,:,1:nlev)*exner(:,:,1:nlev)/pnh(:,:,1:nlev)
+
+     do k=1,nlev
+        mindp3d = minval(dphi(:,:,k))
+        if ( mindp3d < 10 ) then
+            write(iulog,*) 'W:CAAR: dphi small.',k,mindp3d,hvcoord%dp0(k),&
+elem(ie)%spherep(1,1)%lon,elem(ie)%spherep(1,1)%lat
+        endif
+     enddo        
 
 ! theta check
      do k=1,nlev
         mindp3d = minval(elem(ie)%state%vtheta_dp(:,:,k,np1))
-        if ( mindp3d < 0.0 ) then
-           write(iulog,*) 'W:CAAR theta<0',k,mindp3d,elem(ie)%spherep(1,1)%lon,&
+        if ( mindp3d < 200 ) then
+           write(iulog,*) 'W:CAAR theta<200',k,mindp3d,elem(ie)%spherep(1,1)%lon,&
 elem(ie)%spherep(1,1)%lat
         endif
      enddo
+
+!temperature check
+     do k=1,nlev
+        call get_temperature(elem(ie),dphi,hvcoord,np1)
+        mindp3d = minval(dphi)
+        if ( mindp3d < 170 ) then
+           write(iulog,*) 'W:CAAR T<170',k,mindp3d,elem(ie)%spherep(1,1)%lon,&
+elem(ie)%spherep(1,1)%lat
+        endif
+     enddo
+
   enddo
 
   call t_stopf('compute_andor_apply_rhs')
