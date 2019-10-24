@@ -1137,9 +1137,13 @@ contains
                      elem(ie)%state%w_i(:,:,k2,nt)*stens(:,:,k2,3,ie))/2 ) /  &
                    (exner(:,:,k)*Cp)  
            endif
-           elem(ie)%state%vtheta_dp(:,:,k,nt)=elem(ie)%state%vtheta_dp(:,:,k,nt) &
-                +stens(:,:,k,2,ie)*hvcoord%dp0(k)*exner0(k)/(exner(:,:,k)*elem(ie)%state%dp3d(:,:,k,nt)&
-                )  -heating(:,:,k)
+!           elem(ie)%state%vtheta_dp(:,:,k,nt)=elem(ie)%state%vtheta_dp(:,:,k,nt) &
+!                +stens(:,:,k,2,ie)*hvcoord%dp0(k)*exner0(k)/(exner(:,:,k)*elem(ie)%state%dp3d(:,:,k,nt)&
+!                )  -heating(:,:,k)
+
+           elem(ie)%state%vtheta_dp(:,:,k,nt)=elem(ie)%state%vtheta_dp(:,:,k,nt)           &
+                +stens(:,:,k,2,ie)
+
         enddo
      enddo ! ie
   enddo  ! subcycle
@@ -1481,7 +1485,7 @@ contains
   real (kind=real_kind) ::  temp(np,np,nlev)
   real (kind=real_kind) ::  vtemp(np,np,2,nlev)       ! generic gradient storage
   real (kind=real_kind), dimension(np,np) :: sdot_sum ! temporary field
-  real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn
+  real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn, mindp3d
   integer :: i,j,k,kptr,ie, nlyr_tot
 
   call t_startf('compute_andor_apply_rhs')
@@ -2094,9 +2098,35 @@ contains
         enddo
 #endif
      endif
-     call limiter_dp3d_k(elem(ie)%state%dp3d(:,:,:,np1),elem(ie)%state%vtheta_dp(:,:,:,np1),&
-          elem(ie)%spheremp,hvcoord%dp0)
+
+!     call limiter_dp3d_k(elem(ie)%state%dp3d(:,:,:,np1),elem(ie)%state%vtheta_dp(:,:,:,np1),&
+!          elem(ie)%spheremp,hvcoord%dp0)
   end do
+
+
+!checks
+  do ie=nets,nete
+!dp check
+     dp3d  => elem(ie)%state%dp3d(:,:,:,np1)
+     do k=1,nlev
+        mindp3d = minval(dp3d(:,:,k))
+        if ( mindp3d < 0.125*hvcoord%dp0(k) ) then
+           write(iulog,*) 'W:CAAR: dp3d small.',k,mindp3d,hvcoord%dp0(k),&
+elem(ie)%spherep(1,1)%lon,elem(ie)%spherep(1,1)%lat
+        endif
+     enddo
+
+
+! theta check
+     do k=1,nlev
+        mindp3d = minval(elem(ie)%state%vtheta_dp(:,:,k,np1))
+        if ( mindp3d < 0.0 ) then
+           write(iulog,*) 'W:CAAR theta<0',k,mindp3d,elem(ie)%spherep(1,1)%lon,&
+elem(ie)%spherep(1,1)%lat
+        endif
+     enddo
+  enddo
+
   call t_stopf('compute_andor_apply_rhs')
 
   end subroutine compute_andor_apply_rhs
