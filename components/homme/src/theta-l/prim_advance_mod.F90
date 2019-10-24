@@ -988,11 +988,11 @@ contains
      call phi_from_eos(hvcoord,elem(ie)%state%phis,&
           temp(:,:,:),dp_ref(:,:,:,ie),phi_ref(:,:,:,ie))
 
-#if 0
+#if 1
      ! no reference state, for testing
      theta_ref(:,:,:,ie)=0
      phi_ref(:,:,:,ie)=0
-     dp_ref(:,:,:,ie)=0
+     !dp_ref(:,:,:,ie)=0
 #endif
 
      ! convert vtheta_dp -> theta
@@ -2110,6 +2110,7 @@ contains
      dp3d  => elem(ie)%state%dp3d(:,:,:,np1)
      do k=1,nlev
         mindp3d = minval(dp3d(:,:,k))
+!print *, mindp3d
         if ( mindp3d < 0.125*hvcoord%dp0(k) ) then
            write(iulog,*) 'W:CAAR: dp3d small.',k,mindp3d,hvcoord%dp0(k),&
 elem(ie)%spherep(1,1)%lon,elem(ie)%spherep(1,1)%lat
