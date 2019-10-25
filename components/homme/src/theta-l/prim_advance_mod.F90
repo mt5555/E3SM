@@ -1486,7 +1486,8 @@ contains
   real (kind=real_kind) ::  vtemp(np,np,2,nlev)       ! generic gradient storage
   real (kind=real_kind), dimension(np,np) :: sdot_sum ! temporary field
   real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn, mindp3d, dphi(np,np,nlev), rstar(np,np,nlev)
-  integer :: i,j,k,kptr,ie, nlyr_tot
+  integer :: i,j,k,kptr,ie, nlyr_tot 
+  integer :: myid
 
   call t_startf('compute_andor_apply_rhs')
 
@@ -2143,12 +2144,27 @@ elem(ie)%spherep(1,1)%lat
      do k=1,nlev
         dphi(:,:,k)= Rgas*vtheta_dp(:,:,k)*exner(:,:,k)&
           /(rstar(:,:,k)*dp3d(:,:,k))
-        mindp3d = minval(dphi)
+        mindp3d = minval(dphi(:,:,k))
         if ( mindp3d < 160 ) then
            write(iulog,*) 'W:CAAR T<160',k,mindp3d,elem(ie)%spherep(1,1)%lon,&
 elem(ie)%spherep(1,1)%lat
+!print *, 'my id is', elem(ie)%globalid
         endif
      enddo
+
+!myid=elem(ie)%globalid
+
+#if 0
+if ( (myid ==46295).or.(myid ==46294).or.(myid ==46175).or.(myid ==46174).or.(myid ==46173) )then
+print *, elem(ie)%globalid
+do j=1,np
+do i=1,np
+print *,i,j,vtheta_dp(i,j,:)
+print *,i,j,dp3d(i,j,:)
+enddo
+enddo
+endif
+#endif
 
   enddo
 
