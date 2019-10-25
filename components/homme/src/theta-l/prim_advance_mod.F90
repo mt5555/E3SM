@@ -1485,7 +1485,7 @@ contains
   real (kind=real_kind) ::  temp(np,np,nlev)
   real (kind=real_kind) ::  vtemp(np,np,2,nlev)       ! generic gradient storage
   real (kind=real_kind), dimension(np,np) :: sdot_sum ! temporary field
-  real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn, mindp3d, dphi(np,np,nlev)
+  real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn, mindp3d, dphi(np,np,nlev), rstar(np,np,nlev)
   integer :: i,j,k,kptr,ie, nlyr_tot
 
   call t_startf('compute_andor_apply_rhs')
@@ -2120,9 +2120,7 @@ elem(ie)%spherep(1,1)%lon,elem(ie)%spherep(1,1)%lat
 
 !dphi check
      call pnh_and_exner_from_eos(hvcoord,vtheta_dp,dp3d,phi_i,pnh,exner,dpnh_dp_i,caller='CAAR')
-
-     dphi(:,:,1:nlev) = Rgas*vtheta_dp(:,:,1:nlev)*exner(:,:,1:nlev)/pnh(:,:,1:nlev)
-
+     dphi(:,:,:) = Rgas*vtheta_dp(:,:,:)*exner(:,:,:)/pnh(:,:,:)
      do k=1,nlev
         mindp3d = minval(dphi(:,:,k))
         if ( mindp3d < 10 ) then
@@ -2133,19 +2131,21 @@ elem(ie)%spherep(1,1)%lon,elem(ie)%spherep(1,1)%lat
 
 ! theta check
      do k=1,nlev
-        mindp3d = minval(elem(ie)%state%vtheta_dp(:,:,k,np1))
-        if ( mindp3d < 200 ) then
-           write(iulog,*) 'W:CAAR theta<200',k,mindp3d,elem(ie)%spherep(1,1)%lon,&
+        mindp3d = minval(vtheta_dp/dp3d)
+        if ( mindp3d < 20 ) then
+           write(iulog,*) 'W:CAAR theta<20',k,mindp3d,elem(ie)%spherep(1,1)%lon,&
 elem(ie)%spherep(1,1)%lat
         endif
      enddo
 
 !temperature check
+     call get_R_star(rstar,elem(ie)%state%Q(:,:,:,1))
      do k=1,nlev
-        call get_temperature(elem(ie),dphi,hvcoord,np1)
+        dphi(:,:,k)= Rgas*vtheta_dp(:,:,k)*exner(:,:,k)&
+          /(rstar(:,:,k)*dp3d(:,:,k))
         mindp3d = minval(dphi)
-        if ( mindp3d < 170 ) then
-           write(iulog,*) 'W:CAAR T<170',k,mindp3d,elem(ie)%spherep(1,1)%lon,&
+        if ( mindp3d < 160 ) then
+           write(iulog,*) 'W:CAAR T<160',k,mindp3d,elem(ie)%spherep(1,1)%lon,&
 elem(ie)%spherep(1,1)%lat
         endif
      enddo
