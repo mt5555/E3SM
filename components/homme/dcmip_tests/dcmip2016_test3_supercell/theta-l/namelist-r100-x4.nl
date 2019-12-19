@@ -14,7 +14,7 @@
   runtype           = 0                         ! 0 => new run
   tstep             = 2.00                      ! 2.25 stable. 2.5 unstable
   integration       = 'explicit'                ! explicit time integration
-  tstep_type        = 7
+  tstep_type        = 9
   rsplit            = 3
   qsplit            = 2                         ! dt_tracer <= 3s  
   nu                = 5.8e8                     ! default= 1e15/(120)^3,  120=4*ne900/ne30

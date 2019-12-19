@@ -14,7 +14,7 @@
   runtype           = 0                         ! 0 => new run
   tstep             = 6.0                       
   integration       = 'explicit'                ! explicit time integration
-  tstep_type        = 7
+  tstep_type        = 9
   rsplit            = 2                         ! dt_remap=48 unstable, 32 stable.   
   qsplit            = 2
   nu                = 1.5e10                    ! default= 1e15/(120)^3 *(ne30/ne8)**3.2 = 4e10
