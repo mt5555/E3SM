@@ -4,8 +4,8 @@
 # need at least 11 nodes, since r400 is hardcoded as mpirun -np 384
 #
 #SBATCH --job-name d16-3-theta
-#SBATCH --account=FY150001
-#SBATCH -p ec
+#XXSBATCH --account=FY150001
+#XXSBATCH -p ec
 #SBATCH --account=condo
 #SBATCH -p acme-medium
 #SBATCH -N 36
