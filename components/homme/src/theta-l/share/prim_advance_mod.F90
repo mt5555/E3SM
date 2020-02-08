@@ -1371,12 +1371,18 @@ contains
            v_theta(:,:,1,k)=elem(ie)%state%v(:,:,1,k,n0)*vtheta_dp(:,:,k)
            v_theta(:,:,2,k)=elem(ie)%state%v(:,:,2,k,n0)*vtheta_dp(:,:,k)
            div_v_theta(:,:,k)=divergence_sphere(v_theta(:,:,:,k),deriv,elem(ie))
-        else
+        else if (theta_advect_form==1) then
            ! alternate form, non-conservative, better HS topography results
            v_theta(:,:,:,k) = gradient_sphere(vtheta(:,:,k),deriv,elem(ie)%Dinv)
            div_v_theta(:,:,k)=vtheta(:,:,k)*divdp(:,:,k) + &
                 dp3d(:,:,k)*elem(ie)%state%v(:,:,1,k,n0)*v_theta(:,:,1,k) + &
-                dp3d(:,:,k)*elem(ie)%state%v(:,:,2,k,n0)*v_theta(:,:,2,k) 
+                dp3d(:,:,k)*elem(ie)%state%v(:,:,2,k,n0)*v_theta(:,:,2,k)
+        else if (theta_advect_form==2) then
+           ! right now, only coded for rsplit>0
+           v_theta(:,:,:,k) = gradient_sphere(vtheta(:,:,k),deriv,elem(ie)%Dinv)
+           div_v_theta(:,:,k)=&
+                elem(ie)%state%v(:,:,1,k,n0)*v_theta(:,:,1,k) + &
+                elem(ie)%state%v(:,:,2,k,n0)*v_theta(:,:,2,k) 
         endif
 #ifdef HOMMEXX_BFB_TESTING
         theta_tens(:,:,k)=(-theta_vadv(:,:,k)-div_v_theta(:,:,k))
@@ -1648,9 +1654,17 @@ contains
         elem(ie)%state%v(:,:,1,k,np1) = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%v(:,:,1,k,nm1) &
           + dt2*vtens1(:,:,k) )
         elem(ie)%state%v(:,:,2,k,np1) = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%v(:,:,2,k,nm1) &
-          +  dt2*vtens2(:,:,k) )
-        elem(ie)%state%vtheta_dp(:,:,k,np1) = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%vtheta_dp(:,:,k,nm1) &
-          + dt2*theta_tens(:,:,k))
+             +  dt2*vtens2(:,:,k) )
+        if (theta_advect_form==2) then
+           ! advective form
+           elem(ie)%state%vtheta_dp(:,:,k,np1) = elem(ie)%spheremp(:,:)*&
+             (scale3 * elem(ie)%state%vtheta_dp(:,:,k,nm1)/elem(ie)%state%dp3d(:,:,k,nm1)&
+             + dt2*theta_tens(:,:,k))
+        else
+           ! conservation form
+           elem(ie)%state%vtheta_dp(:,:,k,np1) = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%vtheta_dp(:,:,k,nm1) &
+                + dt2*theta_tens(:,:,k))
+        endif
 
         if ( .not. theta_hydrostatic_mode ) then
            elem(ie)%state%w_i(:,:,k,np1)    = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%w_i(:,:,k,nm1)   &
@@ -1715,6 +1729,11 @@ contains
      do k=1,nlev
         elem(ie)%state%dp3d(:,:,k,np1) =elem(ie)%rspheremp(:,:)*elem(ie)%state%dp3d(:,:,k,np1)
         elem(ie)%state%vtheta_dp(:,:,k,np1)=elem(ie)%rspheremp(:,:)*elem(ie)%state%vtheta_dp(:,:,k,np1)
+        if (theta_advect_form==2) then
+           ! update in advective form, convert back to theta*dp
+           elem(ie)%state%vtheta_dp(:,:,k,np1)=elem(ie)%state%vtheta_dp(:,:,k,np1)*&
+                elem(ie)%state%dp3d(:,:,k,np1)
+        endif
         if ( .not. theta_hydrostatic_mode ) then
            elem(ie)%state%w_i(:,:,k,np1)    =elem(ie)%rspheremp(:,:)*elem(ie)%state%w_i(:,:,k,np1)
            elem(ie)%state%phinh_i(:,:,k,np1)=elem(ie)%rspheremp(:,:)*elem(ie)%state%phinh_i(:,:,k,np1)

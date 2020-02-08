@@ -1025,6 +1025,9 @@ end if
     if (transport_alg == 0 .and. dt_remap_factor > 0 .and. dt_remap_factor < dt_tracer_factor) then
        call abortmp('Only SL transport supports vertical remap time step < tracer time step.')
     end if
+    if (theta_advect_form==2) then
+       if (rsplit==0) call abortmp('theta_advect_form=2 requires rsplit>0')
+    endif
 #endif
 
 #if !defined(CAM) && !defined(SCREAM)
