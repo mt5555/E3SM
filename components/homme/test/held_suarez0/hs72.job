@@ -21,7 +21,7 @@
 #XXSBATCH --account=FY150001
 #SBATCH -p acme-medium
 #SBATCH --account=condo
-#SBATCH -N 40
+#SBATCH -N 25
 #SBATCH --time=6:00:00
 
 
@@ -68,13 +68,13 @@ if ( $ne == 15 ) then
     set nu = 2.5e-8       # 1.5e15 crashed, 1.6e15 ran
     set nu_div = 2.5e-8
     set ttype=9
-    set rsplit=3
+    set rsplit=1
 
     set topo = '/home/ccsm-data/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
     #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4_16xdel2-nolim.nc'
 
 
-    set toponame = rsplit
+    set toponame = tt$ttype
  endif
  if ( $ne == 60 ) then
     # 0.5 degree     tbird 200 nodes, 560 days: 20h
@@ -150,7 +150,8 @@ if ( $ne == 15 ) then
  set wdir = $wdir/$name
  mkdir $wdir
  mkdir $wdir/movies
- mkdir $wdir/restart
+# mkdir $wdir/restart
+ ln -fs $wdir/../restart $wdir    # good NE30L72 restart
 
 
 
