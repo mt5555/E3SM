@@ -14,7 +14,9 @@ use dcmip12_wrapper,      only: pressure_thickness, set_tracers, get_evenly_spac
 use control_mod,          only: test_case, dcmip16_pbl_type, dcmip16_prec_type, use_moisture, theta_hydrostatic_mode,&
      sub_case
 use baroclinic_wave,      only: baroclinic_wave_test
+#ifndef HOMME_WITHOUT_PIOLIBRARY
 use supercell,            only: supercell_init, supercell_test, supercell_z
+#endif
 use tropical_cyclone,     only: tropical_cyclone_test
 use derivative_mod,       only: derivative_t, gradient_sphere
 use dimensions_mod,       only: np, nlev, nlevp , qsize, qsize_d, nelemd
@@ -154,6 +156,7 @@ subroutine dcmip2016_test1(elem,hybrid,hvcoord,nets,nete)
 
 end subroutine
 
+#ifndef HOMME_WITHOUT_PIOLIBRARY
 subroutine dcmip2016_test1_pg(elem,hybrid,hvcoord,nets,nete,nphys)
   use gllfvremap_mod, only: gfr_init
 
@@ -177,6 +180,7 @@ subroutine dcmip2016_test1_pg(elem,hybrid,hvcoord,nets,nete,nphys)
   call dcmip2016_test1(elem,hybrid,hvcoord,nets,nete)
   sample_period = 3600*24
 end subroutine dcmip2016_test1_pg
+#endif
 
 !_____________________________________________________________________
 subroutine dcmip2016_test2(elem,hybrid,hvcoord,nets,nete)
@@ -250,6 +254,7 @@ subroutine dcmip2016_test2(elem,hybrid,hvcoord,nets,nete)
 
 end subroutine
 
+#ifndef HOMME_WITHOUT_PIOLIBRARY
 !_____________________________________________________________________
 subroutine dcmip2016_test3(elem,hybrid,hvcoord,nets,nete)
 
@@ -358,6 +363,7 @@ subroutine dcmip2016_test3(elem,hybrid,hvcoord,nets,nete)
 
   sample_period = 60.0 ! sec
 end subroutine
+#endif
 
 !_______________________________________________________________________
 subroutine dcmip2016_append_measurements(max_w,max_precl,min_ps,tl,hybrid)
@@ -595,6 +601,8 @@ subroutine toy_print(hybrid, nstep, rcd)
   end if
 end subroutine toy_print
 
+
+#ifndef HOMME_WITHOUT_PIOLIBRARY
 subroutine dcmip2016_test1_pg_forcing(elem,hybrid,hvcoord,nets,nete,nt,ntQ,dt,tl)
   use element_ops, only: get_field
   use gllfvremap_mod
@@ -809,6 +817,8 @@ subroutine dcmip2016_test1_pg_forcing(elem,hybrid,hvcoord,nets,nete,nt,ntQ,dt,tl
 
   call dcmip2016_append_measurements(max_w,max_precl,min_ps,tl,hybrid)
 end subroutine dcmip2016_test1_pg_forcing
+
+#endif
 
 !_______________________________________________________________________
 subroutine dcmip2016_test2_forcing(elem,hybrid,hvcoord,nets,nete,nt,ntQ,dt,tl, test)

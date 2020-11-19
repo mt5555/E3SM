@@ -13,7 +13,7 @@ CPPDEFS = -D_PRIM -DQSIZE_D=10 -DNP=4 -DPLEV=26  \
 
 
 
-LDFLAGS = -lblas -llapack
+#LDFLAGS = -lblas -llapack
 
 VPATH = ../src ../src/share ../src/test_src ../src/preqx ../src/preqx/share \
 ../../../cime/src/share/timing ../utils/csm_share
