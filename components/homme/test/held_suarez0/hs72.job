@@ -23,12 +23,13 @@
 #SBATCH --account=condo
 #SBATCH -N 25
 #SBATCH --time=6:00:00
+#SBATCH --exclude=b641,b642
 
 
 set NCPU = 0
 echo using NCPU = $NCPU
 set nlev=72
-set ndays = 1000      # 1600
+set ndays = 300     # 1600
 set nmax =  1       # no. of timesteps.  ignored, unless ndays=0
 set rfreq = 30000    # no. of days, or n. of timesteps if ndays=0
 
@@ -65,8 +66,8 @@ if ( $ne == 15 ) then
     set tstep = 300  # H model
     #set nu = 1e15       # 1.5e15 crashed, 1.6e15 ran
     #set nu_div = 1e15
-    set nu = 2.5e-8       # 1.5e15 crashed, 1.6e15 ran
-    set nu_div = 2.5e-8
+    set nu = 3.4e-8       # 1.5e15 crashed, 1.6e15 ran
+    set nu_div = 3.4e-8
     set ttype=9
     set rsplit=1
 
@@ -74,7 +75,7 @@ if ( $ne == 15 ) then
     #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4_16xdel2-nolim.nc'
 
 
-    set toponame = tt$ttype
+    set toponame = nhHV4
  endif
  if ( $ne == 60 ) then
     # 0.5 degree     tbird 200 nodes, 560 days: 20h
