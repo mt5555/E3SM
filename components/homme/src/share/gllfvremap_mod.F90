@@ -45,6 +45,11 @@ module gllfvremap_mod
 
   private
 
+
+#ifndef HOMME_WITHOUT_PIOLIBRARY
+
+
+
   ! Main API.
   public :: &
        ! Initialize this module.
@@ -2855,4 +2860,8 @@ contains
        end do
     end do
   end subroutine gfr_test
+
+#endif
+
+
 end module gllfvremap_mod

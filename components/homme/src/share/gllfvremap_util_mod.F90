@@ -19,6 +19,7 @@ module gllfvremap_util_mod
   !
   ! AMB 2019/07-2020/06 Initial
 
+#ifndef HOMME_WITHOUT_PIOLIBRARY
   use hybrid_mod, only: hybrid_t
   use kinds, only: real_kind
   use dimensions_mod, only: nelemd, np, nlev, nlevp, qsize
@@ -751,4 +752,7 @@ contains
 #endif
     stat = 0
   end function gfr_pgn_to_smoothed_topo
+
+#endif
+
 end module gllfvremap_util_mod

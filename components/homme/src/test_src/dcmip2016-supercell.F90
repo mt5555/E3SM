@@ -1,5 +1,7 @@
 MODULE supercell
 
+#ifndef HOMME_WITHOUT_PIOLIBRARY
+
 !=======================================================================
 !
 !  Date:  April 22, 2016
@@ -800,5 +802,8 @@ CONTAINS
     end if
 
   END SUBROUTINE
+
+
+#endif
 
 END MODULE supercell
