@@ -5,15 +5,12 @@ F90 = mpif90
 CC  = mpicc
 
 FFLAGS = -w -fallow-argument-mismatch -ffree-line-length-none -O3 
-CPPDEFS = -D_PRIM -DQSIZE_D=10 -DNP=4 -DPLEV=26  \
+CPPDEFS = -D_PRIM -DQSIZE_D=40 -DNP=4 -DPLEV=72  \
 -DHOMME_WITHOUT_PIOLIBRARY -DPIO_INTERP -D_PRESTART \
 -D_MPI -DTIMING -DHAVE_MPI \
 -DSPMD  -DCPRGNU -DDARWIN -DFORTRANUNDERSCORE
- 
 
-
-
-LDFLAGS = -lblas -llapack
+#LDFLAGS = -lblas -llapack
 
 VPATH = ../src ../src/share ../src/test_src ../src/preqx ../src/preqx/share \
 ../../../cime/src/share/timing ../utils/csm_share
