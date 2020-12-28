@@ -21,7 +21,7 @@
 #XXSBATCH --account=FY150001
 #SBATCH -p acme-medium
 #SBATCH --account=condo
-#SBATCH -N 25
+#SBATCH -N 24
 #SBATCH --time=6:00:00
 #SBATCH --exclude=b641,b642
 
@@ -29,7 +29,7 @@
 set NCPU = 0
 echo using NCPU = $NCPU
 set nlev=72
-set ndays = 300     # 1600
+set ndays = 1000     # 1600
 set nmax =  1       # no. of timesteps.  ignored, unless ndays=0
 set rfreq = 30000    # no. of days, or n. of timesteps if ndays=0
 
@@ -63,11 +63,13 @@ if ( $ne == 15 ) then
  endif
  if ( $ne == 30 ) then
     # 1 degree    H model, 20 nodes, 30min for 1600days
-    set tstep = 300  # H model
+    set tstep = 300   # H model
     #set nu = 1e15       # 1.5e15 crashed, 1.6e15 ran
     #set nu_div = 1e15
     set nu = 3.4e-8       # 1.5e15 crashed, 1.6e15 ran
-    set nu_div = 3.4e-8
+    set nu_div = $nu
+    set nu_s = $nu
+    set nu_p = $nu
     set ttype=9
     set rsplit=1
 
@@ -75,7 +77,7 @@ if ( $ne == 15 ) then
     #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4_16xdel2-nolim.nc'
 
 
-    set toponame = nhHV4
+    set toponame = hfdebug
  endif
  if ( $ne == 60 ) then
     # 0.5 degree     tbird 200 nodes, 560 days: 20h
@@ -181,6 +183,8 @@ if ( $ne == 15 ) then
  sed s:tstep_type.\*:"tstep_type=$ttype":  |\
  sed s:rsplit.\*:"rsplit=$rsplit":  |\
  sed s/NU1/$nu/ |\
+ sed s/NUS/$nu_s/ |\
+ sed s/NUP/$nu_p/ |\
  sed s/NU2/$nu_div/ |\
 sed s:infilenames.\*:"infilenames = '$topo'": |\
 sed s/\ndays.\*/"$RUNLEN"/ |\
@@ -239,3 +243,7 @@ echo "NCPU=$NCPU SYPD = $SYPD"
 #  ncwa -O -v zeta -a time movies/held_suarez03.nc  movies/held_suarez03-ave.nc 
 #  ncwa -A -v omega -a time movies/held_suarez03.nc  movies/held_suarez03-ave.nc 
 #endif
+
+# run NCL:
+ncl ~/codes/acme/components/homme/test/held_suarez0/mapave.ncl
+echo done

@@ -50,6 +50,7 @@ if (isfilevar(fuv,"omega")) then
   print("writing omega500")
   ncdf->omega500=omegap
 
+  if (False) then
   print("INTERPOLATING omega to 850mb")
   omegap=0
   do n=0,ntimes-1
@@ -64,6 +65,7 @@ if (isfilevar(fuv,"omega")) then
   print("writing omega850")
   ncdf->omega850=omegap
   delete(omegap)
+  end if
 end if
 
 print("writing dim_avg ps")
