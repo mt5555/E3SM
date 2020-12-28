@@ -12,7 +12,7 @@ module viscosity_theta
 !
 !
 use kinds, only : real_kind, iulog
-use dimensions_mod, only : np, nlev
+use dimensions_mod, only : np, nlev, nlevp
 use hybrid_mod, only : hybrid_t
 use parallel_mod, only : parallel_t
 use element_mod, only : element_t
@@ -57,7 +57,11 @@ real (kind=real_kind), dimension(:,:), pointer :: rspheremv
 real (kind=real_kind), dimension(np,np) :: tmp
 real (kind=real_kind), dimension(np,np) :: tmp2
 real (kind=real_kind), dimension(np,np,2) :: v
+real (kind=real_kind) :: p_i(np,np,nlevp), p(np,np,nlev),dT(np,np,nlev),ptens(np,np,nlev)
+real (kind=real_kind) :: dp_ref(np,np,nlev)
+
 real (kind=real_kind) :: nu_ratio1, nu_ratio2
+real (kind=real_kind) :: dp_thresh
 logical var_coef1
 
 #ifdef HOMMEXX_BFB_TESTING
@@ -73,7 +77,6 @@ else
    ssize=4*nlev
 endif
 #endif
-
 
    !if tensor hyperviscosity with tensor V is used, then biharmonic operator is (\grad\cdot V\grad) (\grad \cdot \grad) 
    !so tensor is only used on second call to laplace_sphere_wk
@@ -99,7 +102,28 @@ endif
 
    do ie=nets,nete
 
+! compute laplace(p)
+      p_i(:,:,1) =  0  ! constant doens't matter
       do k=1,nlev
+         dp_ref(:,:,k)=elem(ie)%derived%dp_ref2(:,:,k)
+! use actual pressure:  causes probles in middle atmosphere
+!         dp_ref(:,:,k)=elem(ie)%state%dp3d(:,:,k,nt)
+         p_i(:,:,k+1) = p_i(:,:,k) + dp_ref(:,:,k)
+      enddo
+
+! z coordinate version:
+#if 0
+      p_i(:,:,:)=elem(ie)%derived%phi_ref(:,:,:)
+      do k=1,nlev
+         dp_ref(:,:,k)=p_i(:,:,k+1)-p_i(:,:,k)
+      enddo
+#endif
+      
+      do k=1,nlev
+         ! compute lap(p) for z surface correction
+         tmp(:,:) = (p_i(:,:,k) + p_i(:,:,k+1))/2
+         ptens(:,:,k)=laplace_sphere_wk(tmp(:,:),deriv,elem(ie),var_coef=var_coef1)
+
          stens(:,:,k,1,ie)=laplace_sphere_wk(elem(ie)%state%dp3d(:,:,k,nt),&
               deriv,elem(ie),var_coef=var_coef1)
          stens(:,:,k,2,ie)=laplace_sphere_wk(elem(ie)%state%vtheta_dp(:,:,k,nt),&
@@ -111,6 +135,47 @@ endif
          vtens(:,:,:,k,ie)=vlaplace_sphere_wk(elem(ie)%state%v(:,:,:,k,nt),deriv,elem(ie),&
               var_coef=var_coef1,nu_ratio=nu_ratio1)
       enddo
+
+
+#if 1
+! add to theta derivative
+      do k=1,nlev
+         p(:,:,k)=elem(ie)%state%vtheta_dp(:,:,k,nt)
+      enddo
+      p_i(:,:,1) = p(:,:,1)
+      p_i(:,:,nlevp) = p(:,:,nlev)
+      do k=2,nlev
+         p_i(:,:,k)=(p(:,:,k)+p(:,:,k-1))/2
+      enddo
+      do k=1,nlev
+         dT(:,:,k) = (p_i(:,:,k+1)-p_i(:,:,k))/dp_ref(:,:,k)
+         !dp_thresh=.00025
+         !where ( dT(:,:,k)<-dp_thresh) ; dT(:,:,k)=-dp_thresh ; end where
+         !where ( dT(:,:,k)> dp_thresh) ; dT(:,:,k)= dp_thresh ; end where
+
+         dp_thresh=.025
+         dT(:,:,k)=dT(:,:,k) / (1 + abs(dT(:,:,k))/dp_thresh)   
+         
+         stens(:,:,k,2,ie)=stens(:,:,k,2,ie)-dT(:,:,k)*ptens(:,:,k)
+      enddo
+#endif
+#if 0
+      do k=1,nlev
+         p(:,:,k)=elem(ie)%state%dp3d(:,:,k,nt)
+      enddo
+      p_i(:,:,1) = p(:,:,1)
+      p_i(:,:,nlevp) = p(:,:,nlev)
+      do k=2,nlev
+         p_i(:,:,k)=(p(:,:,k)+p(:,:,k-1))/2
+      enddo
+      do k=1,nlev
+         dT(:,:,k) = (p_i(:,:,k+1)-p_i(:,:,k))/dp_ref(:,:,k)
+         stens(:,:,k,1,ie)=stens(:,:,k,1,ie)-dT(:,:,k)*ptens(:,:,k)
+      enddo
+#endif
+
+
+
       kptr=0
       call edgeVpack_nlyr(edgebuf,elem(ie)%desc,vtens(1,1,1,1,ie),2*nlev,kptr,nlyr_tot)
       kptr=2*nlev
@@ -130,7 +195,6 @@ endif
       call edgeVunpack_nlyr(edgebuf,elem(ie)%desc,stens(1,1,1,1,ie),ssize,kptr,nlyr_tot)
 
 
-      
       ! apply inverse mass matrix, then apply laplace again
       do k=1,nlev
          tmp(:,:)=rspheremv(:,:)*stens(:,:,k,1,ie)

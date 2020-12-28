@@ -18,13 +18,13 @@ module model_init_mod
   use hybvcoord_mod, 	  only: hvcoord_t
   use hybrid_mod,         only: hybrid_t
   use dimensions_mod,     only: np,nlev,nlevp
-  use element_ops,        only: set_theta_ref
+  use element_ops,        only: set_theta_ref, set_exner_ref
   use element_state,      only: timelevels, nu_scale_top, nlev_tom
   use viscosity_mod,      only: make_c0_vector
   use kinds,              only: real_kind,iulog
   use control_mod,        only: qsplit,theta_hydrostatic_mode
   use time_mod,           only: timelevel_qdp, timelevel_t
-  use physical_constants, only: g, TREF, Rgas, kappa
+  use physical_constants, only: p0,g, TREF, Rgas, kappa
   use imex_mod,           only: test_imex_jacobian
   use eos,                only: phi_from_eos
  
@@ -71,17 +71,26 @@ contains
       enddo
 
       ! initialize reference states used by hyberviscosity
+#if 0
+      call set_exner_ref(elem(ie)%state%phis(:,:),ps_ref(:,:),1)
+      ps_ref = p0*ps_ref**(1/kappa)
+#else
       ps_ref(:,:) = hvcoord%ps0 * exp ( -elem(ie)%state%phis(:,:)/(Rgas*TREF)) 
+#endif
       do k=1,nlev
          elem(ie)%derived%dp_ref(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
               (hvcoord%hybi(k+1)-hvcoord%hybi(k))*ps_ref(:,:)
+         elem(ie)%derived%dp_ref2(:,:,k) = elem(ie)%derived%dp_ref(:,:,k) 
       enddo
+
+      ! use ref profile T=T0 + T1*exner
       call set_theta_ref(hvcoord,elem(ie)%derived%dp_ref,elem(ie)%derived%theta_ref)
       temp=elem(ie)%derived%theta_ref*elem(ie)%derived%dp_ref
       call phi_from_eos(hvcoord,elem(ie)%state%phis,&
            temp,elem(ie)%derived%dp_ref,elem(ie)%derived%phi_ref)
 
-#define HV_REFSTATES_V4
+
+#define HV_REFSTATES_V1
 #ifdef HV_REFSTATES_V0
       elem(ie)%derived%dp_ref=0
       elem(ie)%derived%phi_ref=0

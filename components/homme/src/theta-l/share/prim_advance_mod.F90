@@ -26,7 +26,7 @@ module prim_advance_mod
   use edgetype_mod,       only: EdgeBuffer_t,  EdgeDescriptor_t, edgedescriptor_t
   use element_mod,        only: element_t
   use element_state,      only: nu_scale_top, nlev_tom, max_itercnt, max_deltaerr,max_reserr
-  use element_ops,        only: set_theta_ref, state0, get_R_star
+  use element_ops,        only: set_theta_ref, set_exner_ref, state0, get_R_star
   use eos,                only: pnh_and_exner_from_eos,pnh_and_exner_from_eos2,phi_from_eos
   use hybrid_mod,         only: hybrid_t
   use hybvcoord_mod,      only: hvcoord_t
@@ -580,11 +580,12 @@ contains
   real (kind=real_kind) :: heating(np,np,nlev)
   real (kind=real_kind) :: exner(np,np,nlev)
   real (kind=real_kind) :: pnh(np,np,nlevp)    
-  real (kind=real_kind) :: temp(np,np,nlev)    
+  real (kind=real_kind) :: temp(np,np,nlev)    ,ps(np,np)
   real (kind=real_kind) :: temp_i(np,np,nlevp)    
   real (kind=real_kind) :: dt,xfac
 
   integer :: l1p,l2p,l1n,l2n,l
+  real (kind=real_kind), pointer, dimension(:,:,:) :: vtheta_dp
   call t_startf('advance_hypervis')
 
 #ifdef HOMMEXX_BFB_TESTING
@@ -610,11 +611,24 @@ contains
 
 
   do ie=nets,nete
+#if 0
+     ps(:,:) = hvcoord%hyai(1)*hvcoord%ps0 + sum(elem(ie)%state%dp3d(:,:,:,nt),3)
+     do k=1,nlev
+        elem(ie)%derived%dp_ref(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
+             ( hvcoord%hybi(k+1) - hvcoord%hybi(k) )*ps(:,:)
+     enddo
+#endif
+#if 0
+     ! ref used for HV on dp3d:
+     elem(ie)%derived%dp_ref2(:,:,:) =elem(ie)%state%dp3d(:,:,:,nt)
+#endif
+
      ! convert vtheta_dp -> theta
      do k=1,nlev
         elem(ie)%state%vtheta_dp(:,:,k,nt)=&
              elem(ie)%state%vtheta_dp(:,:,k,nt)/elem(ie)%state%dp3d(:,:,k,nt)
      enddo
+
   enddo
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -654,7 +668,7 @@ contains
         do k=1,nlev
            vtens(:,:,:,k,ie)=-nu  *vtens(:,:,:,k,ie) ! u,v
            stens(:,:,k,1,ie)=-nu_p*stens(:,:,k,1,ie) ! dp3d
-           stens(:,:,k,2,ie)=-nu  *stens(:,:,k,2,ie) ! theta
+           stens(:,:,k,2,ie)=-nu_s*stens(:,:,k,2,ie) ! theta
            stens(:,:,k,3,ie)=-nu  *stens(:,:,k,3,ie) ! w
            stens(:,:,k,4,ie)=-nu_s*stens(:,:,k,4,ie) ! phi
         enddo
@@ -772,10 +786,29 @@ contains
         enddo
 
 
+#if 0
+     vtheta_dp  => elem(ie)%state%vtheta_dp(:,:,:,nt)
+     do l=1,nlev
+        l1p = min(l+1,nlev)
+        l2p = min(l+2,nlev)
+        if (l.eq.nlev) l2p=nlev-1
+        l1n = max(l-1,1)
+        l2n = max(l-2,1)
+        if (l.eq.1) l2n=2
+        
+        ! the 10 in the scaling below comes from 4th order Laplacian:                                        
+        ! eigenvalue of (del**4) = 10 / delz**4.                                                             
+        ! vert_vis = damping time on smallest wavelength                                                     
+        elem(ie)%state%vtheta_dp(:,:,l,nt)=vtheta_dp(:,:,l)-&
+             (.01d0*l/nlev/hypervis_subcycle/10d0)* &
+             (vtheta_dp(:,:,l2p)-4*vtheta_dp(:,:,l1p)+6*vtheta_dp(:,:,l)-4*vtheta_dp(:,:,l1n) + vtheta_dp(:,:,l2n))
+     enddo
+#endif
 
 
      enddo ! ie
   enddo  ! subcycle
+
 
 ! convert vtheta_dp -> theta
   do ie=nets,nete            
@@ -869,7 +902,6 @@ contains
      enddo ! ie
   enddo  ! subcycle
   endif
-
 
 
   call t_stopf('advance_hypervis')
@@ -1115,6 +1147,14 @@ contains
   real (kind=real_kind) ::  vtemp(np,np,2,nlev)       ! generic gradient storage
   real (kind=real_kind), dimension(np,np) :: sdot_sum ! temporary field
   real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn
+
+#define USE_REF_STATES
+#ifdef USE_REF_STATES
+  real (kind=real_kind) :: T0,T1
+  real (kind=real_kind) :: cpgradexner(np,np,2,nlev)
+  real (kind=real_kind) :: exner_ref(np,np,nlev)
+#endif
+
   integer :: i,j,k,kptr,ie, nlyr_tot
 
   call t_startf('compute_andor_apply_rhs')
@@ -1130,6 +1170,9 @@ contains
      vtheta_dp  => elem(ie)%state%vtheta_dp(:,:,:,n0)
      vtheta(:,:,:) = vtheta_dp(:,:,:)/dp3d(:,:,:)
      phi_i => elem(ie)%state%phinh_i(:,:,:,n0)
+
+
+
 
 #ifdef ENERGY_DIAGNOSTICS
      if (.not. theta_hydrostatic_mode) then
@@ -1376,6 +1419,32 @@ contains
     
 
 
+#ifdef USE_REF_STATES
+     T1 = .0065*TREF*Cp/g ! = 191
+     T0 = TREF-T1         ! = 97
+     exner_ref=exner
+     !call set_exner_ref(phi,exner_ref,nlev)
+     do k=1,nlev
+        temp(:,:,k)=log(exner_ref(:,:,k))
+        cpgradexner(:,:,:,k)=gradient_sphere(temp(:,:,k), deriv, elem(ie)%Dinv) 
+        gradexner(:,:,:,k)=gradient_sphere(exner_ref(:,:,k), deriv, elem(ie)%Dinv) 
+        cpgradexner(:,:,1,k)=Cp*T0*cpgradexner(:,:,1,k)-Cp*T0*gradexner(:,:,1,k)/exner_ref(:,:,k)
+        cpgradexner(:,:,2,k)=Cp*T0*cpgradexner(:,:,2,k)-Cp*T0*gradexner(:,:,2,k)/exner_ref(:,:,k)
+
+! works with PGRAD form: cp thetav exner grad(log exner)) 
+!       cpgradexner(:,:,1,k)=-Cp*T1*cpgradexner(:,:,1,k)+Cp*T1*gradexner(:,:,1,k)/exner_ref(:,:,k)
+!       cpgradexner(:,:,2,k)=-Cp*T1*cpgradexner(:,:,2,k)+Cp*T1*gradexner(:,:,2,k)/exner_ref(:,:,k)
+
+! works with PGRAD form grad(theta*exner)-exner*grad(theta)
+!        temp(:,:,k)=log(1d0/exner_ref(:,:,k))
+!        cpgradexner(:,:,:,k)=gradient_sphere(temp(:,:,k), deriv, elem(ie)%Dinv) 
+!        gradexner(:,:,:,k)=gradient_sphere(1d0/exner_ref(:,:,k), deriv, elem(ie)%Dinv) 
+!        cpgradexner(:,:,1,k)=-Cp*T0*cpgradexner(:,:,1,k)+Cp*T0*gradexner(:,:,1,k)*exner_ref(:,:,k)
+!        cpgradexner(:,:,2,k)=-Cp*T0*cpgradexner(:,:,2,k)+Cp*T0*gradexner(:,:,2,k)*exner_ref(:,:,k)
+     enddo
+#endif
+
+
 
 
      ! ================================================                                                                 
@@ -1393,6 +1462,16 @@ contains
            div_v_theta(:,:,k)=vtheta(:,:,k)*divdp(:,:,k) + &
                 dp3d(:,:,k)*elem(ie)%state%v(:,:,1,k,n0)*v_theta(:,:,1,k) + &
                 dp3d(:,:,k)*elem(ie)%state%v(:,:,2,k,n0)*v_theta(:,:,2,k) 
+
+#undef TADV
+#ifdef TADV
+           ! right now, only coded for rsplit>0 and theta_advect_form=1         
+           v_theta(:,:,:,k) = gradient_sphere(log(vtheta(:,:,k)),deriv,elem(ie)%Dinv)                      
+           div_v_theta(:,:,k)=&
+                elem(ie)%state%v(:,:,1,k,n0)*v_theta(:,:,1,k) + &
+                elem(ie)%state%v(:,:,2,k,n0)*v_theta(:,:,2,k)
+#endif
+  
         endif
 #ifdef HOMMEXX_BFB_TESTING
         theta_tens(:,:,k)=(-theta_vadv(:,:,k)-div_v_theta(:,:,k))
@@ -1425,12 +1504,20 @@ contains
 #endif
 #if 0
         ! entropy form: dcmip2012 test2.0 best: max=0.130  (0.124 with conservation form theta)
+        !  grad(exner) =( grad(theta*exner) - exner*theta*grad(log(theta)))/theta
         vtemp(:,:,:,k) = gradient_sphere(vtheta(:,:,k)*exner(:,:,k),deriv,elem(ie)%Dinv)
         v_theta(:,:,:,k) = gradient_sphere(log(vtheta(:,:,k)),deriv,elem(ie)%Dinv)
         gradexner(:,:,1,k) = (vtemp(:,:,1,k)-exner(:,:,k)*vtheta(:,:,k)*v_theta(:,:,1,k))/&
              vtheta(:,:,k)
         gradexner(:,:,2,k) = (vtemp(:,:,2,k)-exner(:,:,k)*vtheta(:,:,k)*v_theta(:,:,2,k))/&
              vtheta(:,:,k)
+#endif
+#if 0
+        ! which form? entropy form with two terms cancelled
+        !  grad(exner) = exner*grad(log(exner))
+        vtemp(:,:,:,k) = gradient_sphere(log(exner(:,:,k)),deriv,elem(ie)%Dinv)
+        gradexner(:,:,1,k) = exner(:,:,k)*vtemp(:,:,1,k)
+        gradexner(:,:,2,k) = exner(:,:,k)*vtemp(:,:,2,k)
 #endif
 #if 0
         ! another form:  terrible results in dcmip2012 test2.0
@@ -1476,6 +1563,12 @@ contains
                   -Cp*vtheta(i,j,k)*gradexner(i,j,2,k) &
                   -wvor(i,j,2,k) )*scale1
 #endif
+#ifdef USE_REF_STATES
+              ! add in term::  -Cp*theta_ref*gradexner + grad( )
+              vtens1(i,j,k)=vtens1(i,j,k) -cpgradexner(i,j,1,k)
+              vtens2(i,j,k)=vtens2(i,j,k) -cpgradexner(i,j,2,k)
+#endif
+
            end do
         end do     
      end do 
@@ -1646,8 +1739,15 @@ contains
           + dt2*vtens1(:,:,k) )
         elem(ie)%state%v(:,:,2,k,np1) = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%v(:,:,2,k,nm1) &
           +  dt2*vtens2(:,:,k) )
+
+#ifdef TADV
+        elem(ie)%state%vtheta_dp(:,:,k,np1) = elem(ie)%spheremp(:,:)*&
+             (scale3 * log(elem(ie)%state%vtheta_dp(:,:,k,nm1)/elem(ie)%state%dp3d(:,:,k,nm1))&
+             + dt2*theta_tens(:,:,k))
+#else
         elem(ie)%state%vtheta_dp(:,:,k,np1) = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%vtheta_dp(:,:,k,nm1) &
           + dt2*theta_tens(:,:,k))
+#endif
 
         if ( .not. theta_hydrostatic_mode ) then
            elem(ie)%state%w_i(:,:,k,np1)    = elem(ie)%spheremp(:,:)*(scale3 * elem(ie)%state%w_i(:,:,k,nm1)   &
@@ -1712,6 +1812,11 @@ contains
      do k=1,nlev
         elem(ie)%state%dp3d(:,:,k,np1) =elem(ie)%rspheremp(:,:)*elem(ie)%state%dp3d(:,:,k,np1)
         elem(ie)%state%vtheta_dp(:,:,k,np1)=elem(ie)%rspheremp(:,:)*elem(ie)%state%vtheta_dp(:,:,k,np1)
+#ifdef TADV
+        elem(ie)%state%vtheta_dp(:,:,k,np1)=exp(elem(ie)%state%vtheta_dp(:,:,k,np1))*&
+             elem(ie)%state%dp3d(:,:,k,np1)
+#endif
+
         if ( .not. theta_hydrostatic_mode ) then
            elem(ie)%state%w_i(:,:,k,np1)    =elem(ie)%rspheremp(:,:)*elem(ie)%state%w_i(:,:,k,np1)
            elem(ie)%state%phinh_i(:,:,k,np1)=elem(ie)%rspheremp(:,:)*elem(ie)%state%phinh_i(:,:,k,np1)
@@ -1807,7 +1912,7 @@ contains
   real (kind=real_kind) :: Qcol(nlev)
   real (kind=real_kind) :: mass,mass_new
   real (kind=real_kind) :: dp3d_thresh=.125
-  real (kind=real_kind) :: vtheta_thresh = 10  ! 10 Kelvin
+  real (kind=real_kind) :: vtheta_thresh = 100  ! 10 Kelvin
   logical :: warn
   integer i,j,k
 

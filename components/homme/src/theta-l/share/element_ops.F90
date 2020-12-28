@@ -70,7 +70,7 @@ module element_ops
   public get_field, get_field_i, get_state
   public get_temperature, get_phi, get_R_star, get_hydro_pressure
   public set_thermostate, set_state, set_state_i, set_elem_state
-  public set_forcing_rayleigh_friction, set_theta_ref
+  public set_forcing_rayleigh_friction, set_theta_ref, set_exner_ref
   public copy_state, tests_finalize
   public state0
   
@@ -742,17 +742,66 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   do k=1,nlev
      p_i(:,:,k+1) = p_i(:,:,k) + dp(:,:,k)
   enddo
+!  do k=1,nlev
   do k=1,nlev
 #ifdef HOMMEXX_BFB_TESTING
      exner(:,:,k) = bfb_pow(((p_i(:,:,k) + p_i(:,:,k+1))/2)/p0,kappa)
 #else
      exner(:,:,k) = ( (p_i(:,:,k) + p_i(:,:,k+1))/(2*p0)) **kappa
 #endif
-     !theta_ref(:,:,k,ie) = (T0/exner(:,:,k) + T1)*Cp*dp_ref(:,:,k,ie)
      theta_ref(:,:,k) = (T0/exner(:,:,k) + T1)
   enddo
 
   end subroutine
+
+
+
+  !_____________________________________________________________________
+  subroutine set_exner_ref(phi,exner_ref,klev)
+#ifdef HOMMEXX_BFB_TESTING
+    use bfb_mod, only: bfb_pow
+#endif
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !
+  ! Newton iteration for exern so that:
+  !  cp theta_ref(exner) grad(exner) + grad(phi) = 0
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  implicit none
+  
+  integer :: klev
+  real (kind=real_kind), intent(in) :: phi(np,np,klev)
+  real (kind=real_kind), intent(out) :: exner_ref(np,np,klev)
+  
+  !   local
+  real (kind=real_kind) :: T0,T1
+  integer :: k,i
+
+  ! reference T = 288K.  reference lapse rate = 6.5K/km   = .0065 K/m
+  ! Tref = T0+T1*exner
+  ! Thetaref = T0/exner + T1
+  T1 = .0065*TREF*Cp/g ! = 191
+  T0 = TREF-T1         ! = 97
+
+  ! F(exner) = cp*(T0*log(exner) + T1*exner-T1) 
+  ! DF(exner) = cp*(T0/exner + T1)
+  ! solve F(exner)+phi = 0
+  ! exner = exner - (F+phi)/DF
+  ! option 4: solve to cancel PHI   .02
+  ! use TREF/1.5 so that newton converges
+
+  T1 = .0065*TREF*Cp/g ! = 191
+  T0 = TREF-T1         ! = 97
+  do k=1,klev
+     exner_ref(:,:,k) =  exp( -kappa*phi(:,:,k)/(Rgas*TREF/1.5)) 
+     do i=1,5
+        exner_ref(:,:,k) = exner_ref(:,:,k) - &
+             (phi(:,:,k)/Cp + T0*log(exner_ref(:,:,k))+T1*exner_ref(:,:,k)-T1 ) &
+             / (T0/exner_ref(:,:,k)+T1)
+     enddo
+  enddo
+
+  end subroutine
+
 
 
 
