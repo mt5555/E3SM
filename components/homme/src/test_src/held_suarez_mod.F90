@@ -54,7 +54,17 @@ contains
 
     dtf_q = dt
     call get_temperature(elemin,temperature,hvcoord,nm1)
-        
+
+    do k=1,nlev
+       if (maxval(temperature(:,:,k))>320) then
+          write(iulog,*),'HS T>320: k,T',k,maxval(temperature(:,:,k))
+       endif
+       if (minval(temperature(:,:,k))<170) then
+          write(iulog,*),'HS T<170: k,T',k,minval(temperature(:,:,k))
+       endif
+    enddo
+       
+
     do j=1,np
        do i=1,np
           psfrc(i,j) = (elemin%state%ps_v(i,j,nm1))
