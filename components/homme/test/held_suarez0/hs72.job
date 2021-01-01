@@ -29,7 +29,7 @@
 set NCPU = 0
 echo using NCPU = $NCPU
 set nlev=72
-set ndays = 1000     # 1600
+set ndays = 1000    # 1600
 set nmax =  1       # no. of timesteps.  ignored, unless ndays=0
 set rfreq = 30000    # no. of days, or n. of timesteps if ndays=0
 
@@ -77,7 +77,7 @@ if ( $ne == 15 ) then
     #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4_16xdel2-nolim.nc'
 
 
-    set toponame = hfdebug
+    set toponame = ramp3long
  endif
  if ( $ne == 60 ) then
     # 0.5 degree     tbird 200 nodes, 560 days: 20h

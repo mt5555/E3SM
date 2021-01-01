@@ -42,7 +42,7 @@ infilenames=''
 output_timeunits=1,2,2    ! 0=tsteps, 1=days, 2=hours, 3=seconds
 output_frequency=1,12,0    ! 0 to disable.
 output_start_time=610,14640,0
-output_end_time=1600,14650,9999999
+output_end_time=1600,14641,9999999
 output_varnames1='ps','omega'
 !output_varnames1='u','v','T','ps','geos','omega'
 !output_varnames1='u','v','T','zeta','ps','Q','DIFFT'

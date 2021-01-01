@@ -90,7 +90,7 @@ contains
            temp,elem(ie)%derived%dp_ref,elem(ie)%derived%phi_ref)
 
 
-#define HV_REFSTATES_V1
+#define HV_REFSTATES_V3
 #ifdef HV_REFSTATES_V0
       elem(ie)%derived%dp_ref=0
       elem(ie)%derived%phi_ref=0

@@ -152,10 +152,8 @@ endif
          !dp_thresh=.00025
          !where ( dT(:,:,k)<-dp_thresh) ; dT(:,:,k)=-dp_thresh ; end where
          !where ( dT(:,:,k)> dp_thresh) ; dT(:,:,k)= dp_thresh ; end where
-
          dp_thresh=.025
          dT(:,:,k)=dT(:,:,k) / (1 + abs(dT(:,:,k))/dp_thresh)   
-         
          stens(:,:,k,2,ie)=stens(:,:,k,2,ie)-dT(:,:,k)*ptens(:,:,k)
       enddo
 #endif
