@@ -19,24 +19,18 @@
 #  main use of this script is as a template to create problem specific
 #  scripts for benchmarking and production runs 
 #
-
-#
-#SBATCH --job-name HS
-#XXSBATCH -p short,batch
-#XXSBATCH --account=FY150001
-#SBATCH -p acme-centos6
+#SBATCH --job-name restart1
+#SBATCH -p acme-medium
 #SBATCH --account=condo
-#XXSBATCH -N 22
-#XXSBATCH --time=4:00:00
-#SBATCH -N 20
-#SBATCH --time=1:00:00
+#SBATCH -N 24
+#SBATCH --time=6:00:00
 
 
 
 set nlev=26
-set ndays = 1600
+set ndays = 900
 set nmax =  5       # no. of timesteps.  ignored, unless ndays=0
-set rfreq = 1600   # no. of days, or n. of timesteps if ndays=0
+set rfreq = 590   # no. of days, or n. of timesteps if ndays=0
 
 
 # 0 = normal, 1=restart
@@ -71,7 +65,10 @@ if ( $ne == 30 ) then
    set nu = 1e15
    set nu_div = 1e15
    set topo = '/home/ccsm-data/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
-   set toponame = 16xdel2
+   #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4_16xdel2-nolim.nc'
+   #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4_8xdel2.nc'
+
+   set toponame = ref
 endif
 if ( $ne == 60 ) then
    # 0.5 degree     tbird 200 nodes, 560 days: 20h
@@ -226,3 +223,7 @@ echo "NCPU=$NCPU SYPD = $SYPD"
 #  ncwa -O -v zeta -a time movies/held_suarez03.nc  movies/held_suarez03-ave.nc 
 #  ncwa -A -v omega -a time movies/held_suarez03.nc  movies/held_suarez03-ave.nc 
 #endif
+
+# run NCL:
+ncl ~/codes/acme/components/homme/test/held_suarez0/mapave.ncl
+echo done

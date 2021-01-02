@@ -23,13 +23,12 @@
 #SBATCH --account=condo
 #SBATCH -N 24
 #SBATCH --time=6:00:00
-#SBATCH --exclude=b641,b642
 
 
 set NCPU = 0
 echo using NCPU = $NCPU
 set nlev=72
-set ndays = 1000    # 1600
+set ndays = 300    # 1600
 set nmax =  1       # no. of timesteps.  ignored, unless ndays=0
 set rfreq = 30000    # no. of days, or n. of timesteps if ndays=0
 
@@ -73,11 +72,13 @@ if ( $ne == 15 ) then
     set ttype=9
     set rsplit=1
 
-    set topo = '/home/ccsm-data/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
+    #set topo = '/home/ccsm-data/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
     #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4_16xdel2-nolim.nc'
+    #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4_16xdel2-nolim.nc'
+    set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4_8xdel2.nc'
 
 
-    set toponame = ramp3long
+    set toponame = ref8x
  endif
  if ( $ne == 60 ) then
     # 0.5 degree     tbird 200 nodes, 560 days: 20h
