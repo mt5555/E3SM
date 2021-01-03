@@ -11,7 +11,7 @@ begin
 
 ; NETCDF files to process
 fnames =  systemfunc( \
-  "ls movies/held_suarez0-*-1.nc;"  \
+  "ls movies/held_suarez0*1.nc;"  \
 )
 fuv_all   = addfiles(fnames,"r")       ; Open netCDF files.	
 print("files = "+fnames)
