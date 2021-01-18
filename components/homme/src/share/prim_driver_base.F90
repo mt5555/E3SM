@@ -1831,10 +1831,14 @@ contains
     integer :: ie
     real (kind=real_kind) :: minf
     real (kind=real_kind) :: phis(np,np,nets:nete)
+    type (quadrature_t)    :: gp
+    integer i,j
+    real (kind=real_kind) :: noreast,nw,se,sw,x,y
 
     do ie=nets,nete
        phis(:,:,ie)=elem(ie)%state%phis(:,:)
     enddo
+
     
     minf=-9e9
     if (hybrid%masterthread) then
@@ -1842,6 +1846,35 @@ contains
        write(iulog,'(a,i10)')  " smooth_phis_numcycle =",smooth_phis_numcycle
        write(iulog,'(a,e13.5)')" smooth_phis_nudt =",smooth_phis_nudt
     endif
+
+#if 0
+  ! replace hypervis w/ bilinear based on continuous corner values
+  if (hybrid%masterthread) &
+    write(iulog,*) "Applying bilinear projection to PHIS"
+
+  gp=gausslobatto(np)
+  do ie=nets,nete
+     noreast = phis(np,np,ie)
+     nw = phis(1,np,ie)
+     se = phis(np,1,ie)
+     sw = phis(1,1,ie)
+     do i=1,np
+        x = gp%points(i)
+        do j=1,np
+           y = gp%points(j)
+           phis(i,j,ie) = 0.25d0*( &
+                (1.0d0-x)*(1.0d0-y)*sw + &
+                (1.0d0-x)*(y+1.0d0)*nw + &
+                (x+1.0d0)*(1.0d0-y)*se + &
+                (x+1.0d0)*(y+1.0d0)*noreast)
+        end do
+     end do
+  end do
+  deallocate(gp%points)
+  deallocate(gp%weights)
+#endif
+
+
     call smooth_phis(phis,elem,hybrid,deriv1,nets,nete,minf,smooth_phis_numcycle)
 
 
