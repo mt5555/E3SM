@@ -1847,6 +1847,32 @@ contains
        write(iulog,'(a,e13.5)')" smooth_phis_nudt =",smooth_phis_nudt
     endif
 
+
+#if 0
+  ! replace hypervis w/ bilinear based on continuous corner values                              
+  if (hybrid%masterthread) &
+    write(iulog,*) "Applying p=2 filter to PHIS"
+
+  gp=gausslobatto(np)
+  do ie=nets,nete
+     x2 = gp%points(2)
+     x3 = gp%points(3)
+     do i=1,np
+        phis4=phis(i,:,ie)
+        phis(i,2,ie)=(x3*phis4(1)+phis4(2)+phis4(3)+x2*phis4(4))/2
+        phis(i,3,ie)=(x2*phis4(1)+phis4(2)+phis4(3)+x3*phis4(4))/2
+     enddo
+     do j=1,np
+        phis4=phis(:,j,ie)
+        phis(2,j,ie)=(x3*phis4(1)+phis4(2)+phis4(3)+x2*phis4(4))/2
+        phis(3,j,ie)=(x2*phis4(1)+phis4(2)+phis4(3)+x3*phis4(4))/2
+     enddo
+  end do
+  deallocate(gp%points)
+  deallocate(gp%weights)
+#endif
+
+    
 #if 0
   ! replace hypervis w/ bilinear based on continuous corner values
   if (hybrid%masterthread) &
