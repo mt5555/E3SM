@@ -41,6 +41,8 @@ def lookfor1(fid,key1,key2="",allow_eof=0):
 
 mumin=[]
 mumax=[]
+Tmin=[]
+Tmax=[]
 KE=[]
 IE=[]
 PE=[]
@@ -63,7 +65,7 @@ try:
     str = lookfor1(sys.stdin,"tstep ","",0)
     str=str.split()
     tstep=float(str[1])
-    print('NCPU = %i tstep=%f' % (ncpu, tstep))
+    print('NCPU = %i tstep=%f NH=%i' % (ncpu, tstep, not hydrostatic_mode))
     while 1:
         # nstep=           3  time=  1.041666666666667E-002  [day]
         str = lookfor1(sys.stdin,"nstep=","",1)
@@ -72,11 +74,17 @@ try:
      
         time.extend([n*tstep/(24*3600)])
 
-        if ( ~hydrostatic_mode ):
+        if ( not hydrostatic_mode ):
             str = lookfor1(sys.stdin,"mu    =","",0)
             str=str.split()
             mumin.extend([float(str[0])])
             mumax.extend([float(str[3])])
+
+        if ( hydrostatic_mode ):
+            str = lookfor1(sys.stdin,"T     =","",0)
+            str=str.split()
+            Tmin.extend([float(str[0])])
+            Tmax.extend([float(str[3])])
 
         # KE,d/dt,diss:
         # IE,d/dt,diss:
@@ -158,7 +166,7 @@ except eof as e:
     plt.legend()
     plt.savefig("HS-diss.png")
 
-    if ( ~hydrostatic_mode ):
+    if ( not hydrostatic_mode ):
         plt.figure()
         print ('plotting mu...std min,max=%f %f' % (np.std(mumin),np.std(mumax)))
         print ('avg min,max=%f %f' % (sum(mumin)/len(mumin),sum(mumax)/len(mumax)))
@@ -170,6 +178,19 @@ except eof as e:
         plt.grid(True)
         plt.legend()
         plt.savefig("mu.png")
+
+    if ( hydrostatic_mode ):
+        plt.figure()
+        print ('plotting T...std min,max=%f %f' % (np.std(Tmin),np.std(Tmax)))
+        print ('avg min,max=%f %f' % (sum(Tmin)/len(Tmin),sum(Tmax)/len(Tmax)))
+        legend1=("min avg: %.3f std: %.4f" % (sum(Tmin)/len(Tmin),np.std(Tmin)) )
+        plt.plot(time,Tmin,label=legend1)
+        legend1=("max avg: %.3f std: %.4f" % (sum(Tmax)/len(Tmax),np.std(Tmax)) )
+        plt.plot(time,Tmax,label=legend1)
+        plt.axis([min(time), max(min(time)+200,max(time)+10), 0,400])
+        plt.grid(True)
+        plt.legend()
+        plt.savefig("T.png")
     
 
     plt.show()

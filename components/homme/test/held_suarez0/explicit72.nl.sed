@@ -12,9 +12,9 @@ tstep_type    = 5
 !tstep_type    = 9
 qsize         = 1
 theta_advect_form = 1
-hv_ref_profiles=1
-hv_theta_correction=1
 pgrad_correction=1
+hv_ref_profiles=2
+hv_theta_correction=1
 limiter_option = 9
 rsplit        = 3
 restartfreq   =  1
@@ -32,7 +32,7 @@ nu_top = 2.5e5  ! default 2.5e5    HSV1 1.5ok.  2.0 bad
                 ! timesplit version.  5e5 works.  10e5 crashes.  
 hypervis_scaling = 3  ! 0 for constant coeff HV
 hypervis_order = 2
-hypervis_subcycle = 3
+hypervis_subcycle = 1
 hypervis_subcycle_tom = 1
 /
 &vert_nl
