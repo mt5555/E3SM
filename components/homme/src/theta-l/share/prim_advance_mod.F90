@@ -1769,6 +1769,7 @@ contains
         enddo
 
         ! check for layer spacing <= 1m
+        if (scale3 /= 0) then
         do k=1,nlev
         do j=1,np
         do i=1,np
@@ -1780,6 +1781,7 @@ contains
         enddo
         enddo
         enddo
+        endif
 #endif
      endif
      if (scale3 /= 0) then
