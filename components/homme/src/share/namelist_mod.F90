@@ -73,7 +73,6 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
     disable_diagnostics, & ! use to disable diagnostics for timing reasons
     psurf_vis,    &
     hypervis_order,       &
-    hypervis_power,       &
     hypervis_subcycle,    &
     hypervis_subcycle_tom,&
     hypervis_subcycle_q,  &
@@ -270,7 +269,6 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
       dcmip16_pbl_type,&
       psurf_vis,     &
       hypervis_order,    &
-      hypervis_power,    &
       hypervis_subcycle, &
       hypervis_subcycle_tom, &
       hypervis_subcycle_q, &
@@ -751,7 +749,6 @@ end if
     call MPI_bcast(disable_diagnostics,1,MPIlogical_t,par%root,par%comm,ierr)
     call MPI_bcast(psurf_vis,1,MPIinteger_t   ,par%root,par%comm,ierr)
     call MPI_bcast(hypervis_order,1,MPIinteger_t   ,par%root,par%comm,ierr)
-    call MPI_bcast(hypervis_power,1,MPIreal_t   ,par%root,par%comm,ierr)
     call MPI_bcast(hypervis_scaling,1,MPIreal_t   ,par%root,par%comm,ierr)
     call MPI_bcast(hypervis_subcycle,1,MPIinteger_t   ,par%root,par%comm,ierr)
     call MPI_bcast(hypervis_subcycle_tom,1,MPIinteger_t   ,par%root,par%comm,ierr)
@@ -1008,18 +1005,7 @@ end if
       laplacian_rigid_factor = rrearth
     end if
 
-!logic around different hyperviscosity options
-    if (hypervis_power /= 0) then
-      if (hypervis_scaling /= 0) then
-        print *,'Both hypervis_power and hypervis_scaling are nonzero.'
-        print *,'(1) Set hypervis_power=1, hypervis_scaling=0 for HV based on an element area.'
-        print *,'(2) Set hypervis_power=0 and hypervis_scaling=1 for HV based on a tensor.'
-        print *,'(3) Set hypervis_power=0 and hypervis_scaling=0 for constant HV.'
-          call abortmp("Error: hypervis_power>0 and hypervis_scaling>0")
-      endif
-    endif
-
-    if (topology == "plane" .and. .not. (hypervis_power == 0 .and. hypervis_scaling > 0)) then
+    if (topology == "plane" .and. hypervis_scaling==0) then
       call abortmp("Error: planar grids require the use of tensor HV")
     end if
 
@@ -1186,11 +1172,7 @@ end if
        write(iulog,*)"readnl: runtype       = ",runtype
        write(iulog,*)"readnl: se_fv_phys_remap_alg = ",se_fv_phys_remap_alg
 
-       if (hypervis_power /= 0)then
-          write(iulog,*)"Variable scalar hyperviscosity: hypervis_power=",hypervis_power
-          write(iulog,*)"max_hypervis_courant = ", max_hypervis_courant
-          write(iulog,*)"Equivalent ne in fine region = ", fine_ne
-       elseif(hypervis_scaling /=0)then
+       if(hypervis_scaling /=0)then
           write(iulog,*)"Tensor hyperviscosity:  hypervis_scaling=",hypervis_scaling
        else
           write(iulog,*)"Constant (hyper)viscosity used."
