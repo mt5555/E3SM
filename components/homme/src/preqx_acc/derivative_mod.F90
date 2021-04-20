@@ -58,9 +58,11 @@ contains
         do j = 1 , np
           do i = 1 , np
             if (var_coef) then
+               if (hypervis_scaling /=0 ) then
                 oldgrads = grads(i,j,:,k,ie)
                 grads(i,j,1,k,ie) = sum(oldgrads(:)*elem(ie)%tensorVisc(i,j,1,:))
                 grads(i,j,2,k,ie) = sum(oldgrads(:)*elem(ie)%tensorVisc(i,j,2,:))
+              endif
             endif
           enddo
         enddo
