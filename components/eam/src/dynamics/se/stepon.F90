@@ -28,6 +28,7 @@ module stepon
    use scamMod,        only: use_iop, doiopupdate, single_column, &
                              setiopupdate, readiopdata
    use element_mod,    only: element_t
+   use element_ops,    only: get_field_i,get_field
    use shr_const_mod,       only: SHR_CONST_PI
 
    implicit none
@@ -148,6 +149,8 @@ subroutine stepon_init(dyn_in, dyn_out )
   call addfld('DYN_V'    ,(/ 'lev' /), 'A', 'm/s',  'Meridional Velocity',    gridname='GLL')
   call addfld('DYN_OMEGA',(/ 'lev' /), 'A', 'Pa/s', 'Vertical Velocity',      gridname='GLL' )
   call addfld('DYN_PS'   ,horiz_only,  'A', 'Pa',   'Surface pressure',       gridname='GLL')
+  call addfld('DYN_Z3'  ,(/ 'ilev' /), 'A', 'm',   'Geopotential Height (above sea level)',gridname='GLL')
+  call addfld('DYN_PNH'  ,(/ 'ilev' /), 'A', 'm',   'nonhydrostatic pressure',gridname='GLL')
 
 end subroutine stepon_init
 
@@ -412,6 +415,21 @@ subroutine stepon_run2(phys_state, phys_tend, dyn_in, dyn_out )
          call outfld('DIV',tmp_dyn(1,1,1,ie),npsq,ie)
       enddo
    endif
+
+   if (hist_fld_active('DYN_Z3')) then
+      do ie=1,nelemd
+         call get_field_i(dyn_in%elem(ie),'geo_i',p_i(:,:,:),hvcoord,tl_f)
+         call outfld('DYN_Z3',p_i,npsq,ie)
+      enddo
+   endif
+   if (hist_fld_active('DYN_PNH')) then
+      do ie=1,nelemd
+         call get_field_i(dyn_in%elem(ie),'pnh_i',p_i(:,:,:),hvcoord,tl_f)
+         call outfld('DYN_PNH',p_i,npsq,ie)
+      enddo
+   endif
+
+
    if (hist_fld_active('FU') .or. hist_fld_active('FV') ) then
       do ie=1,nelemd
          do j=1,np
