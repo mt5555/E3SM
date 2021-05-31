@@ -583,6 +583,10 @@ subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle,p2filt,xgl
   real (kind=real_kind) :: phis4(np)
   integer :: nt,ie,ic,i,j
 
+  ! p2filt=1   apply p2 filter after final iteration
+  ! p2filt=2   apply p2 filter before each iteration, and after final iteration
+  ! p2filt=3   apply p2 filter before laplace iteraitons
+  ! p2filt=4   apply p2 filter before every laplace iteraiton
   if (p2filt>=1 .and. np/=4) then
      call abortmp('ERROR: topo smoothing p2 filter option only supported with np==4')
   endif
@@ -619,9 +623,27 @@ subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle,p2filt,xgl
      pmax(ie)=maxval(pstens(:,:,ie))
   enddo
 
+  if (p2filt==3) then
+     ! apply initial p2 filter 
+     do ie=nets,nete
+        do i=1,np
+           phis4=phis(i,:,ie)
+           phis(i,2,ie)=(xgll(3)*phis4(1)+phis4(2)+phis4(3)+xgll(2)*phis4(4))/2
+           phis(i,3,ie)=(xgll(2)*phis4(1)+phis4(2)+phis4(3)+xgll(3)*phis4(4))/2
+        enddo
+        do j=1,np
+           phis4=phis(:,j,ie)
+           phis(2,j,ie)=(xgll(3)*phis4(1)+phis4(2)+phis4(3)+xgll(2)*phis4(4))/2
+           phis(3,j,ie)=(xgll(2)*phis4(1)+phis4(2)+phis4(3)+xgll(3)*phis4(4))/2
+        enddo
+     end do
+  endif
+  
+
+
   do ic=1,numcycle
 
-     if (p2filt>=1) then
+     if (p2filt==2 .or. p2filt==4) then
         ! apply p2 filter before laplace
         do ie=nets,nete
            do i=1,np
@@ -686,7 +708,7 @@ subroutine smooth_phis(phis,elem,hybrid,deriv,nets,nete,minf,numcycle,p2filt,xgl
 
   enddo
 
-  if (p2filt==2) then
+  if (p2filt==2 .or. p2filt==1) then
      ! apply final p2 filter 
      do ie=nets,nete
         do i=1,np
