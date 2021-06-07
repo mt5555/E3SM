@@ -20,7 +20,7 @@ module model_init_mod
   use dimensions_mod,     only: np,nlev,nlevp
   use element_ops,        only: set_theta_ref
   use element_state,      only: timelevels, nu_scale_top, nlev_tom
-  use viscosity_mod,      only: make_c0_vector
+  use viscosity_mod,      only: make_c0_vector, make_c0
   use kinds,              only: real_kind,iulog
   use control_mod,        only: qsplit,theta_hydrostatic_mode, hv_ref_profiles, &
        hv_theta_correction, tom_sponge_start
@@ -45,6 +45,7 @@ contains
     ! local variables
     integer :: ie,t,k
     real (kind=real_kind) :: gradtemp(np,np,2,nets:nete)
+    real (kind=real_kind) :: tempg(np,np,nets:nete)
     real (kind=real_kind) :: temp(np,np,nlev),ps_ref(np,np)
     real (kind=real_kind) :: ptop_over_press
 
@@ -77,6 +78,7 @@ contains
          elem(ie)%derived%dp_ref(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
               (hvcoord%hybi(k+1)-hvcoord%hybi(k))*ps_ref(:,:)
       enddo
+      elem(ie)%derived%dp_ref2 =  elem(ie)%derived%dp_ref  ! save a copy, for some laplace_p options
       call set_theta_ref(hvcoord,elem(ie)%derived%dp_ref,elem(ie)%derived%theta_ref)
       temp=elem(ie)%derived%theta_ref*elem(ie)%derived%dp_ref
       call phi_from_eos(hvcoord,elem(ie)%state%phis,&
@@ -101,11 +103,36 @@ contains
             temp(:,:,k) = hvcoord%hyam(k)*hvcoord%ps0 + hvcoord%hybm(k)*ps_ref(:,:)
             elem(ie)%derived%lap_p_wk(:,:,k)=laplace_sphere_wk(temp(:,:,k),deriv,elem(ie),&
                  var_coef=.false.)
+
+            elem(ie)%derived%grad_p(:,:,:,k)=gradient_sphere(temp(:,:,k),deriv,elem(ie)%Dinv)
          enddo
       endif
 
 
     enddo 
+
+    if (hv_theta_correction==3 .or. hv_theta_correction==8) then
+    do k=1,nlev
+       do ie=nets,nete
+          ! weak laplace has mass matrix built in. remove it, so we can call make_C0
+          tempg(:,:,ie) = elem(ie)%derived%lap_p_wk(:,:,k)/elem(ie)%spheremp(:,:)
+       enddo
+       call make_C0(tempg,elem,hybrid,nets,nete)
+       do ie=nets,nete
+          temp(:,:,k)=laplace_sphere_wk(tempg(:,:,ie),deriv,elem(ie),var_coef=.true.)
+          tempg(:,:,ie) = temp(:,:,k)/elem(ie)%spheremp(:,:)
+       enddo
+       call make_C0(tempg,elem,hybrid,nets,nete)
+       do ie=nets,nete
+          elem(ie)%derived%biharm_p(:,:,k)=tempg(:,:,ie)
+       enddo
+    enddo
+    endif
+
+    
+
+    
+
 
 
     ! unit test for analytic jacobian and tri-diag solve used by IMEX methods

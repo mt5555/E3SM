@@ -16,7 +16,7 @@ use dimensions_mod, only : np, nlev,nlevp
 use hybrid_mod, only : hybrid_t
 use parallel_mod, only : parallel_t
 use element_mod, only : element_t
-use derivative_mod, only : derivative_t, laplace_sphere_wk, vlaplace_sphere_wk
+use derivative_mod, only : derivative_t, laplace_sphere_wk, vlaplace_sphere_wk, laplace_sphere_wk_p
 use edgetype_mod, only : EdgeBuffer_t, EdgeDescriptor_t
 use edge_mod, only : edgevpack_nlyr, edgevunpack_nlyr
 
@@ -92,12 +92,21 @@ endif
 
    do ie=nets,nete
 
+      if (hv_theta_correction==7 .or. hv_theta_correction==4) then
+         stens(:,:,:,2,ie)=laplace_sphere_wk_p(elem(ie)%state%vtheta_dp(:,:,:,nt),&
+              deriv,elem(ie),var_coef=var_coef1,hv_theta_correction=hv_theta_correction)
+      endif
 
       do k=1,nlev
          stens(:,:,k,1,ie)=laplace_sphere_wk(elem(ie)%state%dp3d(:,:,k,nt),&
               deriv,elem(ie),var_coef=var_coef1)
+
+         if (hv_theta_correction==7 .or. hv_theta_correction==4) then
+            ! computed above
+         else
          stens(:,:,k,2,ie)=laplace_sphere_wk(elem(ie)%state%vtheta_dp(:,:,k,nt),&
               deriv,elem(ie),var_coef=var_coef1)
+         endif
          stens(:,:,k,3,ie)=laplace_sphere_wk(elem(ie)%state%w_i(:,:,k,nt),&
               deriv,elem(ie),var_coef=var_coef1)
          stens(:,:,k,4,ie)=laplace_sphere_wk(elem(ie)%state%phinh_i(:,:,k,nt),&
@@ -106,7 +115,8 @@ endif
               var_coef=var_coef1,nu_ratio=nu_ratio1)
       enddo
 
-      if (hv_theta_correction>0) then
+
+      if (hv_theta_correction==1) then
          p_i(:,:,1) = elem(ie)%state%vtheta_dp(:,:,1,nt)
          p_i(:,:,nlevp) = elem(ie)%state%vtheta_dp(:,:,nlev,nt)
          do k=2,nlev
@@ -114,7 +124,7 @@ endif
                  elem(ie)%state%vtheta_dp(:,:,k-1,nt))/2
          enddo
          do k=1,nlev
-            tmp(:,:) = (p_i(:,:,k+1)-p_i(:,:,k))/elem(ie)%derived%dp_ref(:,:,k)
+            tmp(:,:) = (p_i(:,:,k+1)-p_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
             tmp(:,:)=tmp(:,:) / (1 + abs(tmp(:,:))/hv_theta_thresh)
             stens(:,:,k,2,ie)=stens(:,:,k,2,ie)-tmp(:,:)*elem(ie)%derived%lap_p_wk(:,:,k)
          enddo
@@ -140,14 +150,30 @@ endif
       call edgeVunpack_nlyr(edgebuf,elem(ie)%desc,stens(1,1,1,1,ie),ssize,kptr,nlyr_tot)
 
 
-      
+      if (hv_theta_correction==5) then
+         ! original: tmp(:,:)=rspheremv(:,:)*stens(:,:,k,2,ie)
+         p_i(:,:,1) =    rspheremv(:,:)*stens(:,:,1,2,ie)
+         p_i(:,:,nlevp) = rspheremv(:,:)*stens(:,:,nlev,2,ie)
+         do k=2,nlev
+            p_i(:,:,k)=rspheremv(:,:)*(stens(:,:,k,2,ie)+stens(:,:,k-1,2,ie))/2
+         enddo
+      endif
+         
       ! apply inverse mass matrix, then apply laplace again
       do k=1,nlev
          tmp(:,:)=rspheremv(:,:)*stens(:,:,k,1,ie)
          stens(:,:,k,1,ie)=laplace_sphere_wk(tmp,deriv,elem(ie),var_coef=.true.)
 
-         tmp(:,:)=rspheremv(:,:)*stens(:,:,k,2,ie)
-         stens(:,:,k,2,ie)=laplace_sphere_wk(tmp,deriv,elem(ie),var_coef=.true.)
+
+         if (hv_theta_correction==5) then
+            tmp(:,:) = (p_i(:,:,k+1)-p_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
+            tmp(:,:)=tmp(:,:) / (1 + abs(tmp(:,:))/hv_theta_thresh)
+            tmp2(:,:)=rspheremv(:,:)*stens(:,:,k,2,ie) - tmp(:,:)*elem(ie)%derived%lap_p_wk(:,:,k)
+            stens(:,:,k,2,ie)=laplace_sphere_wk(tmp2,deriv,elem(ie),var_coef=.true.)            
+         else
+            tmp(:,:)=rspheremv(:,:)*stens(:,:,k,2,ie)
+            stens(:,:,k,2,ie)=laplace_sphere_wk(tmp,deriv,elem(ie),var_coef=.true.)
+         endif
 
          tmp(:,:)=rspheremv(:,:)*stens(:,:,k,3,ie)
          stens(:,:,k,3,ie)=laplace_sphere_wk(tmp,deriv,elem(ie),var_coef=.true.)

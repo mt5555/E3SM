@@ -6,7 +6,7 @@
 module derivative_mod_base
 
   use kinds,          only : real_kind, longdouble_kind
-  use dimensions_mod, only : np, nelemd, nlev
+  use dimensions_mod, only : np, nelemd, nlev, nlevp
   use quadrature_mod, only : quadrature_t, gauss, gausslobatto,legendre, jacobi
   use parallel_mod,   only : abortmp
   use element_mod,    only : element_t
@@ -78,6 +78,7 @@ private
 ! public  :: curl_sphere_wk_testcontra  ! not coded
   public  :: divergence_sphere_wk
   public  :: laplace_sphere_wk
+ public  :: laplace_sphere_wk_p
   public  :: vlaplace_sphere_wk
   public  :: vlaplace_sphere_wk_contra
   public  :: vlaplace_sphere_wk_cartesian
@@ -1114,7 +1115,97 @@ contains
 
   end function laplace_sphere_wk
 
-!DIR$ ATTRIBUTES FORCEINLINE :: vlaplace_sphere_wk
+
+
+
+
+!DIR$ ATTRIBUTES FORCEINLINE :: laplace_sphere_wk
+  function laplace_sphere_wk_p(s,deriv,elem,var_coef,hv_theta_correction) result(laplace)
+!
+!   input:  s = scalar
+!   ouput:  -< grad(PHI), grad(s) >   = weak divergence of grad(s)
+!     note: for this form of the operator, grad(s) does not need to be made C0
+!            
+    real(kind=real_kind), intent(in) :: s(np,np,nlev)
+    logical, intent(in) :: var_coef
+    type (derivative_t), intent(in) :: deriv
+    type (element_t), intent(in) :: elem
+    real(kind=real_kind)             :: laplace(np,np,nlev)
+    real(kind=real_kind)             :: p_i(np,np,nlevp)
+    real(kind=real_kind)             :: u_i(np,np,2,nlevp)
+    integer i,j,k, hv_theta_correction
+
+    ! Local
+    real(kind=real_kind) :: tmp(np,np)
+    real(kind=real_kind) :: g2(np,np,2,nlev)
+    real(kind=real_kind) :: g3(np,np,2,nlev)
+    real(kind=real_kind) :: oldgrads(np,np,2)
+
+    ! compute grad_p(s)
+    p_i(:,:,1) = s(:,:,1)
+    p_i(:,:,nlevp) = s(:,:,nlev)
+    do k=2,nlev
+       p_i(:,:,k)=(s(:,:,k) + s(:,:,k-1))/2
+    enddo
+    do k=1,nlev
+       tmp(:,:) = (p_i(:,:,k+1)-p_i(:,:,k))/elem%derived%dp_ref2(:,:,k)
+
+       g2(:,:,:,k)=gradient_sphere(s(:,:,k),deriv,elem%Dinv)
+       g2(:,:,1,k)=g2(:,:,1,k)-tmp(:,:)*elem%derived%grad_p(:,:,1,k)
+       g2(:,:,2,k)=g2(:,:,2,k)-tmp(:,:)*elem%derived%grad_p(:,:,2,k)
+    enddo
+
+    if (var_coef) then
+       if (hypervis_scaling /=0 ) then
+          ! tensor hv, (3)
+          do k=1,nlev
+             oldgrads=g2(:,:,:,k)
+             do j=1,np
+                do i=1,np
+                   g2(i,j,1,k) = oldgrads(i,j,1)*elem%tensorVisc(i,j,1,1) + &
+                        oldgrads(i,j,2)*elem%tensorVisc(i,j,1,2)
+                   g2(i,j,2,k) = oldgrads(i,j,1)*elem%tensorVisc(i,j,2,1) + &
+                        oldgrads(i,j,2)*elem%tensorVisc(i,j,2,2)
+                end do
+             end do
+          enddo
+       else
+          ! do nothing: constant coefficient viscsoity
+       endif
+    endif
+
+    if (hv_theta_correction==4) then
+       ! div grad_p
+       do k=1,nlev
+          laplace(:,:,k)=divergence_sphere_wk(g2(:,:,:,k),deriv,elem)
+       enddo
+    else
+       ! div_p grad_p
+    u_i(:,:,:,1) = g2(:,:,:,1)
+    u_i(:,:,:,nlevp) = g2(:,:,:,nlev)
+    do k=2,nlev
+       u_i(:,:,:,k)=(g2(:,:,:,k) + g2(:,:,:,k-1))/2
+    enddo
+    do k=1,nlev
+       g3(:,:,1,k) = (u_i(:,:,1,k+1)-u_i(:,:,1,k))/elem%derived%dp_ref2(:,:,k)
+       g3(:,:,2,k) = (u_i(:,:,2,k+1)-u_i(:,:,2,k))/elem%derived%dp_ref2(:,:,k)
+
+       tmp(:,:) = g3(:,:,1,k)*elem%derived%grad_p(:,:,1,k) + &
+            g3(:,:,2,k)*elem%derived%grad_p(:,:,2,k) 
+
+       laplace(:,:,k)=divergence_sphere_wk(g2(:,:,:,k),deriv,elem) - elem%spheremp(:,:)*tmp(:,:)
+    enddo
+    endif
+
+
+
+  end function laplace_sphere_wk_p
+
+
+
+
+
+  !DIR$ ATTRIBUTES FORCEINLINE :: vlaplace_sphere_wk
   function vlaplace_sphere_wk(v,deriv,elem,var_coef,nu_ratio) result(laplace)
 !
 !   input:  v = vector in lat-lon coordinates
