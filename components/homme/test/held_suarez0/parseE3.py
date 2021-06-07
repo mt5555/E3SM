@@ -85,7 +85,7 @@ try:
         mumax.extend([float(str[3])])
 
         # look for TS. return all zeros if we find ps first:
-        str = lookfor1(sys.stdin,"TS=","ps=",0)
+        str = lookfor1(sys.stdin,"TBOT=","ps=",0)
         str=str.split()
         Tmin.extend([float(str[0])])
         Tmax.extend([float(str[1])])

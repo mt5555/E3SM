@@ -20,7 +20,7 @@ module model_init_mod
   use dimensions_mod,     only: np,nlev,nlevp
   use element_ops,        only: set_theta_ref
   use element_state,      only: timelevels, nu_scale_top, nlev_tom
-  use viscosity_mod,      only: make_c0_vector
+  use viscosity_mod,      only: make_c0_vector, make_c0
   use kinds,              only: real_kind,iulog
   use control_mod,        only: qsplit,theta_hydrostatic_mode, hv_ref_profiles, &
        hv_theta_correction
@@ -45,6 +45,7 @@ contains
     ! local variables
     integer :: ie,t,k
     real (kind=real_kind) :: gradtemp(np,np,2,nets:nete)
+    real (kind=real_kind) :: tempg(np,np,nets:nete)
     real (kind=real_kind) :: temp(np,np,nlev),ps_ref(np,np)
     real (kind=real_kind) :: ptop_over_press
 
@@ -106,6 +107,29 @@ contains
 
 
     enddo 
+
+    if (hv_theta_correction==2 .or. hv_theta_correction==3) then
+    do k=1,nlev
+       do ie=nets,nete
+          ! weak laplace has mass matrix built in. remove it, so we can call make_C0
+          tempg(:,:,ie) = elem(ie)%derived%lap_p_wk(:,:,k)/elem(ie)%spheremp(:,:)
+       enddo
+       call make_C0(tempg,elem,hybrid,nets,nete)
+       do ie=nets,nete
+          temp(:,:,k)=laplace_sphere_wk(tempg(:,:,ie),deriv,elem(ie),var_coef=.true.)
+          tempg(:,:,ie) = temp(:,:,k)/elem(ie)%spheremp(:,:)
+       enddo
+       call make_C0(tempg,elem,hybrid,nets,nete)
+       do ie=nets,nete
+          elem(ie)%derived%biharm_p(:,:,k)=tempg(:,:,ie)
+       enddo
+    enddo
+    endif
+
+    
+
+    
+
 
 
     ! unit test for analytic jacobian used by IMEX methods

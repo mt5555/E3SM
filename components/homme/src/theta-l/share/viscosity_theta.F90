@@ -114,7 +114,7 @@ endif
               var_coef=var_coef1,nu_ratio=nu_ratio1)
       enddo
 
-      if (hv_theta_correction>0) then
+      if (hv_theta_correction==1) then
          p_i(:,:,1) = elem(ie)%state%vtheta_dp(:,:,1,nt)
          p_i(:,:,nlevp) = elem(ie)%state%vtheta_dp(:,:,nlev,nt)
          do k=2,nlev

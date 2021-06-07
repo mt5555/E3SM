@@ -18,7 +18,7 @@ module prim_advance_mod
   use control_mod,        only: dcmip16_mu, dcmip16_mu_s, hypervis_order, hypervis_subcycle,&
     integration, nu, nu_div, nu_p, nu_s, nu_top, prescribed_wind, qsplit, rsplit, test_case,&
     theta_hydrostatic_mode, tstep_type, theta_advect_form, hypervis_subcycle_tom, pgrad_correction,&
-    vtheta_thresh
+    vtheta_thresh, hv_theta_correction, hv_theta_thresh
   use derivative_mod,     only: derivative_t, divergence_sphere, gradient_sphere, laplace_sphere_wk,&
     laplace_z, vorticity_sphere, vlaplace_sphere_wk 
   use derivative_mod,     only: subcell_div_fluxes, subcell_dss_fluxes
@@ -581,11 +581,11 @@ contains
   real (kind=real_kind) :: heating(np,np,nlev)
   real (kind=real_kind) :: exner(np,np,nlev)
   real (kind=real_kind) :: pnh(np,np,nlevp)    
-  real (kind=real_kind) :: temp(np,np,nlev)    
+  real (kind=real_kind) :: temp(np,np,nlev)    ,dz(np,np)
   real (kind=real_kind) :: temp_i(np,np,nlevp)    
   real (kind=real_kind) :: dt,xfac
 
-  integer :: l1p,l2p,l1n,l2n,l
+  integer :: l1p,l2p,l1n,l2n,l, laplace_p_iter
   call t_startf('advance_hypervis')
 
 #ifdef HOMMEXX_BFB_TESTING
@@ -772,7 +772,74 @@ contains
                 +stens(:,:,k,2,ie)
         enddo
 
+        ! apply laplace_p correction 
+        !    stens(:,:,k,2,ie)=-nu  *stens(:,:,k,2,ie) ! theta
+        if (hv_theta_correction==2) then
+           laplace_p_iter=2
+           do l=1,laplace_p_iter
 
+           temp_i(:,:,1) = elem(ie)%state%vtheta_dp(:,:,1,nt)
+           temp_i(:,:,nlevp) = elem(ie)%state%vtheta_dp(:,:,nlev,nt)
+           do k=2,nlev
+              temp_i(:,:,k)=(elem(ie)%state%vtheta_dp(:,:,k,nt) +&
+                   elem(ie)%state%vtheta_dp(:,:,k-1,nt))/2
+           enddo
+           do k=1,nlev
+              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref(:,:,k)
+              dz(:,:)=dz(:,:) / (1 + abs(dz(:,:))/hv_theta_thresh)
+              elem(ie)%state%vtheta_dp(:,:,k,nt) = elem(ie)%state%vtheta_dp(:,:,k,nt) + &
+                   nu*(dt/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
+           enddo
+           enddo
+        endif
+
+        if (hv_theta_correction==3) then
+           laplace_p_iter=1
+           do l=1,laplace_p_iter
+
+           temp_i(:,:,1) = elem(ie)%state%vtheta_dp(:,:,1,nt)
+           temp_i(:,:,nlevp) = elem(ie)%state%vtheta_dp(:,:,nlev,nt)
+           do k=2,nlev
+              temp_i(:,:,k)=(elem(ie)%state%vtheta_dp(:,:,k,nt) +&
+                   elem(ie)%state%vtheta_dp(:,:,k-1,nt))/2
+           enddo
+           do k=1,nlev
+              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref(:,:,k)
+              dz(:,:)=dz(:,:) / (1 + abs(dz(:,:))/hv_theta_thresh)
+              temp(:,:,k) = elem(ie)%state%vtheta_dp(:,:,k,nt) + &
+                   nu*(dt/2/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
+
+           enddo
+
+           temp_i(:,:,1) = temp(:,:,1)
+           temp_i(:,:,nlevp) = temp(:,:,nlev)
+           do k=2,nlev
+              temp_i(:,:,k)=(temp(:,:,k) + temp(:,:,k-1))/2
+           enddo
+           do k=1,nlev
+              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref(:,:,k)
+              dz(:,:)=dz(:,:) / (1 + abs(dz(:,:))/hv_theta_thresh)
+              temp(:,:,k) = elem(ie)%state%vtheta_dp(:,:,k,nt) + &
+                   nu*(dt/2/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
+           enddo
+
+           temp_i(:,:,1) = temp(:,:,1)
+           temp_i(:,:,nlevp) = temp(:,:,nlev)
+           do k=2,nlev
+              temp_i(:,:,k)=(temp(:,:,k) + temp(:,:,k-1))/2
+           enddo
+           do k=1,nlev
+              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref(:,:,k)
+              dz(:,:)=dz(:,:) / (1 + abs(dz(:,:))/hv_theta_thresh)
+              elem(ie)%state%vtheta_dp(:,:,k,nt) = elem(ie)%state%vtheta_dp(:,:,k,nt) + &
+                   nu*(dt/2/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
+           enddo
+
+
+
+           enddo
+        endif
+        
 
 
      enddo ! ie
