@@ -122,7 +122,7 @@ endif
                  elem(ie)%state%vtheta_dp(:,:,k-1,nt))/2
          enddo
          do k=1,nlev
-            tmp(:,:) = (p_i(:,:,k+1)-p_i(:,:,k))/elem(ie)%derived%dp_ref(:,:,k)
+            tmp(:,:) = (p_i(:,:,k+1)-p_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
             tmp(:,:)=tmp(:,:) / (1 + abs(tmp(:,:))/hv_theta_thresh)
             stens(:,:,k,2,ie)=stens(:,:,k,2,ie)-tmp(:,:)*elem(ie)%derived%lap_p_wk(:,:,k)
          enddo

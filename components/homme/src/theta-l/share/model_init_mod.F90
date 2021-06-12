@@ -82,6 +82,8 @@ contains
       temp=elem(ie)%derived%theta_ref*elem(ie)%derived%dp_ref
       call phi_from_eos(hvcoord,elem(ie)%state%phis,&
            temp,elem(ie)%derived%dp_ref,elem(ie)%derived%phi_ref)
+      elem(ie)%derived%dp_ref2=elem(ie)%derived%dp_ref
+
       if (hv_ref_profiles==0) then
          ! keep PHI profile, but dont use theta and dp:
          elem(ie)%derived%theta_ref=0
@@ -91,8 +93,24 @@ contains
          ! keep all profiles
       endif
       if (hv_ref_profiles==2) then
-         ! keep only dp_ref
+         ! keep only dp_ref, phi_ref
          elem(ie)%derived%theta_ref=0
+      endif
+      if (hv_ref_profiles==3) then
+         ! 0 + disable phi_ref
+         elem(ie)%derived%theta_ref=0
+         elem(ie)%derived%dp_ref=0
+         elem(ie)%derived%phi_ref=0
+      endif
+      if (hv_ref_profiles==4) then
+         ! 2 + disable phi_ref
+         elem(ie)%derived%theta_ref=0
+         elem(ie)%derived%phi_ref=0
+      endif
+      if (hv_ref_profiles==5) then
+         ! 2 + disable dp_ref
+         elem(ie)%derived%theta_ref=0
+         elem(ie)%derived%dp_ref=0
       endif
 
       if (hv_theta_correction/=0) then

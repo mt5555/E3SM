@@ -629,8 +629,18 @@ contains
              elem(ie)%derived%theta_ref(:,:,:)
         elem(ie)%state%phinh_i(:,:,:,nt)=elem(ie)%state%phinh_i(:,:,:,nt)-&
              elem(ie)%derived%phi_ref(:,:,:)
+
         elem(ie)%state%dp3d(:,:,:,nt)=elem(ie)%state%dp3d(:,:,:,nt)-&
              elem(ie)%derived%dp_ref(:,:,:)
+
+#define USE_DPHI
+#ifdef USE_DPHI
+        ! also switch to dphi
+        temp_i=elem(ie)%state%phinh_i(:,:,:,nt)
+        do k=1,nlev
+           elem(ie)%state%phinh_i(:,:,k,nt)=temp_i(:,:,k+1)-temp_i(:,:,k)
+        enddo
+#endif
      enddo
      
      call biharmonic_wk_theta(elem,stens,vtens,deriv,edge_g,hybrid,nt,nets,nete)
@@ -639,8 +649,10 @@ contains
         !add ref state back
         elem(ie)%state%vtheta_dp(:,:,:,nt)=elem(ie)%state%vtheta_dp(:,:,:,nt)+&
              elem(ie)%derived%theta_ref(:,:,:)
+#ifndef USE_DPHI
         elem(ie)%state%phinh_i(:,:,:,nt)=elem(ie)%state%phinh_i(:,:,:,nt)+&
              elem(ie)%derived%phi_ref(:,:,:)
+#endif
         elem(ie)%state%dp3d(:,:,:,nt)=elem(ie)%state%dp3d(:,:,:,nt)+&
              elem(ie)%derived%dp_ref(:,:,:)
         
@@ -757,6 +769,8 @@ contains
 #endif
 
         do k=1,nlev
+
+
            elem(ie)%state%v(:,:,:,k,nt)=elem(ie)%state%v(:,:,:,k,nt) + &
                 vtens(:,:,:,k,ie)
            elem(ie)%state%w_i(:,:,k,nt)=elem(ie)%state%w_i(:,:,k,nt) &
@@ -771,6 +785,16 @@ contains
            elem(ie)%state%vtheta_dp(:,:,k,nt)=elem(ie)%state%vtheta_dp(:,:,k,nt) &
                 +stens(:,:,k,2,ie)
         enddo
+#ifdef USE_DPHI
+        ! scan back to phi
+        do k=nlev,1,-1
+           elem(ie)%state%phinh_i(:,:,k,nt)=elem(ie)%state%phinh_i(:,:,k+1,nt)-&
+                elem(ie)%state%phinh_i(:,:,k,nt)
+        enddo
+       ! add ref state back
+        elem(ie)%state%phinh_i(:,:,:,nt)=elem(ie)%state%phinh_i(:,:,:,nt)+&
+             elem(ie)%derived%phi_ref(:,:,:)
+#endif
 
         ! apply laplace_p correction 
         !    stens(:,:,k,2,ie)=-nu  *stens(:,:,k,2,ie) ! theta
@@ -785,7 +809,7 @@ contains
                    elem(ie)%state%vtheta_dp(:,:,k-1,nt))/2
            enddo
            do k=1,nlev
-              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref(:,:,k)
+              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
               dz(:,:)=dz(:,:) / (1 + abs(dz(:,:))/hv_theta_thresh)
               elem(ie)%state%vtheta_dp(:,:,k,nt) = elem(ie)%state%vtheta_dp(:,:,k,nt) + &
                    nu*(dt/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
@@ -804,7 +828,7 @@ contains
                    elem(ie)%state%vtheta_dp(:,:,k-1,nt))/2
            enddo
            do k=1,nlev
-              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref(:,:,k)
+              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
               dz(:,:)=dz(:,:) / (1 + abs(dz(:,:))/hv_theta_thresh)
               temp(:,:,k) = elem(ie)%state%vtheta_dp(:,:,k,nt) + &
                    nu*(dt/2/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
@@ -817,7 +841,7 @@ contains
               temp_i(:,:,k)=(temp(:,:,k) + temp(:,:,k-1))/2
            enddo
            do k=1,nlev
-              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref(:,:,k)
+              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
               dz(:,:)=dz(:,:) / (1 + abs(dz(:,:))/hv_theta_thresh)
               temp(:,:,k) = elem(ie)%state%vtheta_dp(:,:,k,nt) + &
                    nu*(dt/2/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
@@ -829,7 +853,7 @@ contains
               temp_i(:,:,k)=(temp(:,:,k) + temp(:,:,k-1))/2
            enddo
            do k=1,nlev
-              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref(:,:,k)
+              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
               dz(:,:)=dz(:,:) / (1 + abs(dz(:,:))/hv_theta_thresh)
               elem(ie)%state%vtheta_dp(:,:,k,nt) = elem(ie)%state%vtheta_dp(:,:,k,nt) + &
                    nu*(dt/2/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
