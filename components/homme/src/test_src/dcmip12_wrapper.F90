@@ -538,7 +538,8 @@ subroutine dcmip2012_test3(elem,hybrid,hvcoord,nets,nete)
         call test3_gravity_wave(lon,lat,p,zi(k),zcoords,use_eta,hyai,hybi,u,v,w,T,T_mean,phis,ps,rho,rho_mean,q(1))
         call set_state_i(u,v,w,T,ps,phis,p,zi(k),g, i,j,k,elem(ie),1,nt)
      enddo; enddo; enddo; 
-     call tests_finalize(elem(ie),hvcoord)
+     ! dont enforce hydrostatic balance in height coords:
+     if (hcoord==0) call tests_finalize(elem(ie),hvcoord)
   enddo
 
 end subroutine
