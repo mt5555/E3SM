@@ -20,7 +20,8 @@
   restartfreq       = -1                        ! don't write restart files if < 0
   runtype           = 0                         ! 0 = new run
   tstep             = 1.0                       ! largest timestep
-  rsplit            = 0
+  rsplit            = 1
+  vert_remap_q_alg  = 10
   integration       = 'explicit'                ! explicit time integration
   tstep_type        = 5                         ! 1 => default method
   nu                = 5.0e8                     ! reduced earth hyperviz
@@ -29,7 +30,7 @@
   hypervis_subcycle = 1                         ! 1 = no hyperviz subcycling
   rearth            = 50969.76                  ! scaled earth radius = a/125.0
   omega             = 0.0                       ! earth angular speed = 0.0
-  hcoord            = 0                         ! 0 = pressure, 1 = geometric height
+  hcoord            = 1
 /
 &vert_nl
   vform             = "ccm"                     ! vertical coordinate type "ccm"=hybrid pressure/terrain
@@ -40,7 +41,7 @@
   output_dir        = "./movies/"               ! destination dir for netcdf file
   output_timeunits  = 0,                        ! 1=days, 2=hours, 0=timesteps
   output_frequency  = 360,                      ! steps
-  output_varnames1  ='T','ps','u','v','omega'   ! variables to write to file
+  output_varnames1  ='T','omega','pnh'          ! variables to write to file
   interp_type       = 0                         ! 0=native grid, 1=bilinear
   output_type       ='netcdf'                   ! netcdf or pnetcdf
   num_io_procs      = 16         

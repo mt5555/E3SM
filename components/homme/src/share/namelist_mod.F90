@@ -1025,9 +1025,6 @@ end if
     if (theta_hydrostatic_mode .and. hcoord==1) then
        call abortmp('height coordinate only runs in theta-l NH model')
     endif
-    if (rsplit/=0 .and. hcoord==1) then
-       call abortmp('height coordinate requires rsplit=0')
-    endif
     ftype = se_ftype
 
 #ifdef _PRIM

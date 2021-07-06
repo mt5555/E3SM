@@ -48,7 +48,7 @@ contains
   integer :: ie,i,j,k,np1,nets,nete,np1_qdp
   integer :: q
 
-  real (kind=real_kind), dimension(np,np,nlev)  :: dp,dp_star
+  real (kind=real_kind), dimension(np,np,nlev)  :: dp,dp_star,dz,dz_star
   real (kind=real_kind), dimension(np,np,nlevp) :: phi_ref
   real (kind=real_kind), dimension(np,np,nlev,5)  :: ttmp
 
@@ -77,25 +77,40 @@ contains
      ! update final ps_v
      elem(ie)%state%ps_v(:,:,np1) = hvcoord%hyai(1)*hvcoord%ps0 + &
           sum(elem(ie)%state%dp3d(:,:,:,np1),3)
-     do k=1,nlev
-        if (hcoord==1) then
-           dp(:,:,k) = elem(ie)%state%dp3d(:,:,k,np1)  ! rsplit=0 case
-           ! rsplit=1  we will remap dp3d based on PHI*
-           ! dz       = dz of reference levels
-           ! dz_star  = d(phinh_i) = current level dz
-           ! call remap1(dp3d,np,5,dz_star,dz)   
-           ! then use remap(dp3d) and dp_start to remap everything else
+
+     if (hcoord==1) then
+        if (rsplit==0) then
+           dp(:,:,:) = elem(ie)%state%dp3d(:,:,:,np1)  
+           do k=1,nlev
+              dp_star(:,:,k) = dp(:,:,k) + dt*(elem(ie)%derived%eta_dot_dpdn(:,:,k+1) -&
+                   elem(ie)%derived%eta_dot_dpdn(:,:,k))
+           enddo
         else
+           dp_star(:,:,:) = elem(ie)%state%dp3d(:,:,:,np1)
+           ! need to remap density to compute dp on ref levels
+           ! note: change sign based on usual convention, so dz,dz_star are positive
+           do k=1,nlev
+              dz_star(:,:,k)=elem(ie)%state%phinh_i(:,:,k,np1)-elem(ie)%state%phinh_i(:,:,k+1,np1)
+              dz(:,:,k)=elem(ie)%derived%phi_ref(:,:,k)-elem(ie)%derived%phi_ref(:,:,k+1)
+           enddo
+           dp = dp_star  
+           call remap1(dp,np,1,dz_star,dz)  ! reamp density, conserving rho*dz
+        endif
+     else
+        do k=1,nlev
            dp(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
                 ( hvcoord%hybi(k+1) - hvcoord%hybi(k) )*elem(ie)%state%ps_v(:,:,np1)
-        endif
+        enddo
         if (rsplit==0) then
-           dp_star(:,:,k) = dp(:,:,k) + dt*(elem(ie)%derived%eta_dot_dpdn(:,:,k+1) -&
-                elem(ie)%derived%eta_dot_dpdn(:,:,k))
+           do k=1,nlev
+              dp_star(:,:,k) = dp(:,:,k) + dt*(elem(ie)%derived%eta_dot_dpdn(:,:,k+1) -&
+                   elem(ie)%derived%eta_dot_dpdn(:,:,k))
+           enddo
         else
-           dp_star(:,:,k) = elem(ie)%state%dp3d(:,:,k,np1)
+           dp_star(:,:,:) = elem(ie)%state%dp3d(:,:,:,np1)
         endif
-     enddo
+     endif
+
      
      if (minval(dp_star)<0) then
         do k=1,nlev
@@ -153,11 +168,15 @@ contains
         elem(ie)%state%phinh_i(:,:,:,np1)=&
              elem(ie)%state%phinh_i(:,:,:,np1)+phi_ref(:,:,:)
 
+        if (hcoord==1 .and. rsplit>0) then
+           ! we are remapping to PHI ref levels, so ignore PHI remap done above:
+           elem(ie)%state%phinh_i(:,:,:,np1)=elem(ie)%derived%phi_ref(:,:,:)
+        endif
 
         ! since u changed, update w b.c.:
         elem(ie)%state%w_i(:,:,nlevp,np1) = (elem(ie)%state%v(:,:,1,nlev,np1)*elem(ie)%derived%gradphis(:,:,1) + &
              elem(ie)%state%v(:,:,2,nlev,np1)*elem(ie)%derived%gradphis(:,:,2))/g
-       
+
      endif
 
      ! remap the gll tracers from lagrangian levels (dp_star)  to REF levels dp
@@ -175,9 +194,7 @@ contains
 
      ! reinitialize dp3d after remap
      ! in eulerian rsplit=0 case, also do this just to keep dp3d /ps consistent
-     if (hcoord == 0) then
-        elem(ie)%state%dp3d(:,:,:,np1)=dp(:,:,:)
-     end if
+     elem(ie)%state%dp3d(:,:,:,np1)=dp(:,:,:)
      
   enddo
   call t_stopf('vertical_remap')
