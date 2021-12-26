@@ -100,8 +100,8 @@ subroutine remap1(Qdp,nx,qsize,dp1,dp2,remap_alg)
   logical :: abrtf=.false.
 
   q = remap_alg
-  if ( (q.ne.-1) .and. (q.ne.0) .and. (q.ne.1) .and. (q.ne.10) .and. (q.ne.11) )&
-     call abortmp('Bad remap_alg value. Use -1, 0, 1, 10 or 11.')
+  if ( (q.ne.-1) .and. (q.ne.0) .and. (q.ne.1) .and. (q.ne.10) .and. (q.ne.11) .and. (q.ne.12))&
+     call abortmp('Bad remap_alg value. Use -1, 0, 1, 10, 11 or 12.')
 
   if (remap_alg == -1) then
      call remap1_nofilter(qdp,nx,qsize,dp1,dp2)
@@ -513,6 +513,7 @@ end subroutine remap1_nofilter
 !! remap_alg == 2  means 1st order reconstruction in ghost cells
 !! remap_alg == 10 linear extrapolation with global bounds preservation
 !! remap_alg == 11 linear extrapolation 
+!! remap_alg == 12 linear extrapolation with global bounds preservation for boundary interface values
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 subroutine remap_Q_ppm(Qdp,nx,qsize,dp1,dp2,remap_alg)
   ! remap 1 field
@@ -617,7 +618,7 @@ subroutine remap_Q_ppm(Qdp,nx,qsize,dp1,dp2,remap_alg)
            call linextrap(dpo(2), dpo(1), dpo(0), dpo(-1), ao(2), ao(1), ao(0), ao(-1), 1,ext(1), ext(2))
            call linextrap(dpo(nlev-1), dpo(nlev), dpo(nlev+1), dpo(nlev+2),&
                 ao(nlev-1), ao(nlev), ao(nlev+1), ao(nlev+2), 1, ext(1), ext(2))
-        else if (remap_alg==11) then
+        else if (remap_alg==11 .or. remap_alg==12) then
            call linextrap(dpo(2), dpo(1), dpo(0), dpo(-1), ao(2), ao(1), ao(0), ao(-1), 0,ext(1), ext(2))
            call linextrap(dpo(nlev-1), dpo(nlev), dpo(nlev+1), dpo(nlev+2),&
                 ao(nlev-1), ao(nlev), ao(nlev+1), ao(nlev+2), 0, ext(1), ext(2))
@@ -691,6 +692,7 @@ function compute_ppm( a , dx, remap_alg )    result(coefs)
   ! Hold expressions based on the grid (which are cumbersome).
   real(kind=real_kind) :: dx1, dx2, dx3, dx4, dx5, dx6, dx7, dx8, dx9, dx10
   real(kind=real_kind) :: al, ar                            !Left and right interface values for cell-local limiting
+  real(kind=real_kind) :: mx,mn
   integer :: j
   integer :: indB, indE
 
@@ -706,6 +708,16 @@ function compute_ppm( a , dx, remap_alg )    result(coefs)
     ai(j) = a(j) + dx(4,j) * ( a(j+1) - a(j) ) + dx(5,j) * ( dx(6,j) * ( dx(7,j) - dx(8,j) ) &
          * ( a(j+1) - a(j) ) - dx(9,j) * dma(j+1) + dx(10,j) * dma(j) )
   enddo
+
+  if (remap_alg==12) then
+     ! limit interface values based on global min/max
+     mx=maxval(a(1:nlev))
+     mn=minval(a(1:nlev))
+     if (ai(0)<mn) ai(0)=mn
+     if (ai(0)>mx) ai(0)=mx
+     if (ai(nlev)<mn) ai(nlev)=mn
+     if (ai(nlev)>mx) ai(nlev)=mx
+  endif
 
   ! Stage 3: Compute limited PPM interpolant over each cell in the physical domain
   ! (dimension nlev) using ai on either side and ao within the cell.
