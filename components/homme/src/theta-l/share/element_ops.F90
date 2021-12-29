@@ -60,7 +60,7 @@ module element_ops
   use perf_mod,       only: t_startf, t_stopf, t_barrierf, t_adj_detailf ! _EXTERNAL
   use parallel_mod,   only: abortmp
   use physical_constants, only : p0, Cp, Rgas, Rwater_vapor, Cpwater_vapor, kappa, g, dd_pi, TREF
-  use control_mod,    only: use_moisture, theta_hydrostatic_mode
+  use control_mod,    only: use_moisture, theta_hydrostatic_mode, hcoord
   use eos,            only: pnh_and_exner_from_eos, phi_from_eos
   implicit none
   private
@@ -707,12 +707,26 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   real(real_kind), dimension(np,np,nlev) :: pi
 
   real(real_kind), dimension(np,np,nlev) :: pnh,exner
-  real(real_kind), dimension(np,np,nlevp) :: dpnh_dp_i,phi_i
+  real(real_kind), dimension(np,np,nlevp) :: dpnh_dp_i
 
   tl=1
 
-  call phi_from_eos(hvcoord,elem%state%phis,elem%state%vtheta_dp(:,:,:,tl),&
-       elem%state%dp3d(:,:,:,tl),elem%state%phinh_i(:,:,:,tl))
+  if (hcoord==0) then
+     ! given dp3d and vtheta_dp, set phinh_i based on EOS
+     call phi_from_eos(hvcoord,elem%state%phis,elem%state%vtheta_dp(:,:,:,tl),&
+          elem%state%dp3d(:,:,:,tl),elem%state%phinh_i(:,:,:,tl))
+
+  else
+     ! given dp3d and phinh_i, set vtheta_dp based on EOS
+     call get_hydro_pressure(pi,elem%state%dp3d(:,:,:,tl),hvcoord)
+     exner=(pi/p0)**kappa
+     ! dphi/ds = -R Thetadp exner/p
+     do k=1,nlev
+        elem%state%vtheta_dp(:,:,k,tl)= &
+             -(elem%state%phinh_i(:,:,k+1,tl)-elem%state%phinh_i(:,:,k,tl)) * &
+             pi(:,:,k)/(Rgas*exner(:,:,k))
+     enddo
+  endif
 
   ! Disable the following check in CUDA bfb builds,
   ! since the calls to pow are inexact
