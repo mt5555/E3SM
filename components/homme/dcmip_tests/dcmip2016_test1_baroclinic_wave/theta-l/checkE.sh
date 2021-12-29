@@ -3,7 +3,7 @@
 #XXSBATCH --account=FY150001
 #XXSBATCH -p ec
 #SBATCH --account=condo
-#SBATCH -p acme-centos6
+#SBATCH -p acme-medium
 #SBATCH -N 6
 #SBATCH --time=2:00:00
 #

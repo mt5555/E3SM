@@ -57,6 +57,7 @@ prefix=r400    ; run $(($NCPU>384?384:NCPU))
 prefix=r100-dry; run $NCPU
 prefix=r100-h  ; run $NCPU
 prefix=r100    ; run $NCPU
+prefix=r100-hcoord ; run $NCPU
 
 prefix=r50    ; run $NCPU
 

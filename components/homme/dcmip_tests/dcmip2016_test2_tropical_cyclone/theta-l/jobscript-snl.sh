@@ -6,7 +6,7 @@
 #SBATCH --account=condo
 #SBATCH -p acme-medium
 #SBATCH -N 12
-#SBATCH --time=0:20:00
+#SBATCH --time=0:30:00
 #
 #  r100 (ne30) 12 nodes, needs 5 min?
 #  
@@ -55,3 +55,4 @@ prefix=r400 ;  run $(($NCPU>384?384:NCPU))
 prefix=r100 ;  run $NCPU
 prefix=r50 ;  run $NCPU
 prefix=r50-h ;  run $NCPU
+prefix=r50-height ;  run $NCPU
