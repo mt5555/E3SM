@@ -71,7 +71,7 @@ module element_ops
   public get_temperature, get_phi, get_R_star, get_hydro_pressure
   public set_thermostate, set_state, set_state_i, set_elem_state
   public set_forcing_rayleigh_friction, set_theta_ref
-  public copy_state, tests_finalize
+  public copy_state, tests_finalize, save_initial_state
   public state0
 
   ! promote this to _real_kind after V2 code freeze

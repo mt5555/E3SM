@@ -60,3 +60,5 @@ prefix=r50              ; run $NCPU
 
 prefix=explicit-r100    ; run $NCPU
 
+prefix=explicit-r100-height  ; run $NCPU
+prefix=r100-height           ; run $NCPU
