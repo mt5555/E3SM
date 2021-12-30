@@ -38,4 +38,21 @@ ncl plot_lon_vs_z.ncl
 \mv -f movies/dcmip2012_test2_11.nc  movies/nonhydro_dcmip2012_test2_11.nc
 \mv -f dcmip2012_test2_1_T_t10.pdf   nonhydro_test2_1_T_t10.pdf
 
+# nonhydrostatic height coord theta
+namelist=namelist-nh-hcoord.nl
+\cp -f $namelist input.nl
+srun -c 1 -N $SLURM_NNODES $EXEC < input.nl
+ncl plot_lon_vs_z.ncl
+\mv -f movies/dcmip2012_test2_11.nc  movies/nh-hcoord_dcmip2012_test2_11.nc
+\mv -f dcmip2012_test2_1_T_t10.pdf   nh-hcoord_test2_1_T_t10.pdf
+
+
+# nonhydrostatic hight coord with remap theta
+namelist=namelist-nh-hcoord-r1.nl
+\cp -f $namelist input.nl
+srun -c 1 -N $SLURM_NNODES $EXEC < input.nl
+ncl plot_lon_vs_z.ncl
+\mv -f movies/dcmip2012_test2_11.nc  movies/nh-hcoord-r1_dcmip2012_test2_11.nc
+\mv -f dcmip2012_test2_1_T_t10.pdf   nh-hcoord-r1_test2_1_T_t10.pdf
+
 date

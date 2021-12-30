@@ -97,14 +97,20 @@ do k=0, nlev-1
   h(k) = (-g/N2)*log( (Teq/bigG)*( (p/Peq)^(Rd/cp) - 1.d0  ) + 1.d0 )
 end do
 
+; do k=0, nlev-1
+;   p0(k,:,:)     = hyam(k)*p_ref + hybm(k)*ps0
+;   T_mean(k,:,:) = bigG*(1.d0 - exp(N2*h(k)/g))+ Ts0*exp(N2*h(k)/g)
+; end do
+ 
+; use initial T away from the instability. works for both height and z coords
+p0 = f->pnh(0,:,:,:)
 do k=0, nlev-1
   print( "height (" +k+ ")= " +h(k))
+  do i=0,nlon-1
+     T_mean(k,:,i) = T(k,:,nlon/2)
+  end do
 end do
 
-do k=0, nlev-1
-  p0(k,:,:)     = hyam(k)*p_ref + hybm(k)*ps0
-  T_mean(k,:,:) = bigG*(1.d0 - exp(N2*h(k)/g))+ Ts0*exp(N2*h(k)/g)
-end do
 
   ;_____________________________________________________________________
   ; plot contour field of lon vs height at the equator
