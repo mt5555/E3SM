@@ -1393,8 +1393,26 @@ contains
     phi_tens(:,:,k) =  (-phi_vadv_i(:,:,k) - v_gradphinh_i(:,:,k))*scale1 &
     + scale1*g*elem(ie)%state%w_i(:,:,k,n0)
     
-
-
+#if 1    
+    if (rsplit==0 .and. hcoord==1 ) then
+       ! debug eta_dot_dpdn code up to nlev:
+       do k=1,nlev  
+          v1=maxval(abs(phi_tens(:,:,k)))
+          v2=max(100d0,maxval(abs(phi_i(:,:,k))))
+          if  ( v1 / v2   > 1e-10) then
+             print *,ie,k,'max abs phi_tens=',v1,v2,&
+                  maxval(abs(g*elem(ie)%state%w_i(:,:,k,n0)-v_gradphinh_i(:,:,k)  )),&
+                  maxval(abs(phi_vadv_i(:,:,k)))
+          endif
+       enddo
+       !phi_tens(:,:,:)=0  ! shouldn't need this
+       k=1
+       v2=max(100d0,maxval(abs(phi_i(:,:,k))))
+       if  ( maxval(abs(gradphinh_i(:,:,:,k)))/v2 > 1e-10) then
+          print *,ie,k,'max abs gradphi=',maxval(abs(gradphinh_i(:,:,:,k)))
+       endif
+    endif
+#endif
 
 
      ! ================================================                                                                 
@@ -1789,6 +1807,17 @@ contains
            endif
         enddo
         enddo
+
+        if (hcoord==1) then
+           do j=1,np
+           do i=1,np
+              if ( abs(elem(ie)%state%w_i(i,j,1,np1)) >1e-10) then
+                 write(iulog,*) 'WARNING: w(1) does not satisfy b.c.',ie,i,j
+                 write(iulog,*) 'val2 = ',elem(ie)%state%w_i(i,j,1,np1)
+              endif
+           enddo
+        enddo
+        endif
 
         ! check for layer spacing <= 1m
         if (scale3 /= 0) then
