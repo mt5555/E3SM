@@ -35,3 +35,13 @@ ncl test200-range.ncl
 \mv -f movies/dcmip2012_test2_01.nc.pdf  nonhydro_test2_0_u.pdf
 \mv -f movies/dcmip2012_test2_01.nc  movies/nonhydro_dcmip2012_test2_01.nc 
 
+# nonhydrostatic height coord theta
+set namelist = namelist-nh-hcoord.nl
+\cp -f $namelist input.nl
+srun -K -c 1 -N $SLURM_NNODES  $EXEC < input.nl
+ncl plot_z_lon.ncl
+ncl test200-range.ncl
+\mv -f dcmip2012_test2_0_u_t6.00.pdf nh-hcoord_test2_0_u_t6.00.pdf
+\mv -f movies/dcmip2012_test2_01.nc.pdf  nh-hcoord_test2_0_u.pdf
+\mv -f movies/dcmip2012_test2_01.nc  movies/nh-hcoord_dcmip2012_test2_01.nc 
+

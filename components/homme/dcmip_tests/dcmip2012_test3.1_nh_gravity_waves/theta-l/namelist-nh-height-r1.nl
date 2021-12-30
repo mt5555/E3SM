@@ -20,7 +20,7 @@
   restartfreq       = -1                        ! don't write restart files if < 0
   runtype           = 0                         ! 0 = new run
   tstep             = 1.0                       ! largest timestep
-  rsplit            = 0
+  rsplit            = 1
   vert_remap_q_alg  = 10
   integration       = 'explicit'                ! explicit time integration
   tstep_type        = 5                         ! 1 => default method
@@ -30,7 +30,7 @@
   hypervis_subcycle = 1                         ! 1 = no hyperviz subcycling
   rearth            = 50969.76                  ! scaled earth radius = a/125.0
   omega             = 0.0                       ! earth angular speed = 0.0
-  hcoord            = 0
+  hcoord            = 1
 /
 &vert_nl
   vform             = "ccm"                     ! vertical coordinate type "ccm"=hybrid pressure/terrain

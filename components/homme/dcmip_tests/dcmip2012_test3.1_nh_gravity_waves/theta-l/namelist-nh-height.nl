@@ -30,7 +30,7 @@
   hypervis_subcycle = 1                         ! 1 = no hyperviz subcycling
   rearth            = 50969.76                  ! scaled earth radius = a/125.0
   omega             = 0.0                       ! earth angular speed = 0.0
-  hcoord            = 0
+  hcoord            = 1
 /
 &vert_nl
   vform             = "ccm"                     ! vertical coordinate type "ccm"=hybrid pressure/terrain

@@ -44,3 +44,35 @@ ncl plot_theta.ncl
 \mv -f dcmip2012_test3_theta_diff.pdf   nonhydro_test3_theta_diff.pdf  
 \mv -f dcmip2012_test3_theta_diff_last.pdf   nonhydro_test3_theta_diff_last.pdf  
 \mv -f movies/dcmip2012_test31.nc        movies/nonhydro_dcmip2012_test31.nc 
+
+
+#############################################################################
+# theta-nh height coord, eulerian
+#############################################################################
+set namelist = ./namelist-nh-height.nl
+\cp -f $namelist input.nl
+srun -K -c 1 -N $SLURM_NNODES  $EXEC < input.nl
+
+ncl plot_omega.ncl
+ncl plot_theta.ncl
+
+\mv -f test31_omega.pdf                 nh-height_test31_omega.pdf
+\mv -f dcmip2012_test3_theta_diff.pdf   nh-height_test3_theta_diff.pdf  
+\mv -f dcmip2012_test3_theta_diff_last.pdf   nh-height_test3_theta_diff_last.pdf  
+\mv -f movies/dcmip2012_test31.nc        movies/nh-height_dcmip2012_test31.nc 
+
+
+#############################################################################
+# theta-nh height coord, vertically lagrangian
+#############################################################################
+set namelist = ./namelist-nh-height-r1.nl
+\cp -f $namelist input.nl
+srun -K -c 1 -N $SLURM_NNODES  $EXEC < input.nl
+
+ncl plot_omega.ncl
+ncl plot_theta.ncl
+
+\mv -f test31_omega.pdf                 nh-height-r1_test31_omega.pdf
+\mv -f dcmip2012_test3_theta_diff.pdf   nh-height-r1_test3_theta_diff.pdf  
+\mv -f dcmip2012_test3_theta_diff_last.pdf   nh-height-r1_test3_theta_diff_last.pdf  
+\mv -f movies/dcmip2012_test31.nc        movies/nh-height-r1_dcmip2012_test31.nc 

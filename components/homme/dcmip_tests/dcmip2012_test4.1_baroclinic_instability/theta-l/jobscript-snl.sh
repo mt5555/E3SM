@@ -75,6 +75,18 @@ ncl plot_zeta.ncl 'fname="movies/nonhydro-X1-dcmip2012_test41.nc"'
 \mv -f ps.pdf nonhydro-X1-ps.pdf
 \mv -f ps-8.pdf nonhydro-X1-ps-8.pdf
 
+# nonhydro X1 height coord
+date
+set EXEC = ../../../test_execs/theta-l-nlev30/theta-l-nlev30
+set namelist = nh-x1-hcoord.nl         
+cp -f $namelist input.nl
+srun -K -c 1 -N $SLURM_NNODES $EXEC < input.nl
+ncl plot_ps.ncl  'fname="movies/nonhydro-X1-dcmip2012_test41.nc"'
+ncl plot_zeta.ncl 'fname="movies/nonhydro-X1-dcmip2012_test41.nc"'
+\mv -f zeta.pdf nh-hcoord-X1-zeta.pdf
+\mv -f ps.pdf nh-hcoord-X1-ps.pdf
+\mv -f ps-8.pdf nh-hcoord-X1-ps-8.pdf
+
 
 date
 

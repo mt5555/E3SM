@@ -1,53 +1,49 @@
 !
-! namelist for dcmip2012 test 3-1 nonhydrostatic gravity waves
-! Small planet X = 125
-! NE=27 (1.125 degrees)
-! Scale NE30 viscosity: 1e15 -> 5.121e8
-! run length: 1h small planet time
-! hydrostatic timestep: 300 -> 2.4
-!
+! namelist for dcmip2012 test2-0: steady-state atmosphere with orography
 !_______________________________________________________________________
 &ctl_nl
   nthreads          = 1
   partmethod        = 4                         ! mesh parition method: 4 = space filling curve
   topology          = "cube"                    ! mesh type: cubed sphere
-  test_case         = "dcmip2012_test3"         ! test identifier
+  test_case         = "dcmip2012_test2_0"       ! test identifier
   theta_hydrostatic_mode = .false.
-  ne                = 27                        ! number of elements per cube face
+  ne                = 30                        ! number of elements per cube face
   qsize             = 0                         ! num tracer fields
-  nmax              = 3600                      ! total number of steps: 3600s / tstep
-  statefreq         = 60                        ! number of steps between screen dumps
+  ndays             = 6                         ! num simulation days: 0 = use nmax steps
+  statefreq         = 144                       ! number of steps between screen dumps
   restartfreq       = -1                        ! don't write restart files if < 0
   runtype           = 0                         ! 0 = new run
-  tstep             = 1.0                       ! largest timestep
-  rsplit            = 0
-  vert_remap_q_alg  = 10
+  tstep             = 300.0                     ! largest timestep in seconds
+  rsplit            = 6                         ! unstable with desired rsplit=6 - why?
+  hcoord            = 1
   integration       = 'explicit'                ! explicit time integration
-  tstep_type        = 5                         ! 1 => default method
-  nu                = 5.0e8                     ! reduced earth hyperviz
-  nu_p              = 5.0e8
+  tstep_type        = 7                         ! 
+  hv_ref_profiles   = 0
+  hv_theta_correction=0
+  pgrad_correction   =0
+  nu                = 1e15                      ! hyperviscosity
+  nu_s              = 1e15
+  nu_p              = 1e15
   hypervis_order    = 2                         ! 2 = hyperviscosity
   hypervis_subcycle = 1                         ! 1 = no hyperviz subcycling
-  rearth            = 50969.76                  ! scaled earth radius = a/125.0
   omega             = 0.0                       ! earth angular speed = 0.0
-  hcoord            = 0
 /
 &vert_nl
   vform             = "ccm"                     ! vertical coordinate type "ccm"=hybrid pressure/terrain
   vanalytic         = 1                         ! set vcoords in initialization routine
-  vtop              = 2.73919e-1                ! vertical coordinate at top of atm (z=10000m)
+  vtop              = 2.05e-1                   ! vertical coordinate at top of atm (z=12000m)
 /
 &analysis_nl
   output_dir        = "./movies/"               ! destination dir for netcdf file
-  output_timeunits  = 0,                        ! 1=days, 2=hours, 0=timesteps
-  output_frequency  = 360,                      ! steps
-  output_varnames1  ='T','omega','pnh'          ! variables to write to file
+  output_timeunits  = 2,                        ! 1=days, 2=hours, 0=timesteps
+  output_frequency  = 12,                       ! output every 12 hours
+  output_varnames1  ='T','ps','u','v','omega','geo'   ! variables to write to file
   interp_type       = 0                         ! 0=native grid, 1=bilinear
   output_type       ='netcdf'                   ! netcdf or pnetcdf
   num_io_procs      = 16         
-  interp_nlat       = 128
-  interp_nlon       = 256
-  interp_gridtype   = 2                         ! gauss grid
+  interp_nlat       = 91
+  interp_nlon       = 360
+  interp_gridtype   = 1
 /
 &prof_inparm
   profile_outpe_num   = 100
