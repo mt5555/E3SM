@@ -69,6 +69,7 @@ module element_ops
 
   public get_field, get_field_i, get_state
   public get_temperature, get_phi, get_R_star, get_hydro_pressure
+  public get_refcoord_dp, get_refcoord_hydro_pressure
   public set_thermostate, set_state, set_state_i, set_elem_state
   public set_forcing_rayleigh_friction, set_theta_ref
   public copy_state, tests_finalize
@@ -102,7 +103,7 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
     case ('exner');           call get_nonhydro_pressure(elem,tmp ,field,hvcoord,nt)
 
     case ('p');
-      call get_hydro_pressure(field,elem%state%dp3d(:,:,:,nt),hvcoord)
+      call get_hydro_pressure(field,pi_i,elem%state%dp3d(:,:,:,nt),hvcoord)
 
     case ('dp');
        field(:,:,:)=elem%state%dp3d(:,:,:,nt)
@@ -278,18 +279,18 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   end subroutine get_dpnh_dp_i 
 
   !_____________________________________________________________________
-  subroutine get_hydro_pressure(p,dp,hvcoord)
+  subroutine get_hydro_pressure(p,p_i,dp,hvcoord)
   !
   implicit none
     
   real (kind=real_kind), intent(out)  :: p(np,np,nlev)
+  real (kind=real_kind), intent(out)  :: p_i(np,np,nlevp)
   real (kind=real_kind), intent(in)   :: dp(np,np,nlev)
   type (hvcoord_t),     intent(in)    :: hvcoord                      ! hybrid vertical coordinate struct
   
   integer :: k
-  real(kind=real_kind), dimension(np,np,nlevp) :: p_i
 
-  p_i(:,:,1)=hvcoord%hyai(1)*hvcoord%ps0
+  p_i(:,:,1)=hvcoord%ptop
   do k=1,nlev  ! SCAN
      p_i(:,:,k+1)=p_i(:,:,k) + dp(:,:,k)
   enddo
@@ -305,6 +306,43 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   
   
   end subroutine get_hydro_pressure
+  
+
+  !_____________________________________________________________________
+  subroutine get_refcoord_hydro_pressure(p,p_i,ps,hvcoord)
+  implicit none
+    
+  real (kind=real_kind), intent(out)  :: p(np,np,nlev)
+  real (kind=real_kind), intent(out)  :: p_i(np,np,nlevp)
+  real (kind=real_kind), intent(in)   :: ps(np,np)
+  type (hvcoord_t),     intent(in)    :: hvcoord                      ! hybrid vertical coordinate struct
+  
+  integer :: k
+
+  do k=1,nlev
+     p(:,:,k) = hvcoord%hyam(k)*hvcoord%ps0 + hvcoord%hybm(k)*ps(:,:)
+  enddo
+  do k=1,nlevp
+     p_i(:,:,k) = hvcoord%hyai(k)*hvcoord%ps0 + hvcoord%hybi(k)*ps(:,:)
+  enddo
+  end subroutine 
+  
+
+  !_____________________________________________________________________
+  subroutine get_refcoord_dp(dp,ps,hvcoord)
+  implicit none
+    
+  real (kind=real_kind), intent(out)  :: dp(np,np,nlev)
+  real (kind=real_kind), intent(in)   :: ps(np,np)
+  type (hvcoord_t),     intent(in)    :: hvcoord                      ! hybrid vertical coordinate struct
+  
+  integer :: k
+
+  do k=1,nlev 
+     dp(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
+          ( hvcoord%hybi(k+1) - hvcoord%hybi(k) )*ps(:,:)
+  enddo
+  end subroutine 
   
 
   !_____________________________________________________________________
@@ -453,22 +491,8 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   integer :: k, nt
 
   nt = 1
-  do k=1,nlev
-     p(:,:,k) = hvcoord%hyam(k)*hvcoord%ps0 + hvcoord%hybm(k)*ps(:,:)
-     dp(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
-          ( hvcoord%hybi(k+1) - hvcoord%hybi(k) )*ps(:,:)
-  enddo
-
-! recompute pressure using same algrebra as EOS:
-! improves precision for initial T/theta conversion
-  pi_i(:,:,1)=hvcoord%hyai(1)*hvcoord%ps0
-  do k=1,nlev
-     pi_i(:,:,k+1)=pi_i(:,:,k) + dp(:,:,k)
-  enddo
-  do k=1,nlev
-     p(:,:,k)=pi_i(:,:,k) + dp(:,:,k)/2
-  enddo
-
+  call get_refcoord_dp(dp,ps,hvcoord)
+  call get_hydro_pressure(p,pi_i,dp,hvcoord)
 
 !set vtheta
   do k=1,nlev
@@ -714,22 +738,6 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   call phi_from_eos(hvcoord,elem%state%phis,elem%state%vtheta_dp(:,:,:,tl),&
        elem%state%dp3d(:,:,:,tl),elem%state%phinh_i(:,:,:,tl))
 
-  ! Disable the following check in CUDA bfb builds,
-  ! since the calls to pow are inexact
-#if !(defined(HOMMEXX_BFB_TESTING) && defined(CUDA_BUILD))
-  ! verify discrete hydrostatic balance
-  call pnh_and_exner_from_eos(hvcoord,elem%state%vtheta_dp(:,:,:,tl),&
-       elem%state%dp3d(:,:,:,tl),elem%state%phinh_i(:,:,:,tl),pnh,exner,dpnh_dp_i)
-  do k=1,nlev
-     pi(:,:,k) = hvcoord%hyam(k)*hvcoord%ps0 + hvcoord%hybm(k)*elem%state%ps_v(:,:,tl)
-     if (maxval(abs(1-dpnh_dp_i(:,:,k))) > 1e-10) then
-        write(iulog,*)'WARNING: hydrostatic inverse FAILED!'
-        write(iulog,*)k,minval(dpnh_dp_i(:,:,k)),maxval(dpnh_dp_i(:,:,k))
-        write(iulog,*) 'pnh',pi(1,1,k),pnh(1,1,k)
-     endif
-  enddo
-#endif
-  
   do tl = 2,timelevels
     call copy_state(elem,1,tl)
   enddo
@@ -769,7 +777,7 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   T1 = tref_lapse_rate*TREF*Cp/g ! = 191
   T0 = TREF-T1           ! = 97
 
-  p_i(:,:,1) =  hvcoord%hyai(1)*hvcoord%ps0   
+  p_i(:,:,1) =  hvcoord%ptop
   do k=1,nlev
      p_i(:,:,k+1) = p_i(:,:,k) + dp(:,:,k)
   enddo

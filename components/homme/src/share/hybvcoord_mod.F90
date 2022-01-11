@@ -18,6 +18,7 @@ private
 !-----------------------------------------------------------------------
 type, public :: hvcoord_t
   real(r8) ps0          ! base state surface-pressure for level definitions
+  real(r8) ptop         ! pressure at model top
   real(r8) hyai(plevp)  ! ps0 component of hybrid coordinate - interfaces
   real(r8) hyam(plev)   ! ps0 component of hybrid coordinate - midpoints
   real(r8) hybi(plevp)  ! ps  component of hybrid coordinate - interfaces
@@ -168,6 +169,8 @@ end function
   integer  :: k
 
   eps            = 1.D-05
+
+  hvcoord%ptop = hvcoord%hyai(1)*hvcoord%ps0
 
   ! Get eta-levels from A,B
   forall(k=1:plev)  hvcoord%etam(k)=hvcoord%hyam(k)+hvcoord%hybm(k)
