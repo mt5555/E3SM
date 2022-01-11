@@ -16,7 +16,7 @@ module prim_driver_base
   use derivative_mod,   only: derivative_t, derivinit
   use dimensions_mod,   only: np, nlev, nlevp, nelem, nelemd, nelemdmax, GlobalUniqueCols, qsize
   use element_mod,      only: element_t, allocate_element_desc, setup_element_pointers
-  use element_ops,      only: copy_state
+  use element_ops,      only: copy_state, get_refcoord_dp, get_refcoord_hydro_pressure
   use gridgraph_mod,    only: GridVertex_t, GridEdge_t
   use hybrid_mod,       only: hybrid_t
   use kinds,            only: real_kind, iulog
@@ -944,17 +944,6 @@ contains
 !$OMP END MASTER
 !$OMP BARRIER
 
-#ifdef CAM
-    ! initialize dp3d from ps_v.  CAM IC/restart code reads ps_v, doesn't
-    ! have access to hvcoord to compute dp3d:
-    do ie=nets,nete
-       do k=1,nlev
-          elem(ie)%state%dp3d(:,:,k,tl%n0)=&
-               ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
-               ( hvcoord%hybi(k+1) - hvcoord%hybi(k) )*elem(ie)%state%ps_v(:,:,tl%n0)
-       enddo
-    end do
-#endif
 
 
     ! For new runs, and branch runs, convert state variable Q to (Qdp)
@@ -1388,13 +1377,10 @@ contains
                 ! Prescribed winds are evaluated on reference levels,
                 ! not floating levels, so don't remap, just update dp3d.
                 do ie = nets,nete
-                   elem(ie)%state%ps_v(:,:,tl%np1) = hvcoord%hyai(1)*hvcoord%ps0 + &
+                   elem(ie)%state%ps_v(:,:,tl%np1) = hvcoord%ptop + &
                         sum(elem(ie)%state%dp3d(:,:,:,tl%np1),3)
-                   do k=1,nlev
-                      dp(:,:,k) = (hvcoord%hyai(k+1) - hvcoord%hyai(k))*hvcoord%ps0 + &
-                                  (hvcoord%hybi(k+1) - hvcoord%hybi(k))*elem(ie)%state%ps_v(:,:,tl%np1)
-                   end do
-                   elem(ie)%state%dp3d(:,:,:,tl%np1) = dp
+                   call get_refcoord_dp(elem(ie)%state%dp3d(:,:,:,tl%np1),&
+                        elem(ie)%state%ps_v(:,:,tl%np1),hvcoord)
                 end do
              else
                 ! Set np1_qdp to -1 to remap dynamics variables but
@@ -1574,6 +1560,7 @@ contains
   real (kind=real_kind)  :: fq
   real (kind=real_kind)  :: dp(np,np,nlev), ps(np,np), dp_adj(np,np,nlev)
   real (kind=real_kind)  :: phydro(np,np,nlev)  ! hydrostatic pressure
+  real (kind=real_kind)  :: phydro_i(np,np,nlevp)
   logical :: adjust_ps   ! adjust PS or DP3D to conserve dry mass
 #ifdef MODEL_THETA_L
   real (kind=real_kind)  :: pprime(np,np,nlev)
@@ -1610,16 +1597,17 @@ contains
   dp=elem%state%dp3d(:,:,:,np1)
   dp_adj=dp
   ps=elem%state%ps_v(:,:,np1)
-  !ps=hvcoord%hyai(1)*hvcoord%ps0 + sum(dp(:,:,:),3) ! introduces roundoff
 
   ! after calling this routine, ps_v may not be valid and should not be used
   elem%state%ps_v(:,:,np1)=0
 
 #ifdef MODEL_THETA_L
    !compute temperatue and NH perturbation pressure before Q tendency
-   do k=1,nlev
-      phydro(:,:,k)=hvcoord%ps0*hvcoord%hyam(k) + ps(:,:)*hvcoord%hybm(k)
-   enddo
+   ! assumes physics is on reference levels:
+   call get_refcoord_hydro_pressure(phydro,phydro_i,ps,hvcoord)  ! matches old code
+   ! better, but introduces roundoff differences:
+   !call get_hydro_pressure(phydro,phydro_i,dp,hvcoord)
+
 
    !one can set pprime=0 to hydro regime but it is not done in master
    !compute pnh, here only pnh is needed
@@ -1701,10 +1689,7 @@ contains
       ! compute water vapor adjusted dp3d:
       if (adjust_ps) then
          ! compute new dp3d from adjusted ps()
-         do k=1,nlev
-            dp_adj(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
-                 ( hvcoord%hybi(k+1) - hvcoord%hybi(k))*ps(:,:)
-         enddo
+         call get_refcoord_dp(dp_adj,ps,hvcoord)
       endif
       elem%state%dp3d(:,:,:,np1)=dp_adj(:,:,:)
    endif
@@ -1720,12 +1705,10 @@ contains
       ! compute updated pnh and exner
       if (adjust_ps) then
          ! recompute hydrostatic pressure from ps
-         do k=1,nlev  
-            phydro(:,:,k)=hvcoord%ps0*hvcoord%hyam(k) + ps(:,:)*hvcoord%hybm(k)
-         enddo
+         call get_refcoord_hydro_pressure(phydro,phydro_i,ps,hvcoord)
       else
          ! recompute hydrostatic pressure from dp3d
-         call get_hydro_pressure(phydro,elem%state%dp3d(:,:,:,np1),hvcoord)
+         call get_hydro_pressure(phydro,phydro_i,elem%state%dp3d(:,:,:,np1),hvcoord)
       endif
       do k=1,nlev
          pnh(:,:,k)=phydro(:,:,k) + pprime(:,:,k)

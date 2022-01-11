@@ -245,7 +245,7 @@ contains
        enddo
 
        ! surface pressure
-       tmp(:,:,ie)=hvcoord%hyai(1)*hvcoord%ps0 + sum(elem(ie)%state%dp3d(:,:,:,n0),3) 
+       tmp(:,:,ie)=hvcoord%ptop + sum(elem(ie)%state%dp3d(:,:,:,n0),3) 
 
        !======================================================  
 
@@ -380,7 +380,7 @@ contains
 #ifdef CAM
        ! CAM neglicts the small, constant p(top) term.  Add this
        ! term in to be consistent
-       tmp(:,:,ie)=tmp(:,:,ie) + hvcoord%hyai(1)*hvcoord%ps0 
+       tmp(:,:,ie)=tmp(:,:,ie) + hvcoord%ptop
 #endif
     enddo
     Mass2 = global_integral(elem, tmp(:,:,nets:nete),hybrid,npts,nets,nete)

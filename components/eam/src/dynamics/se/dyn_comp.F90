@@ -231,7 +231,7 @@ CONTAINS
     use cam_control_mod,  only: aqua_planet, ideal_phys, adiabatic
     use comsrf,           only: sgh, sgh30
     use cam_instance,     only: inst_index
-    use element_ops,      only: set_thermostate
+    use element_ops,      only: set_thermostate, get_refcoord_dp
 
     type (dyn_import_t), intent(inout) :: dyn_in
 
@@ -307,6 +307,14 @@ CONTAINS
           ! new run, scale mass to value given in namelist, if needed
           call prim_set_mass(elem, TimeLevel,hybrid,hvcoord,nets,nete)
        endif
+
+       ! initialize dp3d from ps_v.  CAM IC/restart code reads ps_v, doesn't
+       ! have access to hvcoord to compute dp3d:
+       do ie=nets,nete
+          call get_refcoord_dp(elem(ie)%state%dp3d(:,:,:,TimeLevel%n0),&
+               elem(ie)%state%ps_v(:,:,TimeLevel%n0),hvcoord)
+       end do
+
 
        call t_startf('prim_init2')
        call prim_init2(elem,hybrid,nets,nete, TimeLevel, hvcoord)

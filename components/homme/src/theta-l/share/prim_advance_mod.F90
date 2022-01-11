@@ -1188,7 +1188,7 @@ contains
      enddo
 
      ! Compute omega =  Dpi/Dt   Used only as a DIAGNOSTIC
-     pi_i(:,:,1)=hvcoord%hyai(1)*hvcoord%ps0
+     pi_i(:,:,1)=hvcoord%ptop
      omega_i(:,:,1)=0
      do k=1,nlev
         pi_i(:,:,k+1)=pi_i(:,:,k) + dp3d(:,:,k)

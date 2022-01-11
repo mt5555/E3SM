@@ -9,6 +9,7 @@ module vertremap_mod
   use dimensions_mod, only         : np,nlev,qsize,nlevp,npsq
   use hybvcoord_mod, only          : hvcoord_t
   use element_mod, only            : element_t
+  use element_ops, only            : get_refcoord_dp
   use perf_mod, only               : t_startf, t_stopf  ! _EXTERNAL
   use parallel_mod, only           : abortmp, parallel_t
   use control_mod, only : vert_remap_q_alg,vert_remap_u_alg
@@ -75,11 +76,12 @@ contains
   !
    do ie=nets,nete
      ! update final ps_v
-     elem(ie)%state%ps_v(:,:,np1) = hvcoord%hyai(1)*hvcoord%ps0 + &
+     elem(ie)%state%ps_v(:,:,np1) = hvcoord%ptop + &
           sum(elem(ie)%state%dp3d(:,:,:,np1),3)
      do k=1,nlev
-        dp(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
-             ( hvcoord%hybi(k+1) - hvcoord%hybi(k) )*elem(ie)%state%ps_v(:,:,np1)
+        call get_refcoord_dp(dp,elem(ie)%state%ps_v(:,:,np1),hvcoord)
+        !dp(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
+        !     ( hvcoord%hybi(k+1) - hvcoord%hybi(k) )*elem(ie)%state%ps_v(:,:,np1)
         if (rsplit==0) then
            dp_star(:,:,k) = dp(:,:,k) + dt*(elem(ie)%derived%eta_dot_dpdn(:,:,k+1) -&
                 elem(ie)%derived%eta_dot_dpdn(:,:,k))

@@ -44,34 +44,6 @@ module vertremap_base
 
 !=======================================================================================================!
 
-!remap_calc_grids computes the vertical pressures and pressure differences for one vertical column for the reference grid
-!and for the deformed Lagrangian grid. This was pulled out of each routine since it was a repeated task.
-subroutine remap_calc_grids( hvcoord , ps , dt , eta_dot_dpdn , p_lag , p_ref , dp_lag , dp_ref )
-  implicit none
-  type(hvcoord_t)      , intent(in   ) :: hvcoord               !Derived type to hold vertical sigma grid parameters
-  real(kind=real_kind) , intent(in   ) :: ps                    !Surface pressure for this column
-  real(kind=real_kind) , intent(in   ) :: dt                    !Time step
-  real(kind=real_kind) , intent(in   ) :: eta_dot_dpdn(nlev+1)  !Looks like a vertical pressure flux
-                                                                !to compute deformed grid spacing
-  real(kind=real_kind) , intent(  out) :: p_lag(nlev+1)         !Pressures at interfaces of the Lagrangian deformed grid
-  real(kind=real_kind) , intent(  out) :: p_ref(nlev+1)         !Pressures at interfaces of the reference grid
-  real(kind=real_kind) , intent(  out) :: dp_lag(nlev)          !Pressure differences on Lagrangian deformed grid
-  real(kind=real_kind) , intent(  out) :: dp_ref(nlev)          !Pressure differences on reference grid
-  integer :: k                                                  !Iterator
-  p_ref(1) = 0  !Both grids have a model top pressure of zero
-  p_lag(1) = 0  !Both grids have a model top pressure of zero
-  do k = 1 , nlev
-    dp_ref(k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) ) * hvcoord%ps0 + &
-         ( hvcoord%hybi(k+1) - hvcoord%hybi(k) ) * ps  !Reference pressure difference
-    ! Lagrangian pressure difference (flux in - flux out over the time step)
-    dp_lag(k) = dp_ref(k) + dt * ( eta_dot_dpdn(k+1) - eta_dot_dpdn(k) )
-    p_ref(k+1) = p_ref(k) + dp_ref(k) !Pressure at interfaces accumulated using difference over each cell
-    p_lag(k+1) = p_lag(k) + dp_lag(k) !Pressure at interfaces accumulated using difference over each cell
-  enddo
-end subroutine remap_calc_grids
-
-!=======================================================================================================!
-
 
 
 subroutine remap1(Qdp,nx,qsize,dp1,dp2,remap_alg)

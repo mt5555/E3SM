@@ -18,7 +18,7 @@ module model_init_mod
   use hybvcoord_mod, 	  only: hvcoord_t
   use hybrid_mod,         only: hybrid_t
   use dimensions_mod,     only: np,nlev,nlevp
-  use element_ops,        only: set_theta_ref
+  use element_ops,        only: set_theta_ref, get_refcoord_dp, get_refcoord_hydro_pressure
   use element_state,      only: timelevels, nu_scale_top, nlev_tom
   use viscosity_mod,      only: make_c0_vector
   use kinds,              only: real_kind,iulog
@@ -46,6 +46,7 @@ contains
     integer :: ie,t,k
     real (kind=real_kind) :: gradtemp(np,np,2,nets:nete)
     real (kind=real_kind) :: temp(np,np,nlev),ps_ref(np,np)
+    real (kind=real_kind) :: temp_i(np,np,nlevp)
     real (kind=real_kind) :: ptop_over_press
 
 
@@ -73,10 +74,7 @@ contains
 
       ! initialize reference states used by hyberviscosity
       ps_ref(:,:) = hvcoord%ps0 * exp ( -elem(ie)%state%phis(:,:)/(Rgas*TREF)) 
-      do k=1,nlev
-         elem(ie)%derived%dp_ref(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
-              (hvcoord%hybi(k+1)-hvcoord%hybi(k))*ps_ref(:,:)
-      enddo
+      call get_refcoord_dp(elem(ie)%derived%dp_ref(:,:,:),ps_ref,hvcoord)
       call set_theta_ref(hvcoord,elem(ie)%derived%dp_ref,elem(ie)%derived%theta_ref)
       temp=elem(ie)%derived%theta_ref*elem(ie)%derived%dp_ref
       call phi_from_eos(hvcoord,elem(ie)%state%phis,&
@@ -96,9 +94,8 @@ contains
 
       if (hv_theta_correction/=0) then
          ! compute weak laplace of p_ref
+         call get_refcoord_hydro_pressure(temp,temp_i,ps_ref,hvcoord)
          do k=1,nlev
-            ! compute lap(p) for z surface correction                                              
-            temp(:,:,k) = hvcoord%hyam(k)*hvcoord%ps0 + hvcoord%hybm(k)*ps_ref(:,:)
             elem(ie)%derived%lap_p_wk(:,:,k)=laplace_sphere_wk(temp(:,:,k),deriv,elem(ie),&
                  var_coef=.false.)
          enddo
