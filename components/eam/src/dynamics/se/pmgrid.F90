@@ -1,7 +1,5 @@
 module pmgrid
-  use edgetype_mod, only : EdgeBuffer_t
   use dimensions_mod, only : nnodes,npart,nmpi_per_node
-  use reduction_mod, only : ReductionBuffer_ordered_1d_t
   
 !----------------------------------------------------------------------- 
 ! 
@@ -25,12 +23,7 @@ module pmgrid
    integer, parameter :: plevp  = plev + 1                 ! plev + 1
 
 
-   type (EdgeBuffer_t) :: edge_3    ! 3 layer          edge buffer  (shared)
-   type (EdgeBuffer_t) :: edge_1lp1 ! nlev+1 layer     edge buffer  (shared)
-   type (EdgeBuffer_t) :: edge_3lp1 ! 3*(nlev)+1 layer edge buffer  (shared)
 
-   type (ReductionBuffer_ordered_1d_t)  :: red    ! reduction buffer for cg
-! End additions
 !
 !JPE: i1 and j1, nxpt, jintmx are defined as placeholders - these values are needed
 !     to satisfy code in advection/slt 
