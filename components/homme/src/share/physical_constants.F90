@@ -18,7 +18,6 @@ module physical_constants
     omega,                &
     Rgas => rair,         &
     cpair,                &
-    p0 => pstd,           &
     MWDAIR => mwdry,      &
     Rwater_vapor => rh2o, &
     Cpwater_vapor => cpwv,&
@@ -26,6 +25,12 @@ module physical_constants
     Rd_on_Rv => epsilo,   &
     Cpd_on_Cpv,           &
     rrearth => ra
+
+! CAM has two options:
+!   hycoef::ps0 = 100000     (constant used in hybrid coordinates, hvcoord%ps0)
+!   physconst::pstd = 101325 (reference pressure)
+! HOMME's global constant p0 should match hvcoord%ps0:
+  use hycoef, only: p0 => ps0
 #endif
   ! -----------------------------
   implicit none
