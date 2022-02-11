@@ -798,7 +798,7 @@ END SUBROUTINE test1_advection_orography
 !=========================================================================
 ! Test 2-0:  Steady-State Atmosphere at Rest in the Presence of Orography
 !=========================================================================
-SUBROUTINE test2_steady_state_mountain (lon,lat,p,z,zcoords,hybrid_eta,hyam,hybm,u,v,w,t,phis,ps,rho,q)
+SUBROUTINE test2_steady_state_mountain (lon,lat,p,z,zcoords,hybrid_eta,hyam,hybm,u,v,w,t,phis,ps,rho,q,sub_case)
 
   use control_mod, only: dcmip2_0_h0, dcmip2_0_rm, dcmip2_0_zetam
 
@@ -820,7 +820,7 @@ IMPLICIT NONE
   real(8),  intent(out)   :: ps         ! Surface Pressure (Pa)
   real(8),  intent(out)   :: rho        ! density (kg m^-3)
   real(8),  intent(out)   :: q          ! Specific Humidity (kg/kg)
-
+  integer,  intent(in)    :: sub_case   ! different mountains
 	! if zcoords = 1, then we use z and output p
 	! if zcoords = 0, then we compute or use p
 	! In hybrid-eta coords: p = hyam p0 + hybm ps
@@ -858,11 +858,15 @@ IMPLICIT NONE
   !-----------------------------------------------------------------------
   !    PHIS (surface geopotential)
   !-----------------------------------------------------------------------
-
-	r   = acos( sin(phim)*sin(lat) + cos(phim)*cos(lat)*cos(lon - lambdam) )
-
-  zs  = 0.d0
-  if (r < Rm) zs=(h0/2.d0)*(1.d0+cos(pi*r/Rm))*cos(pi*r/zetam)**2.d0    ! mountain height
+  if (sub_case==1) then
+     r   = acos( sin(phim)*sin(lat) + cos(phim)*cos(lat)*cos(lon - lambdam) )
+     zs  = 0.d0
+     if (r < Rm) zs=(h0/2.d0)*(1.d0+cos(pi*r/Rm))*cos(pi*r/zetam)**2.d0    ! mountain height
+  endif
+  if (sub_case==2) then
+     r = acos( sin(phim)*sin(lat) + cos(phim)*cos(lat)*cos(lon-lambdam))
+     zs = h0*exp(- (r/0.1d0)**2)
+  endif
 
 	phis = g*zs
 

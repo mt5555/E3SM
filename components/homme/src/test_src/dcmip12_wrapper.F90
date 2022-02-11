@@ -9,7 +9,7 @@ module dcmip12_wrapper
 
 ! Implementation of the dcmip2012 dycore tests for the preqx dynamics target
 
-use control_mod,          only: test_case, dcmip4_moist, dcmip4_X, vanalytic
+use control_mod,          only: test_case, dcmip4_moist, dcmip4_X, vanalytic, sub_case
 use dcmip2012_test1_2_3,  only: test1_advection_deformation, test1_advection_hadley, test1_advection_orography, &
                                 test2_steady_state_mountain, test2_schaer_mountain,test3_gravity_wave
 use dcmip2012_test1_conv, only: test1_conv_advection_deformation
@@ -368,7 +368,7 @@ subroutine dcmip2012_test2_0(elem,hybrid,hvcoord,nets,nete)
   do ie = nets,nete; 
      do k=1,nlev; do j=1,np; do i=1,np
         call get_coordinates(lat,lon,hyam,hybm, i,j,k,elem(ie),hvcoord)
-        call test2_steady_state_mountain(lon,lat,p,z,zcoords,use_eta,hyam,hybm,u,v,w,T,phis,ps,rho,q(1))
+        call test2_steady_state_mountain(lon,lat,p,z,zcoords,use_eta,hyam,hybm,u,v,w,T,phis,ps,rho,q(1),sub_case)
         dp = pressure_thickness(ps,k,hvcoord)
         !let's get an analytical \phi
         he = (T0 - T)/gamma
@@ -377,7 +377,7 @@ subroutine dcmip2012_test2_0(elem,hybrid,hvcoord,nets,nete)
      enddo; enddo; enddo; 
      do k=1,nlevp; do j=1,np; do i=1,np
         call get_coordinates(lat,lon,hyai,hybi, i,j,k,elem(ie),hvcoord)
-        call test2_steady_state_mountain(lon,lat,p,z,zcoords,use_eta,hyai,hybi,u,v,w,T,phis,ps,rho,q(1))
+        call test2_steady_state_mountain(lon,lat,p,z,zcoords,use_eta,hyai,hybi,u,v,w,T,phis,ps,rho,q(1),sub_case)
         !let's get an analytical \phi
         he = (T0 - T)/gamma
         call set_state_i(u,v,w,T,ps,phis,p,he,g, i,j,k,elem(ie),1,nt)
