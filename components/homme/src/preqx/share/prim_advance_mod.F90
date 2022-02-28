@@ -920,6 +920,8 @@ contains
   real (kind=real_kind), dimension(np,np,nlev+1)   :: eta_dot_dpdn  ! half level vertical velocity on p-grid
   real (kind=real_kind), dimension(np,np)      :: sdot_sum   ! temporary field
   real (kind=real_kind), dimension(np,np,2)    :: vtemp     ! generic gradient storage
+  real (kind=real_kind), dimension(np,np,2)    :: grad_exner
+  real (kind=real_kind), dimension(np,np)    :: exner
   real (kind=real_kind), dimension(np,np,2,nlev):: vdp       !                            
   real (kind=real_kind), dimension(np,np,2     ):: v         !                            
   real (kind=real_kind), dimension(np,np)      :: vgrad_T    ! v.grad(T)
@@ -1138,12 +1140,19 @@ contains
 
         ! vtemp = grad ( E + PHI )
         vtemp = gradient_sphere(Ephi(:,:),deriv,elem(ie)%Dinv)
+        exner(:,:)=(p(:,:,k)/hvcoord%ps0)**kappa
+        grad_exner(:,:,:) = gradient_sphere(exner(:,:),deriv,elem(ie)%Dinv)
 
         do j=1,np
            do i=1,np
               gpterm = T_v(i,j,k)/p(i,j,k)
+#if OLDCODE
               glnps1 = Rgas*gpterm*grad_p(i,j,1,k)
               glnps2 = Rgas*gpterm*grad_p(i,j,2,k)
+#else
+              glnps1 = cp*(T_v(i,j,k)/exner(i,j))*grad_exner(i,j,1)
+              glnps2 = cp*(T_v(i,j,k)/exner(i,j))*grad_exner(i,j,2)
+#endif
 
               v1     = elem(ie)%state%v(i,j,1,k,n0)
               v2     = elem(ie)%state%v(i,j,2,k,n0)
