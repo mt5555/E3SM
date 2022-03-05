@@ -78,6 +78,7 @@ private
 ! public  :: curl_sphere_wk_testcontra  ! not coded
   public  :: divergence_sphere_wk
   public  :: laplace_sphere_wk
+ public  :: laplace_sphere_wk_p
   public  :: vlaplace_sphere_wk
   public  :: vlaplace_sphere_wk_contra
   public  :: vlaplace_sphere_wk_cartesian
@@ -1114,7 +1115,60 @@ contains
 
   end function laplace_sphere_wk
 
-!DIR$ ATTRIBUTES FORCEINLINE :: vlaplace_sphere_wk
+
+
+
+
+!DIR$ ATTRIBUTES FORCEINLINE :: laplace_sphere_wk
+  function laplace_sphere_wk_p(s,spg,deriv,elem,var_coef) result(laplace)
+!
+!   input:  s = scalar
+!   ouput:  -< grad(PHI), grad(s) >   = weak divergence of grad(s)
+!     note: for this form of the operator, grad(s) does not need to be made C0
+!            
+    real(kind=real_kind), intent(in) :: s(np,np)
+    real(kind=real_kind), intent(in) :: spg(np,np,2) 
+    logical, intent(in) :: var_coef
+    type (derivative_t), intent(in) :: deriv
+    type (element_t), intent(in) :: elem
+    real(kind=real_kind)             :: laplace(np,np)
+    real(kind=real_kind)             :: laplace2(np,np)
+    integer i,j
+
+    ! Local
+    real(kind=real_kind) :: grads(np,np,2), oldgrads(np,np,2)
+
+    grads=gradient_sphere(s,deriv,elem%Dinv)
+    grads=grads-spg
+
+    if (var_coef) then
+       if (hypervis_scaling /=0 ) then
+          ! tensor hv, (3)
+          oldgrads=grads
+          do j=1,np
+             do i=1,np
+                grads(i,j,1) = oldgrads(i,j,1)*elem%tensorVisc(i,j,1,1) + &
+                               oldgrads(i,j,2)*elem%tensorVisc(i,j,1,2)
+                grads(i,j,2) = oldgrads(i,j,1)*elem%tensorVisc(i,j,2,1) + &
+                               oldgrads(i,j,2)*elem%tensorVisc(i,j,2,2)
+             end do
+          end do
+       else
+          ! do nothing: constant coefficient viscsoity
+       endif
+    endif
+
+    ! note: divergnece_sphere and divergence_sphere_wk are identical *after* bndry_exchange
+    ! if input is C_0.  Here input is not C_0, so we should use divergence_sphere_wk().  
+    laplace=divergence_sphere_wk(grads,deriv,elem)
+
+  end function laplace_sphere_wk_p
+
+
+
+
+
+  !DIR$ ATTRIBUTES FORCEINLINE :: vlaplace_sphere_wk
   function vlaplace_sphere_wk(v,deriv,elem,var_coef,nu_ratio) result(laplace)
 !
 !   input:  v = vector in lat-lon coordinates

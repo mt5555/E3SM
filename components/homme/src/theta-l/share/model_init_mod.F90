@@ -78,6 +78,7 @@ contains
          elem(ie)%derived%dp_ref(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
               (hvcoord%hybi(k+1)-hvcoord%hybi(k))*ps_ref(:,:)
       enddo
+      elem(ie)%derived%dp_ref2 =  elem(ie)%derived%dp_ref  ! save a copy, for some laplace_p options
       call set_theta_ref(hvcoord,elem(ie)%derived%dp_ref,elem(ie)%derived%theta_ref)
       temp=elem(ie)%derived%theta_ref*elem(ie)%derived%dp_ref
       call phi_from_eos(hvcoord,elem(ie)%state%phis,&
@@ -102,6 +103,8 @@ contains
             temp(:,:,k) = hvcoord%hyam(k)*hvcoord%ps0 + hvcoord%hybm(k)*ps_ref(:,:)
             elem(ie)%derived%lap_p_wk(:,:,k)=laplace_sphere_wk(temp(:,:,k),deriv,elem(ie),&
                  var_coef=.false.)
+
+            elem(ie)%derived%grad_p(:,:,:,k)=gradient_sphere(temp(:,:,k),deriv,elem(ie)%Dinv)
          enddo
       endif
 

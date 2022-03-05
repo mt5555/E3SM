@@ -16,7 +16,7 @@ use dimensions_mod, only : np, nlev,nlevp
 use hybrid_mod, only : hybrid_t
 use parallel_mod, only : parallel_t
 use element_mod, only : element_t
-use derivative_mod, only : derivative_t, laplace_sphere_wk, vlaplace_sphere_wk
+use derivative_mod, only : derivative_t, laplace_sphere_wk, vlaplace_sphere_wk, laplace_sphere_wk_p
 use edgetype_mod, only : EdgeBuffer_t, EdgeDescriptor_t
 use edge_mod, only : edgevpack_nlyr, edgevunpack_nlyr
 
@@ -57,6 +57,7 @@ integer :: i,j,k,kptr,ie,nlyr_tot,ssize
 real (kind=real_kind), dimension(:,:), pointer :: rspheremv
 real (kind=real_kind), dimension(np,np) :: tmp
 real (kind=real_kind), dimension(np,np) :: tmp2
+real (kind=real_kind), dimension(np,np,2,nlev) :: spg
 real (kind=real_kind), dimension(np,np,nlevp) :: p_i
 real (kind=real_kind), dimension(np,np,2) :: v
 real (kind=real_kind) :: nu_ratio1, nu_ratio2
@@ -92,12 +93,33 @@ endif
 
    do ie=nets,nete
 
+      ! move this code to laplace_sphere_wk_p
+      if (hv_theta_correction==4) then
+         p_i(:,:,1) = elem(ie)%state%vtheta_dp(:,:,1,nt)
+         p_i(:,:,nlevp) = elem(ie)%state%vtheta_dp(:,:,nlev,nt)
+         do k=2,nlev
+            p_i(:,:,k)=(elem(ie)%state%vtheta_dp(:,:,k,nt) +&
+                 elem(ie)%state%vtheta_dp(:,:,k-1,nt))/2
+         enddo
+         do k=1,nlev
+            tmp(:,:) = (p_i(:,:,k+1)-p_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
+            tmp(:,:)=tmp(:,:) / (1 + abs(tmp(:,:))/hv_theta_thresh)
+            spg(:,:,1,k) = tmp(:,:)*elem(ie)%derived%grad_p(:,:,1,k)
+            spg(:,:,2,k) = tmp(:,:)*elem(ie)%derived%grad_p(:,:,2,k)
+         enddo
+      endif
 
       do k=1,nlev
          stens(:,:,k,1,ie)=laplace_sphere_wk(elem(ie)%state%dp3d(:,:,k,nt),&
               deriv,elem(ie),var_coef=var_coef1)
+
+         if (hv_theta_correction==4) then
+         stens(:,:,k,2,ie)=laplace_sphere_wk_p(elem(ie)%state%vtheta_dp(:,:,k,nt),&
+              spg(:,:,:,k),deriv,elem(ie),var_coef=var_coef1)
+         else
          stens(:,:,k,2,ie)=laplace_sphere_wk(elem(ie)%state%vtheta_dp(:,:,k,nt),&
               deriv,elem(ie),var_coef=var_coef1)
+         endif
          stens(:,:,k,3,ie)=laplace_sphere_wk(elem(ie)%state%w_i(:,:,k,nt),&
               deriv,elem(ie),var_coef=var_coef1)
          stens(:,:,k,4,ie)=laplace_sphere_wk(elem(ie)%state%phinh_i(:,:,k,nt),&
@@ -105,6 +127,7 @@ endif
          vtens(:,:,:,k,ie)=vlaplace_sphere_wk(elem(ie)%state%v(:,:,:,k,nt),deriv,elem(ie),&
               var_coef=var_coef1,nu_ratio=nu_ratio1)
       enddo
+
 
       if (hv_theta_correction==1) then
          p_i(:,:,1) = elem(ie)%state%vtheta_dp(:,:,1,nt)
@@ -114,7 +137,7 @@ endif
                  elem(ie)%state%vtheta_dp(:,:,k-1,nt))/2
          enddo
          do k=1,nlev
-            tmp(:,:) = (p_i(:,:,k+1)-p_i(:,:,k))/elem(ie)%derived%dp_ref(:,:,k)
+            tmp(:,:) = (p_i(:,:,k+1)-p_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
             tmp(:,:)=tmp(:,:) / (1 + abs(tmp(:,:))/hv_theta_thresh)
             stens(:,:,k,2,ie)=stens(:,:,k,2,ie)-tmp(:,:)*elem(ie)%derived%lap_p_wk(:,:,k)
          enddo
