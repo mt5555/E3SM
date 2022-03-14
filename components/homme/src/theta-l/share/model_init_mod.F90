@@ -95,6 +95,10 @@ contains
          ! keep only dp_ref
          elem(ie)%derived%theta_ref=0
       endif
+      if (hv_ref_profiles==3) then
+         ! keep only theta_ref
+         elem(ie)%derived%dp_ref=0
+      endif
 
       if (hv_theta_correction/=0) then
          ! compute weak laplace of p_ref
