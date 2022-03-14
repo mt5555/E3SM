@@ -57,7 +57,6 @@ integer :: i,j,k,kptr,ie,nlyr_tot,ssize
 real (kind=real_kind), dimension(:,:), pointer :: rspheremv
 real (kind=real_kind), dimension(np,np) :: tmp
 real (kind=real_kind), dimension(np,np) :: tmp2
-real (kind=real_kind), dimension(np,np,2,nlev) :: spg
 real (kind=real_kind), dimension(np,np,nlevp) :: p_i
 real (kind=real_kind), dimension(np,np,2) :: v
 real (kind=real_kind) :: nu_ratio1, nu_ratio2
@@ -93,29 +92,17 @@ endif
 
    do ie=nets,nete
 
-      ! move this code to laplace_sphere_wk_p
-      if (hv_theta_correction==4) then
-         p_i(:,:,1) = elem(ie)%state%vtheta_dp(:,:,1,nt)
-         p_i(:,:,nlevp) = elem(ie)%state%vtheta_dp(:,:,nlev,nt)
-         do k=2,nlev
-            p_i(:,:,k)=(elem(ie)%state%vtheta_dp(:,:,k,nt) +&
-                 elem(ie)%state%vtheta_dp(:,:,k-1,nt))/2
-         enddo
-         do k=1,nlev
-            tmp(:,:) = (p_i(:,:,k+1)-p_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
-            tmp(:,:)=tmp(:,:) / (1 + abs(tmp(:,:))/hv_theta_thresh)
-            spg(:,:,1,k) = tmp(:,:)*elem(ie)%derived%grad_p(:,:,1,k)
-            spg(:,:,2,k) = tmp(:,:)*elem(ie)%derived%grad_p(:,:,2,k)
-         enddo
+      if (hv_theta_correction==7) then
+         stens(:,:,:,2,ie)=laplace_sphere_wk_p(elem(ie)%state%vtheta_dp(:,:,:,nt),&
+              deriv,elem(ie),var_coef=var_coef1)
       endif
 
       do k=1,nlev
          stens(:,:,k,1,ie)=laplace_sphere_wk(elem(ie)%state%dp3d(:,:,k,nt),&
               deriv,elem(ie),var_coef=var_coef1)
 
-         if (hv_theta_correction==4) then
-         stens(:,:,k,2,ie)=laplace_sphere_wk_p(elem(ie)%state%vtheta_dp(:,:,k,nt),&
-              spg(:,:,:,k),deriv,elem(ie),var_coef=var_coef1)
+         if (hv_theta_correction==7) then
+            ! computed above
          else
          stens(:,:,k,2,ie)=laplace_sphere_wk(elem(ie)%state%vtheta_dp(:,:,k,nt),&
               deriv,elem(ie),var_coef=var_coef1)
