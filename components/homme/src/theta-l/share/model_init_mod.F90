@@ -25,7 +25,7 @@ module model_init_mod
   use control_mod,        only: qsplit,theta_hydrostatic_mode, hv_ref_profiles, &
        hv_theta_correction, tom_sponge_start
   use time_mod,           only: timelevel_qdp, timelevel_t
-  use physical_constants, only: g, TREF, Rgas, kappa
+  use physical_constants, only: g, TREF, Rgas, kappa, dd_pi
   use imex_mod,           only: test_imex_jacobian
   use eos,                only: phi_from_eos
  
@@ -48,6 +48,7 @@ contains
     real (kind=real_kind) :: tempg(np,np,nets:nete)
     real (kind=real_kind) :: temp(np,np,nlev),ps_ref(np,np)
     real (kind=real_kind) :: ptop_over_press
+    real (kind=real_kind) :: db,db_exp,cosramp(nlevp)
 
 
     ! other theta specific model initialization should go here    
@@ -78,6 +79,7 @@ contains
          elem(ie)%derived%dp_ref(:,:,k) = ( hvcoord%hyai(k+1) - hvcoord%hyai(k) )*hvcoord%ps0 + &
               (hvcoord%hybi(k+1)-hvcoord%hybi(k))*ps_ref(:,:)
       enddo
+
       elem(ie)%derived%dp_ref2 =  elem(ie)%derived%dp_ref  ! save a copy, for some laplace_p options
       call set_theta_ref(hvcoord,elem(ie)%derived%dp_ref,elem(ie)%derived%theta_ref)
       temp=elem(ie)%derived%theta_ref*elem(ie)%derived%dp_ref
@@ -98,6 +100,40 @@ contains
       if (hv_ref_profiles==3) then
          ! keep only theta_ref
          elem(ie)%derived%dp_ref=0
+      endif
+      if (hv_ref_profiles==4) then
+         ! compute a theta_ref that gets to pure pressure faster
+         do k=1,nlev
+            ! switch to p = etam(k)*p0 + hybm(k)*(ps_ref-p0)
+            db_exp=1
+            db =  (hvcoord%etai(k+1)**db_exp) *hvcoord%hybi(k+1) - (hvcoord%etai(k)**db_exp)*hvcoord%hybi(k)
+            temp(:,:,k) = ( hvcoord%etai(k+1) - hvcoord%etai(k) )*hvcoord%ps0 + &
+                 db*(ps_ref(:,:)-hvcoord%ps0)
+         enddo
+         call set_theta_ref(hvcoord,temp,elem(ie)%derived%theta_ref)
+      endif
+      if (hv_ref_profiles==5) then
+         ! compute a theta_ref that gets to pure pressure faster
+         do k=1,nlevp
+            ! cos((pi/2)* (1-eta)/(1-eta0) )**6
+            db=.95
+            if ( hvcoord%etai(k)>db) then
+               cosramp(k)=cos((dd_pi/2)*(1-hvcoord%etai(k)) / ( 1 - db) )**6
+            else
+               cosramp(k)=0
+            endif
+            if (ie==nets .and. hybrid%masterthread) print *,'HV cosramp k,val=',k,cosramp(k)
+         enddo
+         do k=1,nlev
+            ! switch to p = etam(k)*p0 + hybm(k)*(ps_ref-p0)
+            !db_exp=5
+            !db =  (hvcoord%etai(k+1)**db_exp) *hvcoord%hybi(k+1) - (hvcoord%etai(k)**db_exp)*hvcoord%hybi(k)
+            db = cosramp(k+1)*hvcoord%hybi(k+1) - cosramp(k)*hvcoord%hybi(k)
+            temp(:,:,k) = ( hvcoord%etai(k+1) - hvcoord%etai(k) )*hvcoord%ps0 + &
+                 db*(ps_ref(:,:)-hvcoord%ps0)
+         enddo
+         elem(ie)%derived%dp_ref=temp
+         call set_theta_ref(hvcoord,temp,elem(ie)%derived%theta_ref)
       endif
 
       if (hv_theta_correction/=0) then
