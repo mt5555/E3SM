@@ -11,8 +11,8 @@ tstep_type    = 5
 qsize         = 0
 theta_advect_form = 1
 pgrad_correction=1
-hv_ref_profiles=2
-hv_theta_correction=1
+hv_ref_profiles=1
+hv_theta_correction=0
 limiter_option = 9
 restartfreq   =  1
 restartfile   = "restart/R0001"
@@ -22,6 +22,7 @@ tstep         = TSTEP
 dt_remap_factor = 1
 dt_tracer_factor = 1
 vert_remap_q_alg = 10
+!vert_remap_q_alg = 11
 integration   = "explicit"
 nu            = NU1
 nu_top = 2.5e5
@@ -37,16 +38,16 @@ vfile_int     = "../vcoord/cami-26.ascii"
 /
 &analysis_nl
 infilenames=''
-output_timeunits=1,0,2    ! 1=days, 2=hours, 3=seconds
-output_frequency=1,0,0    ! 0 to disable
-output_start_time=200,0,0
-output_end_time=500,999999999,0
+output_timeunits=2,0,2    ! 1=days, 2=hours, 3=seconds
+output_frequency=6,0,2    ! 0 to disable
+output_start_time=4920,0,4800        ! 200h*24 = 4800
+output_end_time=5640,999999999,4900
 !output_varnames1='u','v','T','zeta','div','ps','geos','omega'
 output_varnames1='u','v','T','omega','ps'
 ! debug output
 output_varnames2='u','v','T','zeta','div','ps','geo','dp3d','geos','Th'
 ! output3: hourly data for 20 days  
-output_varnames3='geos','omega','zeta','ps','div'
+output_varnames3='omega','ps'
 io_stride = 32
 /
 

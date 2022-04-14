@@ -25,7 +25,8 @@ endif
 # Set default compile and link flags
 FFLAGS  = -L$(LIB_NETCDF) -I$(INC_NETCDF)
 #LDFLAGS = -L$(LIB_NETCDF) -lnetcdf -lnetcdff -lcurl -lhdf5 -lhdf5_hl -mcmodel=medium 
-LDFLAGS = -L$(LIB_NETCDF) -lnetcdf -lnetcdff -lcurl
+#LDFLAGS = -L$(LIB_NETCDF) -lnetcdf -L$(LIB_NETCDFF) -lnetcdff -lcurl
+LDFLAGS = -L$(LIB_NETCDF) -lnetcdf -L$(LIB_NETCDFF) -lnetcdff
 
 # Determine platform 
 UNAMES := $(shell uname -s)

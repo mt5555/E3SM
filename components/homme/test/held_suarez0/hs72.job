@@ -13,15 +13,17 @@
 #
 #
 #SBATCH --job-name HS72
-#SBATCH -p acme-medium
-#SBATCH --account=condo
-#SBATCH -N 30
+#XXXSBATCH -p acme-medium
+#XXXSBATCH --account=condo
+#SBATCH -p compute
+#SBATCH -N 85
 #SBATCH --time=2:00:00
-#SBATCH -x b589
+
+
 
 
 set nlev=72
-set ndays = 1200    # 1600
+set ndays = 1000     # 1600
 set nmax =  1       # no. of timesteps.  ignored, unless ndays=0
 set rfreq = 30000    # no. of days, or n. of timesteps if ndays=0
 
@@ -33,7 +35,8 @@ set NPTS = 4
 set qsize = 0         # number of tracers
 set topo = ''
 set toponame = ''
-set nu=5.5e-8
+set nu=3.4e-8
+#set nu=4.5e-8
 
 
 if ( $ne == 8 ) then
@@ -47,8 +50,19 @@ if ( $ne == 15 ) then
     # 1 degree    H model, 20 nodes, 30min for 1600days
     set tstep = 300   # H model
     #set topo = '/home/ccsm-data/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
-    set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4_fx2t.nc'
-    set toponame = fx2t
+    #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4pg2_x6t.nc'
+    set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4pg2_fx3t.nc'
+    #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4pg2_p1x4t.nc'
+    #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4pg2_x6t.nc'
+    #set toponame = x6t
+    #set toponame = ref123-x6t
+    #set toponame = ref123b-fx3t
+
+    #set tstep = 150   # H model
+    #set tstep = 5   # H model
+    set toponame = ref160-fx3t
+
+
  endif
  if ( $ne == 120 ) then
     # 0.25 degree 
@@ -70,11 +84,11 @@ if ( $ne == 15 ) then
 
 
  set HOMME = ~/codes/acme/components/homme
- set wdir = ~/scratch1/preqx
+ set wdir = ~/scratch1/hstopo
 
  set MACH = $HOMME/cmake/machineFiles/anvil.cmake
  set input = $HOMME/test/held_suarez0
- set bld = $wdir/bld72
+ set bld = $wdir/bld72-chrys
  #set exe = preqx
  set exe = theta-l
 
@@ -154,7 +168,9 @@ cat  $wdir/input.nl
 ############################################################
 date
 set echo
-srun -K -c 1 -N $SLURM_NNODES   $bld/src/$exe/$exe < $wdir/input.nl 
+srun -K -c 2 -n 5400    $bld/src/$exe/$exe < $wdir/input.nl
+#srun -K -c 2 -N $SLURM_NNODES   $bld/src/$exe/$exe < $wdir/input.nl
+#srun -K -c 1 -N $SLURM_NNODES   $bld/src/$exe/$exe < $wdir/input.nl 
 date
 
 # save timing data
