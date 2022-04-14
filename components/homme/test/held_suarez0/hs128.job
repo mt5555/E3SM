@@ -12,7 +12,7 @@
 #  75 nodes  45min
 #  50 nodes
 #
-#SBATCH --job-name HS72
+#SBATCH --job-name HS128
 #SBATCH -p acme-medium
 #SBATCH --account=condo
 #XXSBATCH -p compute
@@ -22,7 +22,7 @@
 
 
 
-set nlev=72
+set nlev=128
 set ndays = 1000     # 1600
 set nmax =  1       # no. of timesteps.  ignored, unless ndays=0
 set rfreq = 30000    # no. of days, or n. of timesteps if ndays=0
@@ -91,11 +91,11 @@ if ( $ne == 15 ) then
 # chrysalis: use -c 2 below (HT is one).  64 cores per node
  set MACH = $HOMME/cmake/machineFiles/anvil.cmake
  set input = $HOMME/test/held_suarez0
- set bld = $wdir/bld72-anvil
+ set bld = $wdir/bld128-anvil
  #set exe = preqx
  set exe = theta-l
 
- set name = hs72${toponame}-$exe-ne${ne}-nu${nu}
+ set name = hs128${toponame}-$exe-ne${ne}-nu${nu}
  echo $name
 
  mkdir -p $bld
