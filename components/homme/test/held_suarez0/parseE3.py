@@ -23,6 +23,7 @@ def lookfor1(fid,key1,key2="",allow_eof=0):
         pos=line.find(key1)
         if (-1 != pos ):
             sline = line[pos+len(key1):-1]
+            sline = sline.replace('(','( ')
             return sline
         if (len(key2)>0):
            pos=line.find(key2)

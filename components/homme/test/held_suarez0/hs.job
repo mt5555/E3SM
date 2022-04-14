@@ -20,21 +20,22 @@
 #SBATCH --job-name HS
 #SBATCH -p acme-medium
 #SBATCH --account=condo
-#SBATCH -N 30
+#SBATCH -N 12       # good values: 15,25,30,50,75,150
 #SBATCH --time=1:00:00
 
 
 set nlev=26
-set ndays = 1200
+set ndays = 35
 set nmax =  5       # no. of timesteps.  ignored, unless ndays=0
-set rfreq = 1600   # no. of days, or n. of timesteps if ndays=0
+set rfreq = 200   # no. of days, or n. of timesteps if ndays=0
 
 # use TensorHV order3 scalings, for all resolutions:
 set nu = 4.5e-8
 
 
 # 0 = normal, 1=restart
-set runtype = 0 
+set runtype = 1
+
 
 set ne = 30
 set NPTS = 4
@@ -54,8 +55,10 @@ if ( $ne == 30 ) then
    set tstep = 300       # dynamics timestep
    #set topo = '/home/ccsm-data/inputdata/atm/cam/topo/USGS-gtopo30_ne30np4_16xdel2-PFC-consistentSGH.nc'
    #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4_16xdel2-nolim.nc'
-   set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4pg2_fx2t.nc'
-   set toponame = fx2t
+   set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4pg2_x6t.nc'
+   #set topo = '/lcrc/group/acme/ac.mtaylor/topodata/ne30/USGS-gtopo30_ne30np4pg2_fx2t.nc'
+   set toponame = x6t-hvref1
+   #set toponame = x6t
 endif
 if ( $ne == 120 ) then
    # 0.25 degree 
@@ -74,7 +77,7 @@ endif
 
 
 set HOMME = ~/codes/acme/components/homme
-set wdir = ~/scratch1/preqx
+set wdir = ~/scratch1/hstopo
 
 set MACH = $HOMME/cmake/machineFiles/anvil.cmake
 set input = $HOMME/test/held_suarez0
@@ -115,7 +118,7 @@ mkdir $wdir
 mkdir $wdir/movies
 mkdir $wdir/restart
 #use a restart file from a different simulation
-#ln -fs $wdir/../restart-ne30L26-8x $wdir/restart
+ln -fs $wdir/../restart-ne30L26-x6t/* $wdir/restart
 
 
 
