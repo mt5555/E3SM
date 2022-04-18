@@ -13,7 +13,8 @@ module held_suarez_mod
   use hybrid_mod,             only: hybrid_t
   use hybvcoord_mod,          only: hvcoord_t
   use kinds,                  only: real_kind, iulog
-  use physical_constants,     only: p0, kappa,g, dd_pi, Rgas
+  use physical_constants,     only: p0, kappa,g, dd_pi, Rgas, TREF
+  use control_mod,            only: sub_case
   use physics_mod,            only: prim_condense
   use time_mod,               only: secpday
 #ifndef HOMME_WITHOUT_PIOLIBRARY
@@ -57,13 +58,18 @@ contains
         
     do j=1,np
        do i=1,np
-          psfrc(i,j) = (elemin%state%ps_v(i,j,nm1))
+          if (sub_case==4) then
+             psfrc(i,j) = hvcoord%ps0 * exp ( -elemin%state%phis(i,j)/(Rgas*TREF)) 
+          else
+             psfrc(i,j) = (elemin%state%ps_v(i,j,nm1))
+          endif
        end do
     end do
 
     elemin%derived%FT(:,:,:) = elemin%derived%FT(:,:,:) + &
          hs_T_forcing(hvcoord,psfrc(1,1),               &
          temperature,elemin%spherep,np, nlev)
+
 
     v(:,:,1:2,:) = elemin%state%v(:,:,1:2,:,nm1)
 #if ( defined MODEL_THETA_L ) 
@@ -209,6 +215,10 @@ contains
              Teq     = (315.0D0 - dT_y*snlatsq(i,j))*pratk
 #endif
              hs_T_frc(i,j,k)= -k_t(i,j)*(T(i,j,k)-Teq)
+             if (sub_case==2) hs_T_frc(i,j,k)= -k_a*(T(i,j,k)-Teq)
+             if (sub_case==3) then
+                if (etam > sigma_b) hs_T_frc(i,j,k)=0
+             endif
           end do
        end do
     end do
