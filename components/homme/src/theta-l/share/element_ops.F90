@@ -742,7 +742,7 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
 
 
   !_____________________________________________________________________
-  subroutine set_theta_ref(hvcoord,dp,theta_ref)
+  subroutine set_theta_ref(hvcoord,dp,theta_ref,linear_profile)
 #ifdef HOMMEXX_BFB_TESTING
     use bfb_mod, only: bfb_pow
 #endif
@@ -756,6 +756,7 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   type (hvcoord_t),     intent(in)  :: hvcoord                      ! hybrid vertical coordinate struct
   real (kind=real_kind), intent(in) :: dp(np,np,nlev)
   real (kind=real_kind), intent(out) :: theta_ref(np,np,nlev)
+  integer :: linear_profile
   
   !   local
   real (kind=real_kind) :: p_i(np,np,nlevp)
@@ -780,7 +781,12 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
      exner(:,:,k) = ( (p_i(:,:,k) + p_i(:,:,k+1))/(2*p0)) **kappa
 #endif
      !theta_ref(:,:,k,ie) = (T0/exner(:,:,k) + T1)*Cp*dp_ref(:,:,k,ie)
-     theta_ref(:,:,k) = (T0/exner(:,:,k) + T1)
+     if (linear_profile==1) then
+        ! linearize around (1-exner)
+        theta_ref(:,:,k) = T0 + T0*(1-exner(:,:,k)) + T1   
+     else
+        theta_ref(:,:,k) = (T0/exner(:,:,k) + T1)
+     endif
   enddo
 
   end subroutine

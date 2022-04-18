@@ -81,23 +81,36 @@ contains
       enddo
 
       elem(ie)%derived%dp_ref2 =  elem(ie)%derived%dp_ref  ! save a copy, for some laplace_p options
-      call set_theta_ref(hvcoord,elem(ie)%derived%dp_ref,elem(ie)%derived%theta_ref)
+      if (hv_ref_profiles==8) then
+         call set_theta_ref(hvcoord,elem(ie)%derived%dp_ref,elem(ie)%derived%theta_ref,1)
+      else
+         call set_theta_ref(hvcoord,elem(ie)%derived%dp_ref,elem(ie)%derived%theta_ref,0)
+      endif
       temp=elem(ie)%derived%theta_ref*elem(ie)%derived%dp_ref
       call phi_from_eos(hvcoord,elem(ie)%state%phis,&
            temp,elem(ie)%derived%dp_ref,elem(ie)%derived%phi_ref)
+
+      ! recompute theta_ref, using linear profile
+      if (hv_ref_profiles==6) then
+         call set_theta_ref(hvcoord,elem(ie)%derived%dp_ref,elem(ie)%derived%theta_ref,1)
+      endif
+      if (hv_ref_profiles==7) then
+         call set_theta_ref(hvcoord,elem(ie)%derived%dp_ref,elem(ie)%derived%theta_ref,1)
+      endif
+         
       if (hv_ref_profiles==0) then
          ! keep PHI profile, but dont use theta and dp:
          elem(ie)%derived%theta_ref=0
          elem(ie)%derived%dp_ref=0
       endif
-      if (hv_ref_profiles==1) then
+      if (hv_ref_profiles==1 .or. hv_ref_profiles==6 .or. hv_ref_profiles==8) then
          ! keep all profiles
       endif
       if (hv_ref_profiles==2) then
          ! keep only dp_ref
          elem(ie)%derived%theta_ref=0
       endif
-      if (hv_ref_profiles==3) then
+      if (hv_ref_profiles==3 .or. hv_ref_profiles==7) then
          ! keep only theta_ref
          elem(ie)%derived%dp_ref=0
       endif
@@ -110,7 +123,7 @@ contains
             temp(:,:,k) = ( hvcoord%etai(k+1) - hvcoord%etai(k) )*hvcoord%ps0 + &
                  db*(ps_ref(:,:)-hvcoord%ps0)
          enddo
-         call set_theta_ref(hvcoord,temp,elem(ie)%derived%theta_ref)
+         call set_theta_ref(hvcoord,temp,elem(ie)%derived%theta_ref,0)
       endif
       if (hv_ref_profiles==5) then
          ! compute a theta_ref that gets to pure pressure faster
@@ -133,7 +146,7 @@ contains
                  db*(ps_ref(:,:)-hvcoord%ps0)
          enddo
          elem(ie)%derived%dp_ref=temp
-         call set_theta_ref(hvcoord,temp,elem(ie)%derived%theta_ref)
+         call set_theta_ref(hvcoord,temp,elem(ie)%derived%theta_ref,0)
       endif
 
       if (hv_theta_correction/=0) then
