@@ -17,7 +17,7 @@ set mesh = ne${NE}np${NPTS}
 cd $WDIR
 if (!  -x $exe ) then
   # configure  set output = `$TOOLDIR/../../../../cime/CIME/Tools/get_case_env`
-  eval $output
+  #eval $output
   cmake -C $MACH -DPREQX_NP=$NPTS -DPREQX_PLEV=26 $TOOLDIR/../..
   # compile the tool
   make -j4 homme_tool
