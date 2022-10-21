@@ -851,7 +851,7 @@ contains
               dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
               dz(:,:)=dz(:,:) / (1 + abs(dz(:,:))/hv_theta_thresh)
               elem(ie)%state%vtheta_dp(:,:,k,nt) = elem(ie)%state%vtheta_dp(:,:,k,nt) + &
-                   nu*(dt/2/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
+                   nu*(dt/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
            enddo
 
 
