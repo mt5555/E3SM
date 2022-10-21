@@ -616,6 +616,61 @@ contains
      enddo
   enddo
 
+  if (hv_theta_correction==8) then
+     dt=dt2
+     do ie=nets,nete
+        laplace_p_iter=1
+        do l=1,laplace_p_iter
+           
+           temp_i(:,:,1) = elem(ie)%state%vtheta_dp(:,:,1,nt)
+           temp_i(:,:,nlevp) = elem(ie)%state%vtheta_dp(:,:,nlev,nt)
+           do k=2,nlev
+              temp_i(:,:,k)=(elem(ie)%state%vtheta_dp(:,:,k,nt) +&
+                   elem(ie)%state%vtheta_dp(:,:,k-1,nt))/2
+           enddo
+           do k=1,nlev
+              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
+              dz(:,:)=dz(:,:) / (1 + abs(dz(:,:))/hv_theta_thresh)
+              temp(:,:,k) = elem(ie)%state%vtheta_dp(:,:,k,nt) + &
+                   nu*(dt/2/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
+              
+           enddo
+           
+           temp_i(:,:,1) = temp(:,:,1)
+           temp_i(:,:,nlevp) = temp(:,:,nlev)
+           do k=2,nlev
+              temp_i(:,:,k)=(temp(:,:,k) + temp(:,:,k-1))/2
+           enddo
+           do k=1,nlev
+              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
+              dz(:,:)=dz(:,:) / (1 + abs(dz(:,:))/hv_theta_thresh)
+              temp(:,:,k) = elem(ie)%state%vtheta_dp(:,:,k,nt) + &
+                   nu*(dt/2/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
+           enddo
+           
+           temp_i(:,:,1) = temp(:,:,1)
+           temp_i(:,:,nlevp) = temp(:,:,nlev)
+           do k=2,nlev
+              temp_i(:,:,k)=(temp(:,:,k) + temp(:,:,k-1))/2
+           enddo
+           do k=1,nlev
+              dz(:,:)=(temp_i(:,:,k+1)-temp_i(:,:,k))/elem(ie)%derived%dp_ref2(:,:,k)
+              dz(:,:)=dz(:,:) / (1 + abs(dz(:,:))/hv_theta_thresh)
+              elem(ie)%state%vtheta_dp(:,:,k,nt) = elem(ie)%state%vtheta_dp(:,:,k,nt) + &
+                   nu*(dt/laplace_p_iter)*elem(ie)%derived%biharm_p(:,:,k) * dz(:,:)
+           enddo
+           
+           
+           
+        enddo
+     enddo
+  endif
+
+
+
+
+
+  
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   !  hyper viscosity
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

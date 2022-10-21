@@ -164,7 +164,7 @@ contains
 
     enddo 
 
-    if (hv_theta_correction==2 .or. hv_theta_correction==3) then
+    if (hv_theta_correction==3 .or. hv_theta_correction==8) then
     do k=1,nlev
        do ie=nets,nete
           ! weak laplace has mass matrix built in. remove it, so we can call make_C0

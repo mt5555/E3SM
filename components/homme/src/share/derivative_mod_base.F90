@@ -1120,7 +1120,7 @@ contains
 
 
 !DIR$ ATTRIBUTES FORCEINLINE :: laplace_sphere_wk
-  function laplace_sphere_wk_p(s,deriv,elem,var_coef) result(laplace)
+  function laplace_sphere_wk_p(s,deriv,elem,var_coef,hv_theta_correction) result(laplace)
 !
 !   input:  s = scalar
 !   ouput:  -< grad(PHI), grad(s) >   = weak divergence of grad(s)
@@ -1133,7 +1133,7 @@ contains
     real(kind=real_kind)             :: laplace(np,np,nlev)
     real(kind=real_kind)             :: p_i(np,np,nlevp)
     real(kind=real_kind)             :: u_i(np,np,2,nlevp)
-    integer i,j,k
+    integer i,j,k, hv_theta_correction
 
     ! Local
     real(kind=real_kind) :: tmp(np,np)
@@ -1174,8 +1174,13 @@ contains
        endif
     endif
 
-
-   
+    if (hv_theta_correction==4) then
+       ! div grad_p
+       do k=1,nlev
+          laplace(:,:,k)=divergence_sphere_wk(g2(:,:,:,k),deriv,elem)
+       enddo
+    else
+       ! div_p grad_p
     u_i(:,:,:,1) = g2(:,:,:,1)
     u_i(:,:,:,nlevp) = g2(:,:,:,nlev)
     do k=2,nlev
@@ -1190,6 +1195,7 @@ contains
 
        laplace(:,:,k)=divergence_sphere_wk(g2(:,:,:,k),deriv,elem) - elem%spheremp(:,:)*tmp(:,:)
     enddo
+    endif
 
 
 

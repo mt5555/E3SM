@@ -92,16 +92,16 @@ endif
 
    do ie=nets,nete
 
-      if (hv_theta_correction==7) then
+      if (hv_theta_correction==7 .or. hv_theta_correction==4) then
          stens(:,:,:,2,ie)=laplace_sphere_wk_p(elem(ie)%state%vtheta_dp(:,:,:,nt),&
-              deriv,elem(ie),var_coef=var_coef1)
+              deriv,elem(ie),var_coef=var_coef1,hv_theta_correction=hv_theta_correction)
       endif
 
       do k=1,nlev
          stens(:,:,k,1,ie)=laplace_sphere_wk(elem(ie)%state%dp3d(:,:,k,nt),&
               deriv,elem(ie),var_coef=var_coef1)
 
-         if (hv_theta_correction==7) then
+         if (hv_theta_correction==7 .or. hv_theta_correction==4) then
             ! computed above
          else
          stens(:,:,k,2,ie)=laplace_sphere_wk(elem(ie)%state%vtheta_dp(:,:,k,nt),&
