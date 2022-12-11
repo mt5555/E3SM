@@ -20,7 +20,7 @@ module prim_advance_mod
     theta_hydrostatic_mode, tstep_type, theta_advect_form, hypervis_subcycle_tom, pgrad_correction,&
     vtheta_thresh, hv_theta_correction, hv_theta_thresh
   use derivative_mod,     only: derivative_t, divergence_sphere, gradient_sphere, laplace_sphere_wk,&
-    laplace_z, vorticity_sphere, vlaplace_sphere_wk 
+    laplace_z, vorticity_sphere, vlaplace_sphere_wk, del4_z 
   use derivative_mod,     only: subcell_div_fluxes, subcell_dss_fluxes
   use dimensions_mod,     only: max_corner_elem, nlev, nlevp, np, qsize
   use edge_mod,           only: edge_g, edgevpack_nlyr, edgevunpack_nlyr
@@ -584,6 +584,7 @@ contains
   real (kind=real_kind) :: exner(np,np,nlev)
   real (kind=real_kind) :: pnh(np,np,nlevp)    
   real (kind=real_kind) :: temp(np,np,nlev)    ,dz(np,np)
+  real (kind=real_kind) :: vtemp(np,np,2,nlev)  
   real (kind=real_kind) :: temp_i(np,np,nlevp)    
   real (kind=real_kind) :: dt,xfac
 
@@ -611,6 +612,18 @@ contains
      exner0(k) = (hvcoord%etam(k)*hvcoord%ps0/p0 )**kappa
   enddo
 
+#if 0
+  ! apply vertical viscosity at CFL=0.5
+  do ie=nets,nete
+     call del4_z(elem(ie)%state%vtheta_dp(:,:,:,nt),temp,1,nlev)
+     elem(ie)%state%vtheta_dp(:,:,:,nt) = elem(ie)%state%vtheta_dp(:,:,:,nt) -&
+          0.02*temp(:,:,:)
+     call del4_z(elem(ie)%state%dp3d(:,:,:,nt),temp,1,nlev)
+     elem(ie)%state%dp3d(:,:,:,nt) = elem(ie)%state%dp3d(:,:,:,nt) -&
+          0.02*temp(:,:,:)
+  enddo
+#endif
+
 
   do ie=nets,nete
      ! convert vtheta_dp -> theta
@@ -619,6 +632,32 @@ contains
              elem(ie)%state%vtheta_dp(:,:,k,nt)/elem(ie)%state%dp3d(:,:,k,nt)
      enddo
   enddo
+
+#if 0
+  ! apply vertical viscosity at CFL=0.5
+  do l=1,10
+  do ie=nets,nete
+     call del4_z(elem(ie)%state%vtheta_dp(:,:,:,nt),temp,1,nlev)
+     elem(ie)%state%vtheta_dp(:,:,:,nt) = elem(ie)%state%vtheta_dp(:,:,:,nt) -&
+          0.1*temp(:,:,:)
+  enddo
+  enddo
+#endif
+#if 0
+  ! apply vertical viscosity at CFL=0.5
+  do ie=nets,nete
+     call del4_z(elem(ie)%state%v(:,:,:,:,nt),vtemp,2,nlev)
+     elem(ie)%state%v(:,:,:,:,nt) = elem(ie)%state%v(:,:,:,:,nt) -&
+          0.1*vtemp(:,:,:,:)
+     call del4_z(elem(ie)%state%vtheta_dp(:,:,:,nt),temp,1,nlev)
+     elem(ie)%state%vtheta_dp(:,:,:,nt) = elem(ie)%state%vtheta_dp(:,:,:,nt) -&
+          0.1*temp(:,:,:)
+     call del4_z(elem(ie)%state%dp3d(:,:,:,nt),temp,1,nlev)
+     elem(ie)%state%dp3d(:,:,:,nt) = elem(ie)%state%dp3d(:,:,:,nt) -&
+          0.1*temp(:,:,:)
+  enddo
+#endif
+
 
   if (hv_theta_correction==8) then
      dt=dt2

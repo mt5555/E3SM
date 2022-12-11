@@ -84,6 +84,7 @@ private
   public  :: vlaplace_sphere_wk_cartesian
 !  public  :: laplace_eta
   public  :: laplace_z
+  public  :: del4_z
   public  :: element_boundary_integral
   public  :: limiter_optim_iter_full
   public  :: limiter_clip_and_sum
@@ -1400,6 +1401,39 @@ contains
        do k=1,nk
           laplace(:,:,n,k) =( u_z(:,:,k+1) - u_z(:,:,k) )/dz    ! dz(k)
        enddo
+    enddo
+    end subroutine
+
+
+  subroutine del4_z(v,laplace,ncomp,nk)
+!
+!   input:  v = scalar 
+!   ouput:  vertical del4 operator in z coordinates
+!   output is multipled by the Eigenvalue of del4 = 10/ delz**4.  
+!
+!   to apply with CFL=nu:
+!   call delz_z(v,laplace,ncomp,nk); v = v - nu*laplace
+!
+    integer :: ncomp,nk
+    real(kind=real_kind), intent(in) :: v(np,np,ncomp,nk)
+    real(kind=real_kind), intent(out):: laplace(np,np,ncomp,nk)
+
+    ! local
+    integer :: l,l1p,l2p,l1n,l2n
+
+    do l=1,nk
+       l1p = min(l+1,nk)
+       l2p = min(l+2,nk)
+       if (l.eq.nk) l2p=nk-1
+       l1n = max(l-1,1)
+       l2n = max(l-2,1)
+       if (l.eq.1) l2n=2
+       
+       ! the 10 in the scaling below comes from 4th order Laplacian:
+       ! eigenvalue of (del**4) = 10 / delz**4.         
+       ! vert_vis = damping time on smallest wavelength 
+       laplace(:,:,:,l)=(1.00/10d0)* &
+            (v(:,:,:,l2p)-4*v(:,:,:,l1p)+6*v(:,:,:,l)-4*v(:,:,:,l1n) + v(:,:,:,l2n))
     enddo
     end subroutine
 
