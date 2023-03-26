@@ -16,6 +16,7 @@ module prim_state_mod
   use hybvcoord_mod,    only: hvcoord_t
   use global_norms_mod, only: global_integral, linf_snorm, l1_snorm, l2_snorm
   use element_mod,      only: element_t
+  use element_ops,      only: get_field
   use viscosity_mod,    only: compute_zeta_C0
   use reduction_mod,    only: parallelmax,parallelmin
   use perf_mod,         only: t_startf, t_stopf
@@ -96,6 +97,7 @@ contains
     real (kind=real_kind)  :: tmp1(nets:nete)
     real (kind=real_kind)  :: ps(np,np)
     real (kind=real_kind)  :: dp(np,np)
+    real (kind=real_kind)  :: tdiag(np,np,nlev)
     !    real (kind=real_kind)  :: E(np,np)
 
     real (kind=real_kind) :: umin_local(nets:nete), umax_local(nets:nete), usum_local(nets:nete), &
@@ -111,11 +113,11 @@ contains
 
 
     real (kind=real_kind) :: umin_p, vmin_p, tmin_p, qvmin_p(qsize_d),&
-         psmin_p, dpmin_p
+         psmin_p, dpmin_p, TSmin_p
 
 
     real (kind=real_kind) :: umax_p, vmax_p, tmax_p, qvmax_p(qsize_d),&
-         psmax_p, dpmax_p
+         psmax_p, dpmax_p, TSmax_p
 
     real (kind=real_kind) :: usum_p, vsum_p, tsum_p, qvsum_p(qsize_d),&
          pssum_p, dpsum_p
@@ -192,6 +194,15 @@ contains
        call wrap_repro_sum(nvars=1, comm=hybrid%par%comm)
        qvsum_p(q) = global_shared_sum(1)
     enddo
+    
+    ! compute TS min/max
+    do ie=nets,nete
+       call get_field(elem(ie),'temperature',tdiag,hvcoord,n0,n0q)
+       psmin_local(ie) = MINVAL(tdiag(:,:,nlev))
+       psmax_local(ie) = MAXVAL(tdiag(:,:,nlev))
+    enddo
+    TSmin_p = ParallelMin(psmin_local,hybrid)
+    TSmax_p = ParallelMax(psmax_local,hybrid)
 
     !
     do ie=nets,nete
@@ -345,6 +356,7 @@ contains
        do q=1,qsize
           write(iulog,102) "qv(",q,")= ",qvmin_p(q), qvmax_p(q), qvsum_p(q)
        enddo
+       write(iulog,100) "TBOT= ",TSmin_p,TSmax_p
        write(iulog,100) "ps= ",psmin_p,psmax_p,pssum_p
        write(iulog,'(a,E23.15,a,E23.15,a)') "      M = ",Mass,' kg/m^2',Mass2,' mb     '
 

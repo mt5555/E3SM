@@ -66,10 +66,19 @@ try:
     str = lookfor1(sys.stdin,"theta_hydrostatic_mode ","",0)
     str=str.split()
     hydrostatic_mode  = (str[1]=="T")
-
+    
     str = lookfor1(sys.stdin,"tstep ","",0)
     str=str.split()
     tstep=float(str[1])
+
+    str = lookfor1(sys.stdin,"Running dycore: ","",0)
+    print(str)
+    str=str.split()
+    preqx = (str[0]=="preqx")
+    if preqx:
+        hydrostatic_mode = False
+
+    
     print('NCPU = %i tstep=%f NH=%i' % (ncpu, tstep, not hydrostatic_mode))
     while 1:
         # nstep=           3  time=  1.041666666666667E-002  [day]
@@ -80,7 +89,8 @@ try:
         time.extend([n*tstep/(24*3600)])
 
         # look for mu. return all zeros if we find dz(m) first:
-        str = lookfor1(sys.stdin,"mu    =","dz(m) =",0)
+        #str = lookfor1(sys.stdin,"mu    =","dz(m) =",0)
+        str = lookfor1(sys.stdin,"mu    =","dp    =",0)
         str=str.split()
         mumin.extend([float(str[0])])
         mumax.extend([float(str[3])])
@@ -94,7 +104,7 @@ try:
         # KE,d/dt,diss:
         # IE,d/dt,diss:
         # PE,d/dt,diss:
-        str = lookfor1(sys.stdin,"KE,d/dt","",0)
+        str = lookfor1(sys.stdin,"KE,d/dt,diss","",0)
         str=str.split()
         KE.extend([float(str[1])])
         if (len(str) >= 4):
@@ -117,9 +127,14 @@ try:
            str=str.split()
            IPEdiss.extend([float(str[3])])
 
-        str = lookfor1(sys.stdin," E,d/dt","",0)
-        str=str.split()
-        DELE.extend([float(str[2])])
+        if preqx:
+            str = lookfor1(sys.stdin," E,dE/","",0)
+            str=str.split()
+            DELE.extend([float(str[2])])
+        else:
+            str = lookfor1(sys.stdin," E,d/dt","",0)
+            str=str.split()
+            DELE.extend([float(str[2])])
 
         #print 'parsed nstep=%i' % ( n)
 
