@@ -1093,7 +1093,8 @@ contains
   real (kind=real_kind) :: omega_i(np,np,nlevp)
   real (kind=real_kind) :: omega(np,np,nlev)
   real (kind=real_kind) :: vort(np,np,nlev)           ! vorticity
-  real (kind=real_kind) :: divdp(np,np,nlev)     
+  real (kind=real_kind) :: divdp(np,np,nlev)
+  real (kind=real_kind) :: divdp_expanded(np,np,nlev)     
   real (kind=real_kind) :: phi(np,np,nlev)
   real (kind=real_kind) :: pnh(np,np,nlev)               ! nh (nonydro) pressure
   real (kind=real_kind) :: dp3d_i(np,np,nlevp)
@@ -1228,6 +1229,15 @@ contains
 
         divdp(:,:,k)=divergence_sphere(vtemp(:,:,:,k),deriv,elem(ie))
         vort(:,:,k)=vorticity_sphere(elem(ie)%state%v(:,:,:,k,n0),deriv,elem(ie))
+
+#undef DIVDP_ALT
+#ifdef DIVDP_ALT
+        vtemp(:,:,:,k) = gradient_sphere( dp3d(:,:,k), deriv, elem(ie)%Dinv);
+        temp(:,:,k)=divergence_sphere(elem(ie)%state%v(:,:,:,k,n0),deriv,elem(ie))
+        divdp_expanded(:,:,k)=elem(ie)%state%v(:,:,1,k,n0)*vtemp(:,:,1,k) + &
+             elem(ie)%state%v(:,:,2,k,n0)*vtemp(:,:,2,k) + &
+             dp3d(:,:,k)*temp(:,:,k)
+#endif        
      enddo
 
      ! Compute omega =  Dpi/Dt   Used only as a DIAGNOSTIC
@@ -1712,9 +1722,17 @@ contains
                 + dt2*phi_tens(:,:,k))
         endif
 
+#ifdef DIVDP_ALT
+        elem(ie)%state%dp3d(:,:,k,np1) = &
+             elem(ie)%spheremp(:,:) * (scale3 * elem(ie)%state%dp3d(:,:,k,nm1) - &
+             scale1*dt2 * (divdp_expanded(:,:,k) + eta_dot_dpdn(:,:,k+1)-eta_dot_dpdn(:,:,k)))
+#else        
         elem(ie)%state%dp3d(:,:,k,np1) = &
              elem(ie)%spheremp(:,:) * (scale3 * elem(ie)%state%dp3d(:,:,k,nm1) - &
              scale1*dt2 * (divdp(:,:,k) + eta_dot_dpdn(:,:,k+1)-eta_dot_dpdn(:,:,k)))
+#endif
+
+        
 #endif
      enddo
      if ( .not. theta_hydrostatic_mode ) then
