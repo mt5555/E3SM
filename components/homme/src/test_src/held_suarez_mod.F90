@@ -144,6 +144,10 @@ contains
              k_v = k_f*MAX(0.0_real_kind,(etam - sigma_b )/(1.0_real_kind - sigma_b))
              if (sub_case==5) &
                   k_v = 8*k_f*MAX(0.0_real_kind,(etam - sigma_b )/(1.0_real_kind - sigma_b))
+
+             ! surface drag: 8x stronger 
+             if (sub_case==6 .and. k==nlevels)  k_v = 8*k_v
+
              hs_v_frc(i,j,1,k) = -k_v*v(i,j,1,k)
              hs_v_frc(i,j,2,k) = -k_v*v(i,j,2,k)
 
@@ -217,8 +221,8 @@ contains
              Teq     = (315.0D0 - dT_y*snlatsq(i,j))*pratk
 #endif
              hs_T_frc(i,j,k)= -k_t(i,j)*(T(i,j,k)-Teq)
-             if (sub_case==2) hs_T_frc(i,j,k)= -k_a*(T(i,j,k)-Teq)
-             if (sub_case==5) hs_T_frc(i,j,k)= -k_a*(T(i,j,k)-Teq)
+             if (sub_case==2 .or. sub_case==5 .or. sub_case==6) &
+                  hs_T_frc(i,j,k)= -k_a*(T(i,j,k)-Teq)
              if (sub_case==3) then
                 if (etam > sigma_b) hs_T_frc(i,j,k)=0
              endif
