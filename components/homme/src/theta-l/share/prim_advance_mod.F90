@@ -696,9 +696,13 @@ contains
         do k=1,nlev
            vtens(:,:,:,k,ie)=-nu  *vtens(:,:,:,k,ie) ! u,v
            stens(:,:,k,1,ie)=-nu_p*stens(:,:,k,1,ie) ! dp3d
-           stens(:,:,k,2,ie)=-nu  *stens(:,:,k,2,ie) ! theta
+           if (k==nlev) then
+              stens(:,:,k,2,ie)=-nu_s*stens(:,:,k,2,ie) ! theta
+           else
+              stens(:,:,k,2,ie)=-nu*stens(:,:,k,2,ie) ! theta
+           endif
            stens(:,:,k,3,ie)=-nu  *stens(:,:,k,3,ie) ! w
-           stens(:,:,k,4,ie)=-nu_s*stens(:,:,k,4,ie) ! phi
+           stens(:,:,k,4,ie)=-nu  *stens(:,:,k,4,ie) ! phi
         enddo
         
         kptr=0;      call edgeVpack_nlyr(edge_g,elem(ie)%desc,vtens(:,:,:,:,ie),2*nlev,kptr,nlyr_tot)
