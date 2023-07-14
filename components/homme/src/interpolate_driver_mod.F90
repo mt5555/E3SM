@@ -867,7 +867,7 @@ contains
     character(*), intent(in), optional :: varname
 #ifndef HOMME_WITHOUT_PIOLIBRARY
     ! local
-    character(len=varname_len), dimension(1) :: varnames
+    character(len=varname_len), dimension(2) :: varnames
     type(file_t)     :: infile
     type(edgeBuffer_t) :: edge    
     real(kind=real_kind), allocatable :: farray(:)
@@ -881,12 +881,14 @@ contains
     ncnt_in = sum(elem(1:nelemd)%idxp%numUniquePts)
 
     varnames(1)="PHIS"
+    varnames(2)="SGH30"
     if (present(varname)) varnames(1) = trim(varname)
     call infile_initialize(elem, par,infilenames(1), varnames, infile)
 
 
     allocate(farray(ncnt_in))
     farray = 1.0e-37
+    if (par%masterproc) print *,"reading ",varnames(1)
     call pio_read_darray(infile%FileID, infile%vars%vardesc(1), iodesc2d, farray, ierr)
     !call pio_read_darray(infile%FileID, infile%vars%vardesc(i), iodesc3d, farray, ierr)
     !call pio_read_darray(infile%FileID, infile%vars%vardesc(i), iodesc3dp1, farray, ierr)
@@ -910,6 +912,35 @@ contains
     do ie=1,nelemd
        call edgeVunpack(edge, elem(ie)%state%phis(:,:),ilev,0,ie)
     end do
+
+    farray = 1.0e-37
+    if (par%masterproc) print *,"reading ",varnames(2)
+    call pio_read_darray(infile%FileID, infile%vars%vardesc(2), iodesc2d, farray, ierr)
+    !call pio_read_darray(infile%FileID, infile%vars%vardesc(i), iodesc3d, farray, ierr)
+    !call pio_read_darray(infile%FileID, infile%vars%vardesc(i), iodesc3dp1, farray, ierr)
+
+    offset=0
+    do ie=1,nelemd
+       allocate(ftmp(elem(ie)%idxP%NumUniquePts, ilev))
+       do k=1,ilev
+          do ii=1,elem(ie)%idxP%NumUniquePts
+             iv=(offset+ii+(k-1)*ncnt_in)
+             ftmp(ii,k) = farray(iv)
+          end do
+       end do
+       offset = offset+elem(ie)%idxP%NumUniquePts
+       elem(ie)%derived%sgh30(:,:)=0
+       call putUniquePoints(elem(ie)%idxP, ftmp(:,1), elem(ie)%derived%sgh30(:,:))
+       call edgevpack(edge, elem(ie)%derived%sgh30(:,:),ilev,0,ie)
+       deallocate(ftmp)
+    end do
+    call bndry_exchangeV(par, edge)
+    do ie=1,nelemd
+       call edgeVunpack(edge, elem(ie)%derived%sgh30(:,:),ilev,0,ie)
+    end do
+
+
+
 
 
     deallocate(farray)

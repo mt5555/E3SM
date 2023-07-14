@@ -9,11 +9,11 @@ module held_suarez_mod
   use dimensions_mod,         only: nlev,np,qsize,nlevp
   use element_mod,            only: element_t
   use element_state,          only: timelevels
-  use element_ops,            only: set_thermostate, get_temperature
+  use element_ops,            only: set_thermostate, get_temperature, get_phi
   use hybrid_mod,             only: hybrid_t
   use hybvcoord_mod,          only: hvcoord_t
   use kinds,                  only: real_kind, iulog
-  use physical_constants,     only: p0, kappa,g, dd_pi, Rgas, TREF
+  use physical_constants,     only: p0, kappa,g, dd_pi, Rgas, TREF, g
   use control_mod,            only: sub_case
   use physics_mod,            only: prim_condense
   use time_mod,               only: secpday
@@ -53,6 +53,17 @@ contains
     real (kind=real_kind)                   :: fv(np,np,3,nlev)
     integer                                 :: i,j,k,q
 
+    ! tms
+    real (kind=real_kind) :: pi(np,np,nlev)
+    real (kind=real_kind) :: zm(np,np,nlev)
+    real (kind=real_kind) :: phi(np,np,nlev)
+    real (kind=real_kind) :: phi_i(np,np,nlevp)
+    real (kind=real_kind) :: ksrf(np,np)
+    real (kind=real_kind) :: r_exner(np,np,nlev)
+    real (kind=real_kind) :: ucomp(np,np,nlev)
+    real (kind=real_kind) :: vcomp(np,np,nlev)
+    
+
     dtf_q = dt
     call get_temperature(elemin,temperature,hvcoord,nm1)
         
@@ -85,6 +96,87 @@ contains
 #else
     elemin%derived%FM(:,:,1:2,:) = elemin%derived%FM(:,:,1:2,:) + fv(:,:,1:2,:)
 #endif
+
+
+#if 0
+Notes on TMS:
+compute_tms() output is ksrf, in units of kg/s/m2
+ksrf is of the form rho*tau*|V|
+in CAMs vertial diffusion, it is applied implicitly, but if it was applied explictly,
+it would be via:
+           u(:ncol,pver) = u(:ncol,pver) + tmp1(:ncol)*taux(:ncol)
+           v(:ncol,pver) = v(:ncol,pver) + tmp1(:ncol)*tauy(:ncol)
+           taux = ksrf*u
+           tauy = ksrf*v
+           tmp1 = ztod*g/pdel
+and this is consistent with units of kg/s/m2 for tau
+              
+clubb scales the output of compute_tms by: ksrf/rho_ds_zm(1)
+  dz_g(k) = state1%zi(i,k)-state1%zi(i,k+1)  
+  rho(i,k+1)           = invrs_gravit*state1%pdel(i,pver-k+1)/dz_g(pver-k+1)   
+  rho_ds_zt(k+1)       = real(rho(i,k+1), kind = core_rknd)                    
+  rho_ds_zt(1)       = rho_ds_zt(2)                                           
+  rho_ds_zm       = zt2zm_api(rho_ds_zt)
+                  = zt2zm(azt) = spine based interpolation to midpoints from interfaces
+
+  CLUBB scalings looks to be   dz*g/pdel
+
+sgh30 ranges from 0 up to about 400, but is mostly around 100 over rough topo
+order of magnitude esimates:
+! Determine z0m for orography              ! sgh=1          sgh=100    
+z0oro = min( z0fac * horo, z0max )           .1          10
+! Calculate neutral drag coefficient
+cd = ( karman / log( ( zm(i,pver) + z0oro ) / z0oro) )**2
+take zm=10                                   .0075        .33
+multiply by rho*g/dp3d  = 1/dz =            .00075        .033        
+Damping time in seconds:                  1333s            30s       
+
+so very unstable for sgh=100
+#endif
+
+
+#undef USE_TMS
+#ifdef USE_TMS
+    call get_phi(elemin,phi,phi_i,hvcoord,nm1)
+    do k=1,nlev
+       pi(:,:,k)    = hvcoord%hyam(k)*hvcoord%ps0 + hvcoord%hybm(k)*psfrc(:,:)
+       ! cam's exner as used by clubb when calling tms
+       r_exner(:,:,k) = (psfrc(:,:)/pi(:,:,k))**kappa
+       zm(:,:,k) = (phi(:,:,k)-elemin%state%phis(:,:))/g
+    end do
+    ucomp(:,:,:)=v(:,:,1,:)
+    vcomp(:,:,:)=v(:,:,2,:)
+    call compute_tms(np*np,nlev,np*np,ucomp,vcomp,temperature,pi,r_exner,zm,elemin%derived%sgh30,ksrf)
+
+    ! scaling used by CAM's vertical_diffusion
+    ! if ksrf is in unts of kg/s/m2 (as claimed), then this scales version
+    ! will be in units of 1/s, as desired:
+    ksrf(:,:)=ksrf(:,:)*g/elemin%state%dp3d(:,:,nlev,nm1)
+
+#if 0
+    if (maxval(ksrf)>0) then
+       if ( maxval(ksrf) > 0.1d0*dt)  then
+          ! stronger then 1/3h
+          print *,"TMS limiter ON:  damping time seconds = ", 1/maxval(ksrf(:,:))
+       else
+          print *,"TMS limiter OFF: damping time seconds = ", 1/maxval(ksrf(:,:))
+       endif
+    endif
+#endif
+    ! CFL limiter
+    where ( dt*ksrf(:,:) > 0.1d0 ) 
+       ksrf(:,:)=0.1d0/dt
+    end where
+    ! 3h limiter
+    where ( ksrf(:,:) > 1d0/(3*3600) ) 
+       ksrf(:,:)=1d0/(3*3600)
+    end where
+
+    elemin%derived%FM(:,:,1,nlev) = elemin%derived%FM(:,:,1,nlev) - ksrf(:,:)*ucomp(:,:,nlev)
+    elemin%derived%FM(:,:,2,nlev) = elemin%derived%FM(:,:,2,nlev) - ksrf(:,:)*vcomp(:,:,nlev)
+
+#endif
+
 
     if (qsize>=1) then
        ! HS with tracer  (Galewsky type forcing, with flux of  2.3e-5 kg/m^2/s
@@ -325,6 +417,144 @@ contains
     end do
 
   end subroutine hs0_init_state
+
+
+  ! pcols=ncol=np*np
+  ! pver=nlev
+  ! zm  = (phi()-phis())/g
+  subroutine compute_tms( pcols    , pver    , ncol    ,                     &
+                          u        , v       , t       , pmid    , exner   , &
+                          zm       , sgh     , ksrf    )
+  integer,  parameter :: r8 = selected_real_kind(12) ! 8 byte real
+
+  real(r8), parameter :: horomin= 1._r8       ! Minimum value of subgrid orographic height for mountain stress [ m ]
+  real(r8), parameter :: z0max  = 100._r8     ! Maximum value of z_0 for orography [ m ]
+  real(r8), parameter :: dv2min = 0.01_r8     ! Minimum shear squared [ m2/s2 ]
+  real(r8)            :: orocnst              ! Converts from standard deviation to height [ no unit ]
+  real(r8)            :: z0fac                ! Factor determining z_0 from orographic standard deviation [ no unit ] 
+  real(r8)            :: karman               ! von Karman constant
+  real(r8)            :: gravit               ! Acceleration due to gravity
+  real(r8)            :: rair                 ! Gas constant for dry air
+
+    !------------------------------------------------------------------------------ !
+    ! Turbulent mountain stress parameterization                                    !  
+    !                                                                               !
+    ! Returns surface drag coefficient and stress associated with subgrid mountains !
+    ! For points where the orographic variance is small ( including ocean ),        !
+    ! the returned surface drag coefficient and stress is zero.                     !
+    !                                                                               !
+    ! Lastly arranged : Sungsu Park. Jan. 2010.                                     !
+    !------------------------------------------------------------------------------ !
+
+    ! ---------------------- !
+    ! Input-Output Arguments ! 
+    ! ---------------------- !
+
+
+    integer,  intent(in)  :: pcols                 ! Number of columns (dimension)
+    integer,  intent(in)  :: ncol                 ! Number of columns
+    integer,  intent(in)  :: pver                  ! Number of model layers
+
+    real(r8), intent(in)  :: u(pcols,pver)         ! Layer mid-point zonal wind [ m/s ]
+    real(r8), intent(in)  :: v(pcols,pver)         ! Layer mid-point meridional wind [ m/s ]
+    real(r8), intent(in)  :: t(pcols,pver)         ! Layer mid-point temperature [ K ]
+    real(r8), intent(in)  :: pmid(pcols,pver)      ! Layer mid-point pressure [ Pa ]
+    real(r8), intent(in)  :: exner(pcols,pver)     ! Layer mid-point exner function [ no unit ]
+    real(r8), intent(in)  :: zm(pcols,pver)        ! Layer mid-point height [ m ]
+    real(r8), intent(in)  :: sgh(pcols)            ! Standard deviation of orography [ m ]
+    
+    real(r8), intent(out) :: ksrf(pcols)           ! Surface drag coefficient [ kg/s/m2 ]
+
+    ! --------------- !
+    ! Local Variables !
+    ! --------------- !
+
+    integer  :: i                                  ! Loop index
+    integer  :: kb, kt                             ! Bottom and top of source region
+    
+    real(r8) :: horo                               ! Orographic height [ m ]
+    real(r8) :: z0oro                              ! Orographic z0 for momentum [ m ]
+    real(r8) :: dv2                                ! (delta v)**2 [ m2/s2 ]
+    real(r8) :: ri                                 ! Richardson number [ no unit ]
+    real(r8) :: stabfri                            ! Instability function of Richardson number [ no unit ]
+    real(r8) :: rho                                ! Density [ kg/m3 ]
+    real(r8) :: cd                                 ! Drag coefficient [ no unit ]
+    real(r8) :: vmag                               ! Velocity magnitude [ m /s ]
+
+    orocnst  = 1            ! namelist tms_orocnst 
+    z0fac    = 0.1d0        ! namelist tms_z0fac  0.1, 0.075
+    karman   = 0.4d0        ! karman_in    SHR_CONST_KARMAN
+    gravit   = g            !gravit_in
+    rair     = Rgas         !rair_in
+    
+
+    ! ----------------------- !
+    ! Main Computation Begins !
+    ! ----------------------- !
+    do i=1,ncol
+
+     ! determine subgrid orgraphic height ( mean to peak )
+     ! SGH30 ranges from 0..120m in NE30 x6t
+       horo = orocnst * sgh(i)
+
+     ! No mountain stress if horo is too small
+
+       if( horo < horomin ) then
+
+           ksrf(i) = 0._r8
+
+       else
+
+         ! Determine z0m for orography
+
+           z0oro = min( z0fac * horo, z0max )   ! ranges from [1,112]*.1 = [.1,11.2]
+
+         ! Calculate neutral drag coefficient
+
+           cd = ( karman / log( ( zm(i,pver) + z0oro ) / z0oro) )**2
+
+         ! Calculate the Richardson number over the lowest 2 layers
+
+           kt  = pver - 1
+           kb  = pver
+           dv2 = max( ( u(i,kt) - u(i,kb) )**2 + ( v(i,kt) - v(i,kb) )**2, dv2min )
+
+         ! Modification : Below computation of Ri is wrong. Note that 'Exner' function here is
+         !                inverse exner function. Here, exner function is not multiplied in
+         !                the denominator. Also, we should use moist Ri not dry Ri.
+         !                Also, this approach using the two lowest model layers can be potentially
+         !                sensitive to the vertical resolution.  
+         ! OK. I only modified the part associated with exner function.
+
+           ri  = 2._r8 * gravit * ( t(i,kt) * exner(i,kt) - t(i,kb) * exner(i,kb) ) * ( zm(i,kt) - zm(i,kb) ) &
+                                / ( ( t(i,kt) * exner(i,kt) + t(i,kb) * exner(i,kb) ) * dv2 )
+
+         ! ri  = 2._r8 * gravit * ( t(i,kt) * exner(i,kt) - t(i,kb) * exner(i,kb) ) * ( zm(i,kt) - zm(i,kb) ) &
+         !                      / ( ( t(i,kt) + t(i,kb) ) * dv2 )
+
+         ! Calculate the instability function and modify the neutral drag cofficient.
+         ! We should probably follow more elegant approach like Louis et al (1982) or Bretherton and Park (2009) 
+         ! but for now we use very crude approach : just 1 for ri < 0, 0 for ri > 1, and linear ramping.
+
+           stabfri = max( 0._r8, min( 1._r8, 1._r8 - ri ) )
+           cd      = cd * stabfri
+
+         ! Compute density, velocity magnitude and stress using bottom level properties
+
+           ! MT: remove rho scalings
+           rho     = pmid(i,pver) / ( rair * t(i,pver) ) 
+           vmag    = sqrt( u(i,pver)**2 + v(i,pver)**2 )
+           ksrf(i) = rho * cd * vmag 
+           !taux(i) = -ksrf(i) * u(i,pver)
+           !tauy(i) = -ksrf(i) * v(i,pver)
+
+       end if
+
+    end do
+    return
+  end subroutine 
+
+
 
 
 end module held_suarez_mod
