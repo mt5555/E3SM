@@ -1202,6 +1202,7 @@ contains
   real (kind=real_kind) ::  vtemp(np,np,2,nlev)       ! generic gradient storage
   real (kind=real_kind), dimension(np,np) :: sdot_sum ! temporary field
   real (kind=real_kind) ::  v1,v2,w,d_eta_dot_dpdn_dn, T0
+  real (kind=real_kind) ::  thmin,thmin2
   integer :: i,j,k,kptr,ie, nlyr_tot
 
   call t_startf('compute_andor_apply_rhs')
@@ -1743,6 +1744,20 @@ contains
    endif
 #endif
 
+#undef THETA_LIM4
+#ifdef THETA_LIM4
+     ! not using SSP method, so min value is approximate. take over both timelevels
+     thmin=minval( elem(ie)%state%vtheta_dp(:,:,nlev,nm1) /  elem(ie)%state%dp3d(:,:,nlev,nm1) )
+     thmin2=minval( elem(ie)%state%vtheta_dp(:,:,nlev,n0) /  elem(ie)%state%dp3d(:,:,nlev,n0) )
+     thmin=min(thmin,thmin2)
+     !thmin=thmin*.99   ! TBOT=162
+     !thmin=thmin*.999   ! smaller dip, TBOT 210
+     !thmin=thmin*.9995   ! TBOT=223
+     !thmin=thmin*.9999  ! TBOT=227 (good). 
+     !thmin=220           
+#endif
+
+
 
      do k=1,nlev
 #ifdef HOMMEXX_BFB_TESTING
@@ -1799,6 +1814,15 @@ contains
         
 #endif
      enddo
+
+
+#ifdef THETA_LIM4
+     ! apply SE limiter to pre-DSS update
+     temp(:,:,1)=elem(ie)%state%vtheta_dp(:,:,nlev,np1)-thmin*elem(ie)%state%dp3d(:,:,nlev,np1)
+     call limiter2d_zero1(temp(:,:,1))
+     elem(ie)%state%vtheta_dp(:,:,nlev,np1)=temp(:,:,1)+thmin*elem(ie)%state%dp3d(:,:,nlev,np1)
+#endif
+
      if ( .not. theta_hydrostatic_mode ) then
         k=nlevp
 #ifdef HOMMEXX_BFB_TESTING
@@ -2015,7 +2039,7 @@ contains
 #if 1
   ! check for theta < 10K                                                                                                       
   warn=.false.
-  do k=1,nlev
+  do k=nlev,nlev
      if ( minval(vtheta_dp(:,:,k)-vtheta_thresh*dp3d(:,:,k))   <  0) then
 #ifndef HOMMEXX_BFB_TESTING
         ! In bfb unit tests, we use (semi-)random inputs, so we expect to hit this.
@@ -2043,5 +2067,50 @@ contains
 
 
   end subroutine limiter_dp3d_k
+
+  subroutine limiter2d_zero1(Q)
+  ! mass conserving zero limiter (2D only).  to be called just before DSS
+  !
+  ! this routine is called inside a DSS loop, and so Q had already
+  ! been multiplied by the mass matrix.  Thus dont include the mass
+  ! matrix when computing the mass = integral of Q over the element
+  !
+  ! ps is only used when advecting Q instead of Qdp
+  ! so ps should be at one timelevel behind Q
+  implicit none
+  real (kind=real_kind), intent(inout) :: Q(np,np)
+
+  ! local
+  real (kind=real_kind) :: dp(np,np)
+  real (kind=real_kind) :: mass,mass_new,ml
+  integer i,j
+
+    mass = 0
+    do j = 1 , np
+      do i = 1 , np
+        mass = mass + Q(i,j)
+      enddo
+    enddo
+
+    ! negative mass.  so reduce all postive values to zero
+    ! then increase negative values as much as possible
+    if ( mass < 0 ) Q(:,:) = -Q(:,:)
+    mass_new = 0
+    do j = 1 , np
+      do i = 1 , np
+        if ( Q(i,j) < 0 ) then
+          Q(i,j) = 0
+        else
+          mass_new = mass_new + Q(i,j)
+        endif
+      enddo
+    enddo
+
+    ! now scale the all positive values to restore mass
+    if ( mass_new > 0 ) Q(:,:) = Q(:,:) * abs(mass) / mass_new
+    if ( mass     < 0 ) Q(:,:) = -Q(:,:)
+  end subroutine limiter2d_zero1
+
+
 
 end module prim_advance_mod
