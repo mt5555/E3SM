@@ -896,6 +896,70 @@ contains
 
 
 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !  laplace at surface
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#undef SURF_LAPLACE
+#ifdef SURF_LAPLACE
+  nlyr_tom=2
+  dt=dt2
+  do ic=1,1
+
+     do ie=nets,nete
+        do k=nlev,nlev
+           ! add regular diffusion near top
+           !lap_s(:,:,1)=laplace_sphere_wk(elem(ie)%state%dp3d     (:,:,k,nt),deriv,elem(ie),var_coef=.false.)
+           !lap_s(:,:,2)=laplace_sphere_wk(elem(ie)%state%vtheta_dp(:,:,k,nt),deriv,elem(ie),var_coef=.false.)
+           !lap_s(:,:,3)=laplace_sphere_wk(elem(ie)%state%w_i      (:,:,k,nt),deriv,elem(ie),var_coef=.false.)
+           !lap_s(:,:,4)=laplace_sphere_wk(elem(ie)%state%phinh_i  (:,:,k,nt),deriv,elem(ie),var_coef=.false.)
+           lap_v=vlaplace_sphere_wk(elem(ie)%state%v            (:,:,:,k,nt),deriv,elem(ie),var_coef=.false.)
+           
+           xfac=dt*2.5e5*5
+
+           vtens(:,:,:,k,ie)=xfac*lap_v(:,:,:)
+           !stens(:,:,k,1,ie)=xfac*lap_s(:,:,1)  ! dp3d
+           !stens(:,:,k,2,ie)=xfac*lap_s(:,:,2)  ! vtheta_dp
+           !stens(:,:,k,3,ie)=xfac*lap_s(:,:,3)  ! w_i
+           !stens(:,:,k,4,ie)=xfac*lap_s(:,:,4)  ! phi_i
+        enddo
+        
+        kptr=0;      
+        call edgeVpack_nlyr(edge_g,elem(ie)%desc,vtens(:,:,:,nlev,ie),2,kptr,nlyr_tom)
+     enddo
+     
+     call t_startf('ahdp_bexchV2')
+     call bndry_exchangeV(hybrid,edge_g)
+     call t_stopf('ahdp_bexchV2')
+     
+     do ie=nets,nete
+        
+        kptr=0
+        call edgeVunpack_nlyr(edge_g,elem(ie)%desc,vtens(:,:,:,nlev,ie),2,kptr,nlyr_tom)
+        
+        
+        ! apply inverse mass matrix, add tendency
+        do k=nlev,nlev
+           elem(ie)%state%v(:,:,1,k,nt)=elem(ie)%state%v(:,:,1,k,nt) + &
+                vtens(:,:,1,k,ie)*elem(ie)%rspheremp(:,:)
+           elem(ie)%state%v(:,:,2,k,nt)=elem(ie)%state%v(:,:,2,k,nt) + &
+                vtens(:,:,2,k,ie)*elem(ie)%rspheremp(:,:)
+           !elem(ie)%state%w_i(:,:,k,nt)=elem(ie)%state%w_i(:,:,k,nt) &
+           !     +stens(:,:,k,3,ie)*elem(ie)%rspheremp(:,:)
+           
+           !elem(ie)%state%dp3d(:,:,k,nt)=elem(ie)%state%dp3d(:,:,k,nt) &
+           !     +stens(:,:,k,1,ie)*elem(ie)%rspheremp(:,:)
+           !elem(ie)%state%phinh_i(:,:,k,nt)=elem(ie)%state%phinh_i(:,:,k,nt) &
+           !     +stens(:,:,k,4,ie)*elem(ie)%rspheremp(:,:)
+
+           !elem(ie)%state%vtheta_dp(:,:,k,nt)=elem(ie)%state%vtheta_dp(:,:,k,nt) &
+           !     +stens(:,:,k,2,ie)*elem(ie)%rspheremp(:,:)
+        enddo
+     enddo ! ie
+  enddo  ! subcycle
+#endif
+
+
+
   call t_stopf('advance_hypervis')
 
   end subroutine advance_hypervis
