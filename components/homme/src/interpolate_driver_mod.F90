@@ -876,6 +876,16 @@ contains
     do ie=1,nelemd
        elem(ie)%state%phis(:,:) = temp3d(:,:,1,ie)
     enddo
+
+    ! FIX THIS: if we turn on SGH, need to make sure we can read SGH30_d
+    ! most topo files will only have SGH30 on pg2 grid
+    !varnames(1)="SGH30"
+    !infilenames_index=1    
+    !call pio_read_var(temp3d,elem,par,varnames(1),1,infilenames_index)
+    !do ie=1,nelemd
+    !   elem(ie)%derived%sgh30(:,:) = temp3d(:,:,1,ie)
+    !enddo
+
   end subroutine pio_read_phis
   
 
