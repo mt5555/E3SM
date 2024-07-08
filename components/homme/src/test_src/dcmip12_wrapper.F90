@@ -9,7 +9,7 @@ module dcmip12_wrapper
 
 ! Implementation of the dcmip2012 dycore tests for the preqx dynamics target
 
-use control_mod,          only: test_case, dcmip4_moist, dcmip4_X, vanalytic, sub_case
+use control_mod,          only: test_case, dcmip4_moist, dcmip4_X, vanalytic, sub_case, u_perturb
 use dcmip2012_test1_2_3,  only: test1_advection_deformation, test1_advection_hadley, test1_advection_orography, &
                                 test2_steady_state_mountain, test2_schaer_mountain,test3_gravity_wave
 use dcmip2012_test1_conv, only: test1_conv_advection_deformation
@@ -657,7 +657,7 @@ subroutine dcmip2012_test4_init(elem,hybrid,hvcoord,nets,nete)
         !test4_baroclinic_wave(moist,X,lon,lat,p,z,zcoords,u,v,w,t,phis,ps,rho,q,q1,q2)
         !moist 0 or 1, X is Earth scale factor, zcoord=0, q is vapor, q1, q2
         call test4_baroclinic_wave(dcmip4_moist,dcmip4_X,lon,lat,&
-                                   pressure,z,zcoords,u,v,w,T,phis,ps,rho,q,q1,q2)
+                                   pressure,z,zcoords,u,v,w,T,phis,ps,rho,q,q1,q2,u_perturb/=0)
         qarray(1)=q; qarray(2)=q1; qarray(3)=q2;
         dp = pressure_thickness(ps,k,hvcoord)
         call set_state(u,v,w,T,ps,phis,pressure,dp,z,g, i,j,k,elem(ie),1,nt)
@@ -675,7 +675,7 @@ subroutine dcmip2012_test4_init(elem,hybrid,hvcoord,nets,nete)
         !test4_baroclinic_wave(moist,X,lon,lat,p,z,zcoords,u,v,w,t,phis,ps,rho,q,q1,q2)
         !moist 0 or 1, X is Earth scale factor, zcoord=0, q is vapor, q1, q2
         call test4_baroclinic_wave(dcmip4_moist,dcmip4_X,lon,lat,&
-                                   pressure,z,zcoords,u,v,w,T,phis,ps,rho,q,q1,q2)
+                                   pressure,z,zcoords,u,v,w,T,phis,ps,rho,q,q1,q2,u_perturb/=0)
         qarray(1)=q; qarray(2)=q1; qarray(3)=q2;
         call set_state_i(u,v,w,T,ps,phis,pressure,z,g, i,j,k,elem(ie),1,nt)
 

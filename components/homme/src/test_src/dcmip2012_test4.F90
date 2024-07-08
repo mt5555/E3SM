@@ -106,14 +106,14 @@ MODULE dcmip2012_test4
 
 CONTAINS
 
-  SUBROUTINE test4_baroclinic_wave (moist,X,lon,lat,p,z,zcoords,u,v,w,t,phis,ps,rho,q,q1,q2)
+  SUBROUTINE test4_baroclinic_wave (moist,X,lon,lat,p,z,zcoords,u,v,w,t,phis,ps,rho,q,q1,q2,lperturb)
  
     IMPLICIT NONE
 
 !-----------------------------------------------------------------------
 !     input/output params parameters at given location
 !-----------------------------------------------------------------------
-    INTEGER, INTENT(IN)  :: moist      ! Moist (1) or non-moist (0) test case
+    INTEGER, INTENT(IN)  :: moist   ! Moist (1) or non-moist (0) test case
 
     REAL(8), INTENT(IN)  :: &
                 lon,        & ! Longitude (radians)
@@ -135,7 +135,7 @@ CONTAINS
                 q,          & ! Specific Humidity (kg/kg)
                 q1,         & ! Tracer q1 - Potential temperature (kg/kg)
                 q2            ! Tracer q2 - Ertel's potential vorticity (kg/kg)
-
+    logical, intent(in)  :: lperturb
     REAL(8) :: eta
 
 !-----------------------------------------------------------------------
@@ -158,8 +158,8 @@ CONTAINS
 !-----------------------------------------------------------------------
 !    initialize wind field with perturbation
 !-----------------------------------------------------------------------
-     u = u_wind(lon,lat,eta,.TRUE.)
-     v = v_wind(lon,lat,eta,.TRUE.)
+     u = u_wind(lon,lat,eta,lperturb)
+     v = v_wind(lon,lat,eta,lperturb)
      w = 0.d0
 
 !-----------------------------------------------------------------------
