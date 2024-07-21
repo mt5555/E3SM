@@ -22,24 +22,8 @@ nu=            7.0e5
 nu_s=          0
 hypervis_order = 2
 hypervis_subcycle = 1
-hypervis_power = 0
 mesh_file = 'mountain_10_x8.g'
 hypervis_scaling = 4
-/
-&solver_nl
-precon_method = "block_jacobi"
-maxits        = 100
-tol           = 1.e-12
-/
-&filter_nl
-transfer_type = "bv"
-filter_type   = "taylor"
-filter_freq   = 0
-filter_mu     = 0.05D0
-p_bv          = 12.0D0
-s_bv          = .666666666666666666D0
-wght_fm       = 0.10D0
-kcut_fm       = 2
 /
 &analysis_nl
 !=======================================================!
