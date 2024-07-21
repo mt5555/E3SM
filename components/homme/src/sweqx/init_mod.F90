@@ -189,10 +189,10 @@ contains
           nelem_edge = PlaneEdgeCount()
         end if
       end if
+      if(par%masterproc) print *,"number of elements=", nelem
 
         approx_elements_per_task = dble(nelem)/dble(par%nprocs)
         if  (approx_elements_per_task < 1.0D0) then
-            if(par%masterproc) print *,"number of elements=", nelem
             if(par%masterproc) print *,"number of procs=", par%nprocs
             call abortmp('There is not enough paralellism in the job, that is, there is less than one elements per task.')
         end if
