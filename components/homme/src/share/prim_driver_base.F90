@@ -27,7 +27,7 @@ module prim_driver_base
                               red_sum, red_sum_int, red_flops, initreductionbuffer, &
                               red_max_index, red_min_index
 #if !defined(CAM) && !defined(SCREAM)
-  use prim_restart_mod, only : initrestartfile
+  use prim_restart_mod, only : initrestartfile, readstate_uniquepts
   use restart_io_mod ,  only : readrestart
   use test_mod,         only: set_test_initial_conditions, compute_test_forcing
 #endif
@@ -624,7 +624,7 @@ contains
     !      I)  Setting up the MPI datastructures
     ! ==========================================================
 #if !defined(CAM) && !defined(SCREAM)
-    if(restartfreq > 0 .or. runtype>=1)  then
+    if(restartfreq > 0 .or. runtype==1 .or. runtype==2)  then
        call initRestartFile(elem(1)%state,par,RestFile)
     endif
 #endif
@@ -900,6 +900,7 @@ contains
        ! ===========================================================
        ! runtype==1   Exact Restart
        ! runtype==2   Initial run, but take inital condition from Restart file
+       ! runtype==3   Initial run, but take inital condition from uniquepts file
        ! ===========================================================
 
        if (hybrid%masterthread) then
@@ -908,7 +909,13 @@ contains
 
        call set_test_initial_conditions(elem,deriv1,hybrid,hvcoord,tl,nets,nete)
 
-       call ReadRestart(elem,hybrid%ithr,nets,nete,tl)
+       if (runtype==3) then
+          ! filename given in infilenames(2)
+          ! infilenames(1) is used elsewhere to read PHIS
+          call readstate_uniquepts(elem,hybrid%par,tl,2)
+       else
+          call ReadRestart(elem,hybrid%ithr,nets,nete,tl)
+       endif
 
        if (runtype==2) then
           do ie=nets,nete
@@ -932,7 +939,7 @@ contains
 
 #endif
 !$OMP MASTER
-    if (runtype==2) then
+    if (runtype>=2) then
        ! branch run
        ! reset time counters to zero since timestep may have changed
        nEndStep = nEndStep-tl%nstep ! used by standalone HOMME.  restart code set this to nmax + tl%nstep
@@ -958,7 +965,7 @@ contains
     ! For new runs, and branch runs, convert state variable Q to (Qdp)
     ! because initial conditon reads in Q, not Qdp
     ! restart runs will read dpQ from restart file
-    if (runtype==0 .or. runtype==2) then
+    if (runtype==0 .or. runtype==2 .or. runtype==3) then
        do ie=nets,nete
           elem(ie)%derived%omega_p(:,:,:) = 0D0
        end do

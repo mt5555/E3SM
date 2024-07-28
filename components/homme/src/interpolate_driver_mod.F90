@@ -26,13 +26,13 @@ module interpolate_driver_mod
   use pio_nf_utils, only : copy_pio_var ! _EXTERNAL
   use pio_io_mod, only : nfsizekind ! _EXTERNAL
   use common_io_mod, only : nf_handle, max_output_streams, MAX_INFILES,&
-              infilenames,piofs, output_type
+              infilenames,piofs, output_type, varname_len
   use parallel_mod, only : abortmp, syncmp, haltmp
   implicit none
   private
 !#include "pnetcdf.inc"
 #endif
-  public :: interpolate_driver, pio_read_phis, &
+  public :: interpolate_driver, pio_read_phis, pio_read_var, &
        read_gll_topo_file, read_physgrid_topo_file, write_physgrid_topo_file, &
        write_physgrid_smoothed_phis_file
 
@@ -174,7 +174,7 @@ contains
     character(len=*), intent(inout) :: varnames(:)
     type(file_t), intent(out) :: infile
     type(io_desc_t), pointer :: iodesc
-    character(len=80), allocatable :: varnames_list(:)
+    character(len=256), allocatable :: varnames_list(:)
     
     integer :: ndims, nvars,  varcnt
     integer :: ret, i, ncid, n
@@ -184,7 +184,7 @@ contains
     integer*8, pointer :: ldof(:)
     integer(kind=PIO_OFFSET_KIND) :: start(3), count(3)
     integer :: iorank, dimcnt
-    character(len=80) :: name
+    character(len=256) :: name
 
     if (par%masterproc) print *,'initializing input file: ',trim(infilename)
 
@@ -206,17 +206,24 @@ contains
 
     ! is this an output file with "ncol", or "ncol_d"?
     ! set ncoldimname before calling "is_ncolfile"
+    ncoldimname='ncol'
     do i=1,ndims
        ret = PIO_inq_dimname(Infile%fileid, i, infile%dims(i)%name)
        if(infile%dims(i)%name.eq.'ncol_d') ncoldimname='ncol_d'
     end do
-    if (par%masterproc) print *,'interpolating dimension = ',ncoldimname
+    if (par%masterproc) print *,'input variable dimension = ',ncoldimname
+
+    ! need to recompute dims after setting ncoldimname
+    call init_dims
 
     ncols=0
     do i=1,ndims
        ret = PIO_inq_dimname(Infile%fileid, i, infile%dims(i)%name)
        ret = PIO_inq_dimlen(Infile%fileid, i, infile%dims(i)%len)
-       if(is_ncoldim(infile%dims(i)%name)) ncols=infile%dims(i)%len
+       if(is_ncoldim(infile%dims(i)%name)) then
+          ncols=infile%dims(i)%len
+          if (par%masterproc) print *,'input variable ncols = ',ncols
+       endif
        if(infile%dims(i)%name.eq.'lev') nlev_file = infile%dims(i)%len
     end do
     if(trim(varnames(1)) == 'all') then
@@ -249,17 +256,13 @@ contains
           if (trim(name)=='ne') ret=PIO_get_att(infile%FileID, PIO_GLOBAL, 'ne', ne_file)
        enddo
 
-       ! abort if file attribute doesn't match model resolution
-       ! some files, like topo files, dont have these attributes.
+       ! abort if ncols doesn't match model resolution
        if (ncols/=2+nelem*(np-1)**2) then
           print *,'nelem,np,ncols',nelem,np,ncols
           call abortmp('File resolution incoorect: ncols <> 2+nelem*(np-1)^2')
        endif
 
-       if(ne_file/=ne .and. ne_file/=-1) then
-          print *,'ne, ne_file',ne,ne_file
-          call abortmp('The variable ne in the namelist must be the same as that of the file.')
-       end if
+       ! if file has np attribute, make sure it matches
        if(np_file/=np .and. np_file/=-1) then
           print *,'np, np_file',np,np_file
           call abortmp('The variable dimensions_mod::np must be the same as that of the file, you will need to recompile.')
@@ -846,11 +849,40 @@ contains
     
   end subroutine interpolate_vars
 #endif
+
+
+!
+! read PHIS from file given in infilenames(1)
+!
+  subroutine pio_read_phis(elem, par, varname)
+    use element_mod, only : element_t
+    use parallel_mod, only : parallel_t, syncmp
+    use common_io_mod, only : varname_len
+    use kinds, only : real_kind
+    use dimensions_mod, only : nelemd,np
+    type(element_t), intent(inout) :: elem(:)
+    type(parallel_t),intent(in) :: par
+    character(*), intent(in), optional :: varname  ! PHIS or PHIS_d
+
+    ! local
+    character(len=varname_len), dimension(1) :: varnames
+    real(kind=real_kind) :: temp3d(np,np,1,nelemd)
+    integer :: ie, infilenames_index
+    
+    varnames(1)="PHIS"
+    if (present(varname)) varnames(1) = trim(varname)
+    infilenames_index=1    
+    call pio_read_var(temp3d,elem,par,varnames(1),1,infilenames_index)
+    do ie=1,nelemd
+       elem(ie)%state%phis(:,:) = temp3d(:,:,1,ie)
+    enddo
+  end subroutine pio_read_phis
+  
+
+!
 ! read a variable from a file
 !
-! if we ever need to read something other than PHIS, this routine should
-! be replaced with a more general routine to read any field
-  subroutine pio_read_phis(elem, par, varname)
+  subroutine pio_read_var(temp3d,elem, par, varname, ilev, infilenames_index)
     use element_mod, only : element_t
     use parallel_mod, only : parallel_t, syncmp
 #ifndef HOMME_WITHOUT_PIOLIBRARY
@@ -860,11 +892,12 @@ contains
     use edgetype_mod, only : edgebuffer_t
     use dimensions_mod, only : nelemd, nlev, np
     use bndry_mod, only : bndry_exchangeV
-    use common_io_mod, only : varname_len,infilenames
 #endif
     type(element_t), intent(inout) :: elem(:)
     type(parallel_t),intent(in) :: par
-    character(*), intent(in), optional :: varname
+    character(*), intent(in) :: varname
+    integer, intent(in) :: ilev, infilenames_index
+    real(kind=real_kind), intent(out) :: temp3d(np,np,ilev,nelemd)
 #ifndef HOMME_WITHOUT_PIOLIBRARY
     ! local
     character(len=varname_len), dimension(1) :: varnames
@@ -873,23 +906,35 @@ contains
     real(kind=real_kind), allocatable :: farray(:)
     real(kind=real_kind), allocatable :: ftmp(:,:)
 
-    integer :: ii,k,ie,ilev,iv, ierr,offset
+    integer :: ii,k,ie,iv, ierr,offset, n, ntimes
     integer :: ncnt_in
 
-    ilev=1
     call initedgebuffer(par,edge,elem,ilev)
     ncnt_in = sum(elem(1:nelemd)%idxp%numUniquePts)
 
-    varnames(1)="PHIS"
-    if (present(varname)) varnames(1) = trim(varname)
-    call infile_initialize(elem, par,infilenames(1), varnames, infile)
+    varnames(1) = trim(varname)
+    call infile_initialize(elem, par,infilenames(infilenames_index), varnames, infile)
+
+    if(infile%vars%timedependent(1)) then
+       ntimes = get_dimlen(infile%dims,'time')
+       n=0
+       if (par%masterproc) print *, 'var time dependent. reading frame ',n,' of ',ntimes
+       call pio_setframe(infile%FileID, infile%vars%vardesc(1),int(n,kind=PIO_OFFSET_KIND))
+    end if
 
 
-    allocate(farray(ncnt_in))
+
+    allocate(farray(ncnt_in*ilev))
     farray = 1.0e-37
-    call pio_read_darray(infile%FileID, infile%vars%vardesc(1), iodesc2d, farray, ierr)
-    !call pio_read_darray(infile%FileID, infile%vars%vardesc(i), iodesc3d, farray, ierr)
-    !call pio_read_darray(infile%FileID, infile%vars%vardesc(i), iodesc3dp1, farray, ierr)
+    if (ilev==1) then
+       call pio_read_darray(infile%FileID, infile%vars%vardesc(1), iodesc2d, farray, ierr)
+    else if (ilev==nlev) then
+       call pio_read_darray(infile%FileID, infile%vars%vardesc(1), iodesc3d, farray, ierr)
+    else if (ilev==nlev+1) then
+       call pio_read_darray(infile%FileID, infile%vars%vardesc(1), iodesc3dp1, farray, ierr)
+    else
+       call abortmp('pio_read_phis: bad ilev')
+    endif
 
     offset=0
     do ie=1,nelemd
@@ -901,14 +946,14 @@ contains
           end do
        end do
        offset = offset+elem(ie)%idxP%NumUniquePts
-       elem(ie)%state%phis(:,:)=0
-       call putUniquePoints(elem(ie)%idxP, ftmp(:,1), elem(ie)%state%phis(:,:))
-       call edgevpack(edge, elem(ie)%state%phis(:,:),ilev,0,ie)
+       temp3d(:,:,:,ie)=0
+       call putUniquePoints(elem(ie)%idxP, ilev, ftmp, temp3d(:,:,:,ie))
+       call edgevpack(edge, temp3d(:,:,:,ie),ilev,0,ie)
        deallocate(ftmp)
     end do
     call bndry_exchangeV(par, edge)
     do ie=1,nelemd
-       call edgeVunpack(edge, elem(ie)%state%phis(:,:),ilev,0,ie)
+       call edgeVunpack(edge, temp3d(:,:,:,ie),ilev,0,ie)
     end do
 
 
@@ -918,9 +963,12 @@ contains
     call pio_closefile(infile%fileid)
     call free_infile(infile)
 #endif
-  end subroutine pio_read_phis
+  end subroutine pio_read_var
   
-!
+
+
+
+  !
 ! Create the pio decomps for the output file.
 !
 #ifndef HOMME_WITHOUT_PIOLIBRARY
@@ -1168,7 +1216,7 @@ contains
 
     integer :: i, j, ierr, natts, vid
 
-    character(len=80) :: name
+    character(len=256) :: name
 
 ! copy global attributes
 !	print *,'copying global  attributes'

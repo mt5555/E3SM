@@ -12,6 +12,8 @@ module prim_restart_mod
    !------------------
    use element_state, only : elem_state_t
    !------------------
+   use element_mod,      only: element_t
+   !------------------
    use restart_io_mod, only : nwordsRestartBuffer_t, RestartBuffer,  File_elem_t, &
         StateDesc_t, createstatedescriptor, AddStateField, constructelementfile, &
         collective_io_read, collective_io_write, printstatedescriptor
@@ -27,7 +29,7 @@ private
    ! ====================================================
    !  Routines for Restart files
    ! ====================================================
-   public :: initRestartFile
+   public :: initRestartFile, readstate_uniquepts
 
 contains 
 ! =========================================================
@@ -104,4 +106,23 @@ contains
     nwordsRestartBuffer_t=RestDesc%nwords
 
     end subroutine initRestartFile
+
+
+!
+!   read state from a regular uniquepts output file
+!
+    subroutine readstate_uniquepts(elem, par,tl,infilenames_index)
+    use time_mod, only : timelevel_t
+    implicit none    
+    type (element_t),   intent(inout)     :: elem(:)
+    type (TimeLevel_t), intent(in)        :: tl     ! time level struct
+    type(parallel_t),   intent(in)        :: par
+    integer,            intent(in)        :: infilenames_index
+
+    call abortmp('runtype=3 only coded for theta-l model')
+
+    end subroutine readstate_uniquepts
+
+
+
 end module prim_restart_mod
