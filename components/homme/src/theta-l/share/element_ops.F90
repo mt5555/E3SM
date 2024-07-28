@@ -150,7 +150,8 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   select case(name)
     case('w_i');
       if(theta_hydrostatic_mode) then
-         call abortmp('ERROR: get_field_i is not supported for w in theta HY')
+         !call abortmp('ERROR: get_field_i is not supported for w in theta HY')
+         field = 0
       else
          field = elem%state%w_i(:,:,1:nlevp,nt)
       endif

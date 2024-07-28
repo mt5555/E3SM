@@ -596,6 +596,7 @@ contains
 
 
              if(nf_selectedvar('Th', output_varnames)) then
+                if (par%masterproc) print *,'writing Th (potential temperature)...'
                 pr0=1./(p0)
                 st=1
                 do ie=1,nelemd
@@ -761,6 +762,7 @@ contains
 
 
              if(nf_selectedvar('dp3d', output_varnames)) then
+                if (par%masterproc) print *,'writing geos...'
                 st=1
                 do ie=1,nelemd
                    do k=1,nlev
