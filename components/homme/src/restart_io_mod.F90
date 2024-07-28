@@ -374,7 +374,7 @@ endif
 
     type (RestartHeader_t),intent(inout) :: header
     type (TimeLevel_t), intent(in) :: TimeLevel
-    if (0==ne) call abortmp('Error in CreateRestartHeader: ne is zero')
+    !if (0==ne) call abortmp('Error in CreateRestartHeader: ne is zero')
 
     header%version   = RestartVersion
     header%ne        = ne
@@ -414,7 +414,7 @@ endif
     type (RestartHeader_t),intent(inout) :: header
 
 
-    if (0==ne) call abortmp('Error in CreateRestartHeader: ne is zero')
+    !if (0==ne) call abortmp('Error in CreateRestartHeader: ne is zero')
     ierr = 0
     if( header%version .ne. RestartVersion) then
       write(*,*) 'CheckRestartHeader: Restart tape VERSION does not match model (', &
