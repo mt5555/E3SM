@@ -503,7 +503,7 @@ contains
        phi_i(:,:,:)         = elem(ie)%state%phinh_i(:,:,:,tl%n0)
        phis(:,:)          = elem(ie)%state%phis(:,:)
        call pnh_and_exner_from_eos(hvcoord,vtheta_dp,dp3d,phi_i,&
-               pnh,exner,dpnh_dp_i,pnh_i_out=pnh_i)
+               pnh,exner,dpnh_dp_i,pnh_i_out=pnh_i,caller='test_imex_jacobian')
 
        dt=100.0
 
