@@ -16,7 +16,7 @@ module prim_driver_base
   use derivative_mod,   only: derivative_t, derivinit
   use dimensions_mod,   only: np, nlev, nlevp, nelem, nelemd, nelemdmax, GlobalUniqueCols, qsize
   use element_mod,      only: element_t, allocate_element_desc, setup_element_pointers
-  use element_ops,      only: copy_state
+  use element_ops,      only: copy_state, tests_finalize
   use gridgraph_mod,    only: GridVertex_t, GridEdge_t
   use hybrid_mod,       only: hybrid_t
   use kinds,            only: real_kind, iulog
@@ -917,9 +917,10 @@ contains
           call ReadRestart(elem,hybrid%ithr,nets,nete,tl)
        endif
 
-       if (runtype==2) then
+       if (runtype>=2) then
           do ie=nets,nete
              call copy_state(elem(ie),tl%n0,tl%nm1)
+             if (runtype==3) call tests_finalize(elem(ie),hvcoord,ie) 
           enddo
        endif ! runtype==2
 
