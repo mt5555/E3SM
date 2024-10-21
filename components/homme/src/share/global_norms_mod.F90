@@ -258,7 +258,8 @@ contains
     use reduction_mod, only : ParallelMin,ParallelMax
     use physical_constants, only : scale_factor_inv, scale_factor,dd_pi
     use control_mod, only : nu, nu_q, nu_div, hypervis_order, nu_top,  &
-                            hypervis_scaling, dcmip16_mu,dcmip16_mu_s,dcmip16_mu_q
+                            hypervis_scaling, dcmip16_mu,dcmip16_mu_s,dcmip16_mu_q, &
+                            laplace_scaling
     use control_mod, only : tstep_type
     use parallel_mod, only : abortmp, global_shared_buf, global_shared_sum
     use edgetype_mod, only : EdgeBuffer_t 
@@ -275,9 +276,9 @@ contains
     real (kind=real_kind) :: min_max_dx,max_unif_dx   ! used for normalizing scalar HV
     real (kind=real_kind) :: max_normDinv  ! used for CFL
     real (kind=real_kind) :: min_hypervis, max_hypervis, avg_hypervis, stable_hv
-    real (kind=real_kind) :: normDinv_hypervis
+    real (kind=real_kind) :: normDinv_hypervis, normDinv_laplace
     real (kind=real_kind) :: x, y, noreast, nw, se, sw
-    real (kind=real_kind), dimension(np,np,nets:nete) :: zeta
+    real (kind=real_kind), dimension(np,np,nets:nete,2) :: zeta
     real (kind=real_kind) :: lambda_max, lambda_vis, min_gw, lambda, nu_div_actual, nu_top_actual
     integer :: ie,corner, i, j, rowind, colind
     type (quadrature_t)    :: gp
@@ -348,6 +349,16 @@ contains
        ! constant coefficient formula:
        normDinv_hypervis = (lambda_vis**2) * (scale_factor_inv*max_normDinv)**4
     endif
+    if (laplace_scaling/=0) then
+       ! tensor laplace.  New eigenvalues are the eigenvalues of the tensor V
+       ! formulas here must match what is in cube_mod.F90
+       lambda = max_normDinv**2
+       normDinv_laplace = (lambda_vis) * (max_normDinv**2) * &
+            (lambda**(-laplace_scaling/2) )
+    else
+       ! constant coefficient formula:
+       normDinv_laplace = (lambda_vis) * (scale_factor_inv*max_normDinv)**2
+    endif
 
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -357,19 +368,23 @@ contains
 !  and also make it bilinear in each element.
 !  Oksana Guba
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-   if (hypervis_scaling /= 0) then
-    call initEdgeBuffer(hybrid%par,edgebuf,elem,1)
+   if (hypervis_scaling /= 0 .or. laplace_scaling/=0) then
+    call initEdgeBuffer(hybrid%par,edgebuf,elem,2)
     do rowind=1,2
       do colind=1,2
 	do ie=nets,nete
-	  zeta(:,:,ie) = elem(ie)%tensorVisc(:,:,rowind,colind)*elem(ie)%spheremp(:,:)
-	  call edgeVpack(edgebuf,zeta(1,1,ie),1,0,ie)
+	  zeta(:,:,ie,1) = elem(ie)%tensorVisc(:,:,rowind,colind)*elem(ie)%spheremp(:,:)
+	  call edgeVpack(edgebuf,zeta(1,1,ie,1),1,0,ie)
+	  zeta(:,:,ie,2) = elem(ie)%tensorVisc_2(:,:,rowind,colind)*elem(ie)%spheremp(:,:)
+	  call edgeVpack(edgebuf,zeta(1,1,ie,2),1,1,ie)
 	end do
 
 	call bndry_exchangeV(hybrid,edgebuf)
 	do ie=nets,nete
-	  call edgeVunpack(edgebuf,zeta(1,1,ie),1,0,ie)
-          elem(ie)%tensorVisc(:,:,rowind,colind) = zeta(:,:,ie)*elem(ie)%rspheremp(:,:)
+	  call edgeVunpack(edgebuf,zeta(1,1,ie,1),1,0,ie)
+          elem(ie)%tensorVisc(:,:,rowind,colind) = zeta(:,:,ie,1)*elem(ie)%rspheremp(:,:)
+	  call edgeVunpack(edgebuf,zeta(1,1,ie,2),1,1,ie)
+          elem(ie)%tensorVisc_2(:,:,rowind,colind) = zeta(:,:,ie,2)*elem(ie)%rspheremp(:,:)
 	end do
       enddo !rowind
     enddo !colind
@@ -395,6 +410,23 @@ contains
 					(x+1.0d0)*(y+1.0d0)*noreast)
 	    end do
 	  end do
+
+	  noreast = elem(ie)%tensorVisc_2(np,np,rowind,colind)
+	  nw = elem(ie)%tensorVisc_2(1,np,rowind,colind)
+	  se = elem(ie)%tensorVisc_2(np,1,rowind,colind)
+	  sw = elem(ie)%tensorVisc_2(1,1,rowind,colind)
+	  do i=1,np
+	    x = gp%points(i)
+	    do j=1,np
+		y = gp%points(j)
+		elem(ie)%tensorVisc_2(i,j,rowind,colind) = 0.25d0*( &
+					(1.0d0-x)*(1.0d0-y)*sw + &
+					(1.0d0-x)*(y+1.0d0)*nw + &
+					(x+1.0d0)*(1.0d0-y)*se + &
+					(x+1.0d0)*(y+1.0d0)*noreast)
+	    end do
+	  end do
+
 	end do
       enddo !rowind
     enddo !colind
@@ -444,12 +476,12 @@ contains
        if(nu_top>0) then
 #ifdef MODEL_THETA_L
           nu_top_actual=maxval(nu_scale_top)*nu_top
-          write(iulog,'(a,f10.2,a)') 'scaled nu_top viscosity CFL: dt < S*', &
-               1.0d0/(nu_top_actual*((scale_factor_inv*max_normDinv)**2)*lambda_vis),'s'
+          write(iulog,'(a,f12.4,a)') 'scaled nu_top viscosity CFL: dt < S*', &
+               1.0d0/(nu_top_actual*normDinv_laplace),'s'
 #else
           nu_top_actual=4*nu_top
           write(iulog,'(a,f10.2,a)') '4*nu_top viscosity CFL: dt < S*', &
-               1.0d0/(nu_top_actual*((scale_factor_inv*max_normDinv)**2)*lambda_vis),'s'
+               1.0d0/(nu_top_actual*normDinv_laplace),'s'
 #endif
        end if
 
