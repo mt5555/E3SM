@@ -3,7 +3,7 @@ NThreads      = 1
 partmethod    = 4
 topology      = "cube"
 test_case     = "held_suarez0"
-sub_case = 2
+sub_case      = 2
 ne            = NE
 mesh_file = "/dev/null"
 ndays         = 400
@@ -13,8 +13,7 @@ tstep_type    = 5
 qsize         = 0
 theta_advect_form = 2
 pgrad_correction=0
-hv_ref_profiles=0
-!hv_theta_correction=1
+hv_ref_profiles=6
 limiter_option = 9
 restartfreq   =  1
 restartfile   = "restart/R0001"
@@ -27,6 +26,7 @@ vert_remap_q_alg = 10
 integration   = "explicit"
 nu            = NU1
 nu_top = 0   !  2.5e5
+tom_sponge_start = 2    ! 2 mb
 hypervis_scaling = 3
 hypervis_order = 2
 hypervis_subcycle = 1
@@ -34,16 +34,23 @@ hypervis_subcycle_tom = 1
 se_ftype=0
 /
 &vert_nl
-vfile_mid     = "../vcoord/camm-26.ascii"
-vfile_int     = "../vcoord/cami-26.ascii"
+vfile_mid     = "../vcoord/e3sm-80m.ascii"
+vfile_int     = "../vcoord/e3sm-80i.ascii"
 /
 &analysis_nl
 infilenames=''
+!output_timeunits=0,0,2,1    ! 1=days, 2=hours, 3=seconds
+!output_frequency=1,0,0,1    ! 0 to disable
+!output_start_time=362280,0,0,200
+
+!output_timeunits=3,0,2,1    ! 1=days, 2=hours, 3=seconds
+!output_frequency=1800,0,0,1    ! 0 to disable
+!output_start_time=0,0,0,200
+
 output_timeunits=1,0,2,1    ! 1=days, 2=hours, 3=seconds
 output_frequency=1,0,0,0    ! 0 to disable
-!output_timeunits=1,0,2,1    ! 1=days, 2=hours, 3=seconds
-!output_frequency=10,0,0,0    ! 0 to disable
 output_start_time=200,0,0,200
+
 output_end_time=-1,-1,-1,200
 !output_varnames1='u','v','T','zeta','div','ps','geos','omega'
 output_varnames1='u','v','T','omega','ps'
