@@ -726,6 +726,25 @@ contains
           write(iulog,'(a,3E22.14)') "I+P,d/dt,diss:",PEner(2)+IEner(2),ddt_tot,ddt_diss
           ddt_tot = (TOTE(2)-TOTE(1))/dt
           write(iulog,'(a,3E22.14)') "  E,d/dt,diss:",TOTE(2),ddt_tot
+
+          if (rsplit>0) then
+             write(iulog,'(a,3E22.14)') "Timestep tendencies not including remap (NR):"
+             ddt_tot  =  (KEner(4)-KEner(1))/dt
+             ddt_diss = ddt_tot -(T1+PEhorz2)
+             write(iulog,'(a,3E22.14)') " KE(NR),d/dt,diss:",KEner(4),ddt_tot,ddt_diss
+
+             ddt_tot  =  (IEner(4)-IEner(1))/dt
+             write(iulog,'(a,3E22.14)') " IE(NR),d/dt     :",IEner(4),ddt_tot
+             ddt_tot  =  (PEner(4)-PEner(1))/dt
+             write(iulog,'(a,3E22.14)') " PE(NR),d/dt     :",PEner(4),ddt_tot
+             
+             ddt_tot =  (PEner(4)+IEner(4)-PEner(1)-IEner(1))/dt
+             ddt_diss = ddt_tot - (S1+PEhorz1)
+             write(iulog,'(a,3E22.14)') "I+P(NR),d/dt,diss:",PEner(4)+IEner(4),ddt_tot,ddt_diss
+             ddt_tot = (TOTE(4)-TOTE(1))/dt
+             write(iulog,'(a,3E22.14)') "  E(NR),d/dt,diss:",TOTE(4),ddt_tot
+          endif
+
        else
           write(iulog,'(a,2e22.14)')'KEu h-adv,sum=0:',KEH1,KEH2
           write(iulog,'(a,3e22.14)')'KEw h-adv,sum=0:',KEwH1+KEwH3,KEwH2
@@ -756,6 +775,23 @@ contains
           ddt_tot = (TOTE(2)-TOTE(1))/dt
           !ddt_diss = ddt_tot - (KEwH1+KEwH2+IEvert1+IEvert2)
           write(iulog,'(a,3E22.14)') " E,d/dt,diss:",TOTE(2),ddt_tot!,ddt_diss
+
+          if (rsplit>0) then
+             write(iulog,'(a,3E22.14)') "Timestep tendencies not including remap (NR):"
+             ddt_tot  =  (KEner(4)-KEner(1))/dt
+             ddt_diss = ddt_tot -(T1+T2+P1) 
+             write(iulog,'(a,3E22.14)') "KE(NR),d/dt,diss:",KEner(4),ddt_tot,ddt_diss
+          
+             ddt_tot =  (IEner(4)-IEner(1))/dt
+             ddt_diss = ddt_tot - (S1+S2)
+             write(iulog,'(a,3E22.14)') "IE(NR),d/dt,diss:",IEner(4),ddt_tot,ddt_diss
+          
+             ddt_tot = (PEner(4)-PEner(1))/dt
+             ddt_diss = ddt_tot - P2
+             write(iulog,'(a,3E22.14)') "PE(NR),d/dt,diss:",PEner(4),ddt_tot,ddt_diss
+             ddt_tot = (TOTE(4)-TOTE(1))/dt
+             write(iulog,'(a,3E22.14)') " E(NR),d/dt,diss:",TOTE(4),ddt_tot!,ddt_diss
+          endif
        endif
 #else
        write(iulog,'(a,3E22.14)') "KE,d/dt      ",KEner(2),(KEner(2)-KEner(1))/dt

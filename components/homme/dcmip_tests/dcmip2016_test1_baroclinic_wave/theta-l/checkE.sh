@@ -3,7 +3,7 @@
 #XXSBATCH --account=FY150001
 #XXSBATCH -p ec
 #SBATCH --account=condo
-#SBATCH -p acme-centos6
+#SBATCH -p acme-medium
 #SBATCH -N 6
 #SBATCH --time=2:00:00
 #
@@ -51,10 +51,17 @@ echo "nmax=" $nmax " restartfile=" $rname " restart run..."
 mpirun  $EXEC < input.nl > $logfile2
 
 echo "diagnostics 3rd timsteps:"
-grep "d/dt" $logfile2 | head -12 | tail -4
+grep "d/dt" $logfile2 | grep -v NR |  head -12 | tail -4
 echo "diagnostics last timesteps:"
-grep "d/dt" $logfile2 | tail -4
-grep "E-E0" $logfile2 | tail -1
+grep "d/dt" $logfile2 | grep -v NR | tail -4
+grep "E-E0" $logfile2 | grep -v NR | tail -1
+
+
+echo "not including remap (NR) option - diagnostics 3rd timsteps:"
+grep "d/dt" $logfile2 | grep  NR |  head -12 | tail -4
+echo "NR diagnostics last timesteps:"
+grep "d/dt" $logfile2 | grep  NR | tail -4
+grep "E-E0" $logfile2 | grep  NR | tail -1
 
 }
 
