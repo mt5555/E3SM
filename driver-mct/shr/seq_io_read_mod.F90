@@ -148,7 +148,7 @@ contains
     endif
     rcode = pio_inq_varid(pioid,trim(name1),varid)
     if (rcode/=0) then
-       if(iam==0) write(logunit,*) subname,'ERROR: pio_inq_varid failed. variable=',&
+       write(logunit,*) subname,'ERROR: pio_inq_varid failed. variable=',&
             trim(name1),'file=',trim(filename)
        call shr_sys_abort()
     endif
@@ -276,7 +276,7 @@ contains
 
     rcode = pio_inq_varid(pioid,trim(name1),varid)
     if (rcode/=0) then
-       if(iam==0) write(logunit,*) subname,'ERROR: pio_inq_varid failed. variable=',&
+       write(logunit,*) subname,'ERROR: pio_inq_varid failed. variable=',&
             trim(name1),'file=',trim(filename)
        call shr_sys_abort()
     endif
@@ -326,7 +326,7 @@ contains
 
     rcode = pio_inq_varid(pioid,trim(name1),varid)
     if (rcode/=0) then
-       if(iam==0) write(logunit,*) subname,'ERROR: pio_inq_varid failed. variable=',&
+       write(logunit,*) subname,'ERROR: pio_inq_varid failed. variable=',&
             trim(name1),'file=',trim(filename)
        call shr_sys_abort()
     endif
