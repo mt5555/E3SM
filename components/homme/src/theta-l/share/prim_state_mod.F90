@@ -700,8 +700,8 @@ contains
              write(iulog,'(a,E23.15,a,E23.15,a)') "    dry M = ",Mass-Q1mass(1),' kg/m^2'
           endif
        endif
-       
-       write(iulog,'(3a25)') "**DYNAMICS**        J/m^2","   W/m^2","W/m^2    "
+
+       write(iulog,'(3a25)') "*CAAR DIAGNOSTICS*  J/m^2","   W/m^2","W/m^2    "
        if (ftype==4) &
             write(iulog,*) "NOTE:ftype=4 so d/dt and diss diagnostics include effects of forcing"
 #if defined(ENERGY_DIAGNOSTICS) && !defined (HOMMEXX_ENABLE_GPU_F90)
@@ -738,31 +738,28 @@ contains
           write(iulog,'(a,2e22.14)')'KE->PE, PE->KE :',P1,P2
           write(iulog,'(a,2e22.14)')'KE->IE, IE->KE :',T1+T2,S1+S2
           
-          ddt_tot  =  (KEner(2)-KEner(1))/dt
+          ddt_tot  =  (KEner(5)-KEner(1))/tstep
           ddt_diss = ddt_tot -(T1+T2+P1) 
-          write(iulog,'(a,3E22.14)') "KE,d/dt,diss:",KEner(2),ddt_tot,ddt_diss
-          !ddt_diss_adj = ddt_tot -(T1+T2+P1+KEwH1+KEwH2)
-          !write(iulog,'(a,3E22.14)') "KE diss(adj):",ddt_diss_adj
+          write(iulog,'(a,3E22.14)') "KE,d/dt,diss:",KEner(1),ddt_tot,ddt_diss
           
-          ddt_tot =  (IEner(2)-IEner(1))/dt
+          ddt_tot =  (IEner(5)-IEner(1))/tstep
           ddt_diss = ddt_tot - (S1+S2)
-          write(iulog,'(a,3E22.14)') "IE,d/dt,diss:",IEner(2),ddt_tot,ddt_diss
-          !ddt_diss_adj = ddt_tot - (S1+S2+IEvert1+IEvert2)
-          !write(iulog,'(a,3E22.14)') "IE diss(adj):",ddt_diss_adj
+          write(iulog,'(a,3E22.14)') "IE,d/dt,diss:",IEner(1),ddt_tot,ddt_diss
           
-          ddt_tot = (PEner(2)-PEner(1))/dt
+          ddt_tot = (PEner(5)-PEner(1))/tstep
           ddt_diss = ddt_tot - P2
-          write(iulog,'(a,3E22.14)') "PE,d/dt,diss:",PEner(2),ddt_tot,ddt_diss
-          ddt_tot = (TOTE(2)-TOTE(1))/dt
-          !ddt_diss = ddt_tot - (KEwH1+KEwH2+IEvert1+IEvert2)
-          write(iulog,'(a,3E22.14)') " E,d/dt,diss:",TOTE(2),ddt_tot!,ddt_diss
+          write(iulog,'(a,3E22.14)') "PE,d/dt,diss:",PEner(1),ddt_tot,ddt_diss
+          ddt_tot = (TOTE(5)-TOTE(1))/dt
+          write(iulog,'(a,3E22.14)') " E,d/dt,diss:",TOTE(1),ddt_tot!,ddt_diss
+
+
        endif
 #else
-       write(iulog,'(a,3E22.14)') "KE,d/dt      ",KEner(2),(KEner(2)-KEner(1))/dt
-       write(iulog,'(a,3E22.14)') "IE,d/dt      ",IEner(2),(IEner(2)-IEner(1))/dt
-       write(iulog,'(a,3E22.14)') "PE,d/dt      ",PEner(2),(PEner(2)-PEner(1))/dt
-       ddt_tot = (TOTE(2)-TOTE(1))/dt
-       write(iulog,'(a,3E22.14)') " E,dE/dt     ",TOTE(2),ddt_tot
+       write(iulog,'(a,3E22.14)') "KE,d/dt      ",KEner(1),(KEner(5)-KEner(1))/dt
+       write(iulog,'(a,3E22.14)') "IE,d/dt      ",IEner(1),(IEner(5)-IEner(1))/dt
+       write(iulog,'(a,3E22.14)') "PE,d/dt      ",PEner(1),(PEner(5)-PEner(1))/dt
+       ddt_tot = (TOTE(5)-TOTE(1))/dt
+       write(iulog,'(a,3E22.14)') " E,dE/dt     ",TOTE(1),ddt_tot
 #endif
        
        do q=1,qsize
@@ -770,16 +767,14 @@ contains
                (Qmass(q,2)-Qmass(q,1))/dt,(Qvar(q,2)-Qvar(q,1))/dt
        enddo
 
-
-       ! changes due to viscosity were with tstep
-       ! changes due to forcing depend on ftype
-       write(iulog,'(a)') 'Change from dribbled phys tendencies, viscosity, remap:'
-       write(iulog,'(a,3e15.7)') 'dKE/dt(W/m^2): ',(KEner(1)-KEner(3))/dt_f,&
-            (KEner(6)-KEner(5))/tstep,(KEner(2)-KEner(4))/dt
-       write(iulog,'(a,3e15.7)') 'dIE/dt(W/m^2): ',(IEner(1)-IEner(3))/dt_f,&
-            (IEner(6)-IEner(5))/tstep,(IEner(2)-IEner(4))/dt
-       write(iulog,'(a,3e15.7)') 'dPE/dt(W/m^2): ',(PEner(1)-PEner(3))/dt_f,&
-            (PEner(6)-PEner(5))/tstep,(PEner(2)-PEner(4))/dt
+       ! be careful to use correct timestep
+       write(iulog,'(a)') 'Change from dribbled phys tendencies, viscosity, remap, CAAR+HV+remap:'
+       write(iulog,'(a,4e15.7)') 'dKE/dt(W/m^2): ',(KEner(1)-KEner(3))/dt_f,&
+            (KEner(6)-KEner(5))/tstep,(KEner(2)-KEner(4))/dt,(KEner(2)-KEner(1))/dt
+       write(iulog,'(a,4e15.7)') 'dIE/dt(W/m^2): ',(IEner(1)-IEner(3))/dt_f,&
+            (IEner(6)-IEner(5))/tstep,(IEner(2)-IEner(4))/dt,(IEner(2)-IEner(1))/dt
+       write(iulog,'(a,4e15.7)') 'dPE/dt(W/m^2): ',(PEner(1)-PEner(3))/dt_f,&
+            (PEner(6)-PEner(5))/tstep,(PEner(2)-PEner(4))/dt,(PEner(2)-PEner(1))/dt
        q=1
        if (qsize>0) write(iulog,'(a,2e15.7)') 'dQ1/dt(kg/sm^2)',(Qmass(q,1)-Qmass(q,3))/dt
 
