@@ -6,7 +6,7 @@
   nthreads          = 1
   partmethod        = 4                         ! mesh parition method: 4 = space filling curve
   topology          = "cube"                    ! mesh type: cubed sphere
-  test_case         = "mtest2"       ! test identifier
+  test_case         = "mtest2"       ! test identifier: Circular Mountain, no shear
   ne                = 60                        ! number of elements per cube face
   qsize             = 0                         ! num tracer fields
   ndays             = 0                         ! num simulation days: 0 => use nmax steps
@@ -17,17 +17,16 @@
   tstep             = 0.1                       ! largest timestep in seconds
   integration       = 'explicit'                ! explicit time integration
   tstep_type        = 5                         ! 1 => default method
-  nu                = 2.2e7                       ! reduced planet hyperviscosity hv/500^3
+  nu                = 2.2e7                       ! reduced planet hyperviscosity hv/166.7^3
   nu_s              = 2.2e7
   nu_p              = 2.2e7
   hypervis_order    = 2                         ! 2 = hyperviscosity
   hypervis_subcycle = 1                         ! 1 = no hyperviz subcycling
-  rearth            = 38248.0                   ! reduced planet radius rearth = a/500.0
+  rearth            = 38248.0                   ! reduced planet radius rearth = a/166.7
   omega             = 0.0                       ! earth angular speed = 0.0
 /
 &vert_nl
   vanalytic         = 1                         ! set vcoords in initialization routine
-  vtop              = 3.2818e-2                 ! vertical coordinate at top of atm (z=30km)
 /
 &analysis_nl
   output_dir        = "./movies/"               ! destination dir for netcdf file
