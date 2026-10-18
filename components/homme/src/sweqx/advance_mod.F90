@@ -1030,20 +1030,19 @@ contains
   integer :: n0,k
   real (kind=real_kind) :: time
 
+  ! the prescribed velocity is the same on every level: compute it once, then copy
   if (test_case=="swtc1") then
-     do k=1,nlev
-        elem%state%v(:,:,:,k,n0)=tc1_velocity(elem%spherep,elem%Dinv)
-     end do
+     elem%state%v(:,:,:,1,n0)=tc1_velocity(elem%spherep,elem%Dinv)
   else if (test_case=="vortex") then
-     do k=1,nlev
-        elem%state%v(:,:,:,k,n0)=vortex_velocity(time,elem%spherep,elem%Dinv)
-     end do
+     elem%state%v(:,:,:,1,n0)=vortex_velocity(time,elem%spherep,elem%Dinv)
   else if (test_case=="swirl") then
-     do k=1,nlev
-        elem%state%v(:,:,:,k,n0)=swirl_velocity(time,elem%spherep,elem%Dinv)
-     end do
-
+     elem%state%v(:,:,:,1,n0)=swirl_velocity(time,elem%spherep,elem%Dinv)
+  else
+     return
   end if
+  do k=2,nlev
+     elem%state%v(:,:,:,k,n0)=elem%state%v(:,:,:,1,n0)
+  end do
   end subroutine set_prescribed_velocity
 
 !----------------------------------------------------------------------------------------
