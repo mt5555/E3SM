@@ -859,7 +859,7 @@ contains
     !-----------------
     use restart_io_mod, only : readrestart, writerestart
     !-----------------
-    use advance_mod, only : advance_nonstag_rk
+    use advance_mod, only : advance_nonstag_rk, advance_nonstag_rk4
     !-----------------
     use control_mod, only : integration, &
          restartfreq, statefreq, runtype, &
@@ -1141,7 +1141,10 @@ contains
        ! =================================
        ! Call advance
        ! =================================
-       if (rk_stage_user > 0) then
+       if (rk_stage_user == -4) then
+          ! classical RK4 (advance_nonstag_rk4): no generic RK tableau needed
+          cfl = 0
+       else if (rk_stage_user > 0) then
           ! user specified number of stages.  has to be >= 2
           cfl = max(2,rk_stage_user)
           cfl = cfl - 1  
@@ -1150,13 +1153,19 @@ contains
        endif
        dt_rk = dt
 
-       call RkInit(cfl,RungeKutta)  ! number of stages: cfl+1
+       if (rk_stage_user /= -4) call RkInit(cfl,RungeKutta)  ! number of stages: cfl+1
 
        if (toy_chemistry==1) call toy_chemistry_forcing(elem,nets,nete,tl,dt_rk)
-       call advance_nonstag_rk(RungeKutta, elem,  edge2, edge3, deriv,  hybrid, &
-            dt_rk   , pmean, tl   , nets, nete)
-       
-       call TimeLevel_update(tl,"leapfrog")       
+       if (rk_stage_user == -4) then
+          ! classical RK4 (low storage, 3 time levels)
+          call advance_nonstag_rk4(elem,  edge2, edge3, deriv,  hybrid, &
+               dt_rk   , pmean, tl   , nets, nete)
+          call TimeLevel_update(tl,"forward")
+       else
+          call advance_nonstag_rk(RungeKutta, elem,  edge2, edge3, deriv,  hybrid, &
+               dt_rk   , pmean, tl   , nets, nete)
+          call TimeLevel_update(tl,"leapfrog")
+       endif
        ! ============================================================
        ! Instrumentation alley:
        !
