@@ -987,6 +987,7 @@ contains
   use edgetype_mod, only : EdgeBuffer_t
   use bndry_mod, only : bndry_exchangev
   use perf_mod, only : t_startf, t_stopf ! _EXTERNAL
+  use control_mod, only : theta_advect_form, kmass
   implicit none
 
   type (hybrid_t)      , intent(in) :: hybrid
@@ -1007,6 +1008,11 @@ contains
   real (kind=real_kind), dimension(np,np)                     :: zeta       ! relative vorticity
   real (kind=real_kind), dimension(np,np)      :: div  
   real (kind=real_kind), dimension(np,np,2)      :: ulatlon
+  real (kind=real_kind), dimension(np,np)        :: rho     ! density p(kmass), or 1 if kmass=-1
+  real (kind=real_kind), dimension(np,np)        :: q       ! mixing ratio p/rho
+  real (kind=real_kind), dimension(np,np,2)      :: gradq   ! strong gradient of q
+  real (kind=real_kind), dimension(np,np,2)      :: rhou    ! mass flux rho*u lat-lon
+  real (kind=real_kind), dimension(np,np)        :: divrhou ! strong divergence of rho*u
 
   integer i,j,k,kptr,ie
   real (kind=real_kind) ::  v1,v2
@@ -1024,6 +1030,12 @@ contains
      spheremp     => elem(ie)%spheremp
 
      call set_prescribed_velocity(elem(ie),n0,real_time)
+
+     if (kmass /= -1) then
+        rho = elem(ie)%state%p(:,:,kmass,n0)
+     else
+        rho = 1.0D0
+     endif
 
      do k=1,nlev
         ! ==============================================
@@ -1047,6 +1059,26 @@ contains
         grade = gradient_sphere(E,deriv,elem(ie)%Dinv)       ! scalar -> latlon vector
         zeta = vorticity_sphere(ulatlon,deriv,elem(ie)) ! latlon vector -> scalar 
         div = divergence_sphere(pv,deriv,elem(ie))      ! latlon vector -> scalar 
+        if (theta_advect_form == 2 .and. k /= kmass) then
+           ! split form about the mass flux, with q = p/rho:
+           !   div(p u) -> 0.5*( div(p u) + rho u.grad(q) + q div(rho u) )
+           ! so q=1 is preserved when p=rho.  With kmass=-1, rho=1 and this is
+           !   div(p u) -> 0.5*( div(p u) + u.grad(p) + p div(u) )
+           ! the density level (kmass) keeps the flux form.
+           ! (pmean is 0 for test cases with a density level)
+           q = elem(ie)%state%p(:,:,k,n0)/rho
+           gradq = gradient_sphere(q,deriv,elem(ie)%Dinv)
+           rhou(:,:,1) = rho*ulatlon(:,:,1)
+           rhou(:,:,2) = rho*ulatlon(:,:,2)
+           divrhou = divergence_sphere(rhou,deriv,elem(ie))
+           do j=1,np
+              do i=1,np
+                 div(i,j) = 0.5D0*( div(i,j) + &
+                      rhou(i,j,1)*gradq(i,j,1) + rhou(i,j,2)*gradq(i,j,2) + &
+                      (pmean+q(i,j))*divrhou(i,j) )
+              end do
+           end do
+        endif
         
         ! ==============================================
         ! Compute velocity tendency terms
