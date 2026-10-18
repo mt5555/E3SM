@@ -57,9 +57,7 @@ module shallow_water_mod
   real (kind=real_kind), public,  parameter  :: latc0  = 0.0D0        ! init latitude of cosine bell center
   real (kind=real_kind), public,  parameter  :: lonc0  = 1.5D0*DD_PI  ! init longitude of cosine bell center
   real (kind=real_kind), private, parameter  :: u0     = 2.0D0*DD_PI*rearth/(12.0*86400.0) ! adv. wind velocity
-  real (kind=real_kind), private, parameter  :: alpha  = 0.0D0        ! angle of wind advection rel. to equator
-!  real (kind=real_kind), private, parameter  :: alpha  = DD_PI/2.0D0       ! angle of wind advection rel. to equator
-!  real (kind=real_kind), private, parameter  :: alpha  = DD_PI/4.0D0  ! angle of wind advection rel. to equator
+  real (kind=real_kind), private             :: alpha  = 0.0D0        ! angle of wind advection rel. to equator
   real (kind=real_kind), private, parameter  :: gh0_tc2 = 2.94D4      ! m^2/s^2 (p. 218 of Williamson)
 
   ! ================================================
@@ -516,13 +514,11 @@ contains
     implicit none
     real (kind=real_kind) :: pmean 
 
-    pmean = gh0_tc1
+    pmean = 0
     ! pmean is needed for semi-implicit
     ! for explicit, it does not matter and it gives negative values
     ! with monotone limiter of order -1e-11 for some reason
-    if (integration == "explicit" .and. limiter_option /= 0) pmean = 0
-    if (integration == "runge_kutta" .and. limiter_option /= 0) pmean = 0
-    if (integration == "full_imp" .and. limiter_option /= 0) pmean = 0
+    if (integration == "full_imp" .and. limiter_option == 0) pmean = gh0_tc1
   end function tc1_init_pmean
   ! ===========================================
   ! tc2_init_pmean
@@ -594,7 +590,7 @@ contains
 
     ! Local variables
 
-    integer ie,k,case
+    integer ie,k
     integer :: nm1 
     integer :: n0 
     integer :: np1
@@ -606,12 +602,22 @@ contains
     n0 = 2
     np1= 3
 
+    select case (sub_case)
+    case (1)
+       alpha = 0.0D0   ! angle of wind advection rel. to equator
+    case (2)
+       alpha = DD_PI/2.0D0
+    case (3)
+       alpha = DD_PI/2.0D0 - 0.05D0
+    case (4)
+       alpha = DD_PI/4.0D0  
+    end select
+
     pmean = tc1_init_pmean()       ! set pmean
     do ie=nets,nete
        do k=1,nlev
-          case = sub_case
-          if (sub_case==1 .and. k>1) case=k  ! run one sub_case in each level
-          elem(ie)%state%p(:,:,k,n0)=tc1_geopotential(elem(ie)%spherep(:,:),pmean,latc0,lonc0,case)
+          ! level k holds its own shape: 1 cosine bell, 2 gaussian, 3 cylinder, 4 slotted cylinder
+          elem(ie)%state%p(:,:,k,n0)=tc1_geopotential(elem(ie)%spherep(:,:),pmean,latc0,lonc0,k)
 !          elem(ie)%state%p(:,:,k,n0)=0.0D0
           elem(ie)%state%p(:,:,k,nm1)=elem(ie)%state%p(:,:,k,n0)
           elem(ie)%state%p(:,:,k,np1)=0.0D0
@@ -1064,66 +1070,52 @@ contains
 
     ! Local variables 
 
-    real (kind=real_kind) :: latc,lonc
-    real (kind=real_kind) :: lamdot,lon
     real (kind=real_kind) :: l1,l2,linf,time_tmp
-    real (kind=real_kind) :: cslonc,snlonc
-    real (kind=real_kind) :: cslatc,snlatc
+    real (kind=real_kind) :: theta,kax(3),xv(3),kxx(3),xb(3)
+    type (spherical_polar_t) :: sback(np,np)
 
     real (kind=real_kind) :: pt(np,np,nets:nete)
     real (kind=real_kind) :: p(np,np,nets:nete)
 
-    integer ie,k
+    character(len=4), parameter :: shape_name(4) = (/ 'cosi','gaus','cyli','slcy' /)
+    integer ie,k,nshape,i,j
+
+    nshape = min(nlev,4)    ! level k holds shape k; one set of error files per shape
 
     if (tl%nstep == 0) then
        if (hybrid%masterthread) then
-          if(sub_case == 1)then
-
-             open(iounit+0,file=TRIM(output_prefix)//"swtc1.cosi.l1.errors",form="formatted")
-             open(iounit+1,file=TRIM(output_prefix)//"swtc1.cosi.l2.errors",form="formatted")
-             open(iounit+2,file=TRIM(output_prefix)//"swtc1.cosi.linf.errors",form="formatted")
-
-          else if(sub_case == 2)then
-
-             open(iounit+0,file=TRIM(output_prefix)//"swtc1.gaus.l1.errors",form="formatted")
-             open(iounit+1,file=TRIM(output_prefix)//"swtc1.gaus.l2.errors",form="formatted")
-             open(iounit+2,file=TRIM(output_prefix)//"swtc1.gaus.linf.errors",form="formatted")
-
-          else if(sub_case== 3)then
-
-             open(iounit+0,file=TRIM(output_prefix)//"swtc1.cyli.l1.errors",form="formatted")
-             open(iounit+1,file=TRIM(output_prefix)//"swtc1.cyli.l2.errors",form="formatted")
-             open(iounit+2,file=TRIM(output_prefix)//"swtc1.cyli.linf.errors",form="formatted")
-
-          else if(sub_case == 4)then
-
-             open(iounit+0,file=TRIM(output_prefix)//"swtc1.slcy.l1.errors",form="formatted")
-             open(iounit+1,file=TRIM(output_prefix)//"swtc1.slcy.l2.errors",form="formatted")
-             open(iounit+2,file=TRIM(output_prefix)//"swtc1.slcy.linf.errors",form="formatted")
-
-          end if
+          do k=1,nshape
+             open(iounit+3*(k-1)+0,file=TRIM(output_prefix)//"swtc1."//shape_name(k)//".l1.errors",form="formatted")
+             open(iounit+3*(k-1)+1,file=TRIM(output_prefix)//"swtc1."//shape_name(k)//".l2.errors",form="formatted")
+             open(iounit+3*(k-1)+2,file=TRIM(output_prefix)//"swtc1."//shape_name(k)//".linf.errors",form="formatted")
+          end do
        end if
     end if
 
-    ! Compute the expected lat,lon of the cosine bell:
-    ! solid body rotations by Z axis and by X axis ..
-    time_tmp   = Time_at(tl%nstep)
-    lamdot = u0/rearth
-    lon  = MODULO(lamdot*time_tmp,2.0D0*real(DD_PI,kind=real_kind))
-    snlatc = SIN(lon)*SIN(alpha)
-    cslatc = SQRT(1.0D0 - snlatc*snlatc)
-
-    cslonc = (COS(lon)*COS(lonc0) - SIN(lon)*SIN(lonc0)*COS(alpha))/cslatc
-    snlonc = (COS(lon)*SIN(lonc0) + SIN(lon)*COS(lonc0)*SIN(alpha))/cslatc
-
-    latc = ASIN(SIN(lon)*SIN(alpha))
-    lonc = ATAN2(snlonc,cslonc)
-
-    if (lonc < 0.0D0) lonc = lonc + 2.0D0*DD_PI
+    ! Exact solution: initial shape evaluated at the point rotated back by
+    ! theta=omega*t about the axis kax = (-sin(alpha),0,cos(alpha))
+    time_tmp = Time_at(tl%nstep)
+    theta = (u0/rearth)*time_tmp
+    kax = (/ -SIN(alpha), 0.0D0, COS(alpha) /)
 
     do k=1,nlev
        do ie=nets,nete
-          pt(:,:,ie)=tc1_geopotential(elem(ie)%spherep(:,:),pmean,latc,lonc,sub_case)
+          do j=1,np
+             do i=1,np
+                xv(1) = COS(elem(ie)%spherep(i,j)%lat)*COS(elem(ie)%spherep(i,j)%lon)
+                xv(2) = COS(elem(ie)%spherep(i,j)%lat)*SIN(elem(ie)%spherep(i,j)%lon)
+                xv(3) = SIN(elem(ie)%spherep(i,j)%lat)
+                kxx(1) = kax(2)*xv(3) - kax(3)*xv(2)
+                kxx(2) = kax(3)*xv(1) - kax(1)*xv(3)
+                kxx(3) = kax(1)*xv(2) - kax(2)*xv(1)
+                xb = xv*COS(theta) - kxx*SIN(theta) &
+                     + kax*DOT_PRODUCT(kax,xv)*(1.0D0-COS(theta))
+                sback(i,j)%lat = ASIN(MAX(-1.0D0,MIN(1.0D0,xb(3))))
+                sback(i,j)%lon = ATAN2(xb(2),xb(1))
+                if (sback(i,j)%lon < 0.0D0) sback(i,j)%lon = sback(i,j)%lon + 2.0D0*DD_PI
+             end do
+          end do
+          pt(:,:,ie)=tc1_geopotential(sback,pmean,latc0,lonc0,k)
           pt(:,:,ie)=pt(:,:,ie) + pmean
           p(:,:,ie) =elem(ie)%state%p(:,:,k,tl%n0) + pmean
        end do
@@ -1132,12 +1124,10 @@ contains
        l2   = l2_snorm(elem, p(:,:,nets:nete),  pt(:,:,nets:nete),hybrid,np,nets,nete)
        linf = linf_snorm(p(:,:,nets:nete),pt(:,:,nets:nete),hybrid,np,nets,nete)
        
-       if (k==1) then
-       if (hybrid%masterthread) then
-          write(iounit+0,30)time_tmp/secpday,l1
-          write(iounit+1,30)time_tmp/secpday,l2
-          write(iounit+2,30)time_tmp/secpday,linf
-       end if
+       if (k<=nshape .and. hybrid%masterthread) then
+          write(iounit+3*(k-1)+0,30)time_tmp/secpday,l1
+          write(iounit+3*(k-1)+1,30)time_tmp/secpday,l2
+          write(iounit+3*(k-1)+2,30)time_tmp/secpday,linf
        end if
 
        if (hybrid%masterthread) then
@@ -1150,7 +1140,7 @@ contains
 
 10  format("      time           l1              l2              linf           ")
 20  format("====================================================================")
-30  format(f11.6,4x,e13.6)
+30  format(f13.6,4x,e13.6)
 
   end subroutine tc1_errors
 
