@@ -168,6 +168,96 @@ contains
 #endif
   end subroutine advance_nonstag
 
+  ! ===================================================================
+  ! advance_nonstag_rk4:
+  !
+  ! Classical RK4 in three time levels: n0 holds u^n (never modified),
+  ! nm1 is the stage value, np1 accumulates the result.
+  !   U2 = u + h/2 F(u, t)
+  !   U3 = u + h/2 F(U2,t+h/2)
+  !   U4 = u + h   F(U3,t+h/2)
+  !   U5 = u + h/6 F(U4,t+h)
+  !   u^{n+1} = (-4u+U2)/3 + 2/3 U3 + 1/3 U4 + U5
+  ! dt is the full step h.  Use TimeLevel_update(tl,"forward") afterwards.
+  ! ===================================================================
+  subroutine advance_nonstag_rk4( elem, edge2,  edge3,  deriv,  hybrid,  &
+       dt,  pmean,     tl,   nets,   nete)
+
+    use kinds,          only: real_kind
+    use dimensions_mod, only: np, nlev
+    use element_mod,    only: element_t
+    use edgetype_mod,   only: EdgeBuffer_t
+    use hybrid_mod,     only: hybrid_t
+    use derivative_mod, only: derivative_t
+    use time_mod,       only: timelevel_t, smooth
+    use perf_mod,       only : t_startf, t_stopf ! _EXTERNAL
+
+    implicit none
+
+    type (element_t)     , intent(inout), target :: elem(:)
+    type (EdgeBuffer_t)  , intent(in) :: edge2
+    type (EdgeBuffer_t)  , intent(inout) :: edge3
+    type (derivative_t)  , intent(in) :: deriv
+    type (hybrid_t)      , intent(in) :: hybrid
+    real (kind=real_kind), intent(in) :: dt
+    real (kind=real_kind), intent(in) :: pmean
+    type (TimeLevel_t)   , intent(in) :: tl
+    integer              , intent(in) :: nets
+    integer              , intent(in) :: nete
+
+    real (kind=real_kind), dimension(np,np,2,nlev,nets:nete)  :: vtens
+    real (kind=real_kind), dimension(np,np,nlev,nets:nete) :: ptens
+
+    real (kind=real_kind) :: real_time
+    integer    :: ie
+    integer    :: nm1,n0,np1
+
+    if (smooth/=0) stop 'ERROR: smooth>0 only allowed for leapfrog'
+
+    nm1 = tl%nm1
+    n0  = tl%n0
+    np1 = tl%np1
+    real_time = dt*real(tl%nstep,kind=real_kind)
+
+    call t_startf('advance_nonstag_rk4')
+
+    ! U2 = u + h/2 F(u,t)
+    call compute_and_apply_rhs(nm1,n0,n0,dt/2,real_time,edge3,elem,pmean,hybrid,deriv,vtens,ptens,nets,nete)
+    do ie=nets,nete
+       elem(ie)%state%v(:,:,:,:,np1) = (-4*elem(ie)%state%v(:,:,:,:,n0) + elem(ie)%state%v(:,:,:,:,nm1))/3
+       elem(ie)%state%p(:,:,:,np1)   = (-4*elem(ie)%state%p(:,:,:,n0)   + elem(ie)%state%p(:,:,:,nm1))/3
+    enddo
+
+    ! U3 = u + h/2 F(U2,t+h/2)
+    call compute_and_apply_rhs(nm1,n0,nm1,dt/2,real_time+dt/2,edge3,elem,pmean,hybrid,deriv,vtens,ptens,nets,nete)
+    do ie=nets,nete
+       elem(ie)%state%v(:,:,:,:,np1) = elem(ie)%state%v(:,:,:,:,np1) + (2.0d0/3.0d0)*elem(ie)%state%v(:,:,:,:,nm1)
+       elem(ie)%state%p(:,:,:,np1)   = elem(ie)%state%p(:,:,:,np1)   + (2.0d0/3.0d0)*elem(ie)%state%p(:,:,:,nm1)
+    enddo
+
+    ! U4 = u + h F(U3,t+h/2)
+    call compute_and_apply_rhs(nm1,n0,nm1,dt,real_time+dt/2,edge3,elem,pmean,hybrid,deriv,vtens,ptens,nets,nete)
+    do ie=nets,nete
+       elem(ie)%state%v(:,:,:,:,np1) = elem(ie)%state%v(:,:,:,:,np1) + (1.0d0/3.0d0)*elem(ie)%state%v(:,:,:,:,nm1)
+       elem(ie)%state%p(:,:,:,np1)   = elem(ie)%state%p(:,:,:,np1)   + (1.0d0/3.0d0)*elem(ie)%state%p(:,:,:,nm1)
+    enddo
+
+    ! U5 = u + h/6 F(U4,t+h)
+    call compute_and_apply_rhs(nm1,n0,nm1,dt/6,real_time+dt,edge3,elem,pmean,hybrid,deriv,vtens,ptens,nets,nete)
+    do ie=nets,nete
+       elem(ie)%state%v(:,:,:,:,np1) = elem(ie)%state%v(:,:,:,:,np1) + elem(ie)%state%v(:,:,:,:,nm1)
+       elem(ie)%state%p(:,:,:,np1)   = elem(ie)%state%p(:,:,:,np1)   + elem(ie)%state%p(:,:,:,nm1)
+    enddo
+
+    call advance_hypervis(edge3,elem,hybrid,deriv,vtens,ptens,np1,nets,nete,dt)
+
+    call t_stopf('advance_nonstag_rk4')
+
+#if (defined HORIZ_OPENMP)
+    !$OMP BARRIER
+#endif
+  end subroutine advance_nonstag_rk4
+
 !--------------------------------------------------------------------------------------------
 
   subroutine advance_nonstag_rk( MyRk, elem, edge2,  edge3,  deriv,  hybrid,  &
@@ -849,6 +939,10 @@ contains
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     if (hypervis_order == 2) then
        do ic=1,hypervis_subcycle
+          ! applied to every level, including the density level kmass, so for the
+          ! tracers this is hyperviscosity on rho*q.  This conserves tracer mass and
+          ! preserves q=1, and (unlike hyperviscosity on q) its stability does not
+          ! depend on rho
           call biharmonic_wk(elem,ptens,vtens,deriv,edge3,hybrid,nt,nets,nete)
 
           do ie=nets,nete
