@@ -58,12 +58,17 @@ kcut_fm       = 2
 !							!
 !  output_varnames1-5					!
 !=======================================================!
-output_start_time= 0
-output_end_time  = 1200000
-output_frequency = 6
-output_timeunits = 1
+! stream 1 (swtc11.nc): daily for 36 days.  stream 2 (swtc12.nc): every 12 days, whole run
+output_start_time= 0, 0
+output_end_time  = 36, -1
+output_frequency = 1, 12
+output_timeunits = 1, 1
 output_varnames1 = 'geop'
+output_varnames2 = 'geop'
 output_type='netcdf'
+interp_type = 1     ! lat/lon output: 0 = element polynomial (default), 1 = bilinear (no new min/max)
+interp_nlon = 768   ! 0.47 deg: finer than the smallest NE30 np=4 GLL spacing (0.59 deg),
+interp_nlat = 384   ! to avoid aliasing with bilinear interpolation
 io_stride = 4
 /
 &dg_nl
