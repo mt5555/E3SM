@@ -287,6 +287,7 @@ contains
 
     real (kind=real_kind) :: E(np,np)
     real (kind=real_kind) :: mass(np,np,nlev,nets:nete)
+    real (kind=real_kind) :: var(np,np,nlev,nets:nete)   ! tracer variance rho*q^2
     real (kind=real_kind) :: kenergy(np,np,nets:nete)
     real (kind=real_kind) :: penergy(np,np,nets:nete)
     real (kind=real_kind) :: penst(np,np,nets:nete)
@@ -303,9 +304,9 @@ contains
     real (kind=real_kind) :: dm,dKE,dPE,dENS,dissE
 
     ! dont use Imass0,Ienergy0,Ipenst0 because they are being used by tc5_invariants
-    real (kind=real_kind),save :: Imass_init(nlev),Ienergy_init,Ipenst_init,Ipv_init,Idiv_init
-    real (kind=real_kind),save :: time_last,Imass_last(nlev),Ikenergy_last,Ipenergy_last,Ipenst_last,Ipv_last,Idiv_last
-    real (kind=real_kind) :: time,Imass(nlev),Ikenergy,Ipenergy,Ipenst,Ienergy,Ipv,Idiv,rms_div,rms_vor,rms_f
+    real (kind=real_kind),save :: Imass_init(nlev),Ivar_init(nlev),Ienergy_init,Ipenst_init,Ipv_init,Idiv_init
+    real (kind=real_kind),save :: time_last,Imass_last(nlev),Ivar_last(nlev),Ikenergy_last,Ipenergy_last,Ipenst_last,Ipv_last,Idiv_last
+    real (kind=real_kind) :: time,Imass(nlev),Ivar(nlev),Ikenergy,Ipenergy,Ipenst,Ienergy,Ipv,Idiv,rms_div,rms_vor,rms_f
     real (kind=real_kind), dimension(:,:,:), pointer :: v
 
     integer               :: k,n0,k1
@@ -323,6 +324,7 @@ contains
           open(iounit+5,file=TRIM(output_prefix)//"sweq.div",status="unknown",form="formatted")
           open(iounit+6,file=TRIM(output_prefix)//"sweq.div2",status="unknown",form="formatted")
           open(iounit+7,file=TRIM(output_prefix)//"sweq.vor2",status="unknown",form="formatted")
+          open(iounit+8,file=TRIM(output_prefix)//"sweq.var",status="unknown",form="formatted")
        endif
     endif
     if (nu > 0 .or. nu_s > 0 ) then
@@ -394,6 +396,13 @@ contains
 !but mass conservation output will be done for all levels 
 	     do k=1,nlev
 		mass(i,j,k,ie)    = (elem(ie)%state%p(i,j,k,n0) + pmean)/g
+		! rho*q^2 = p^2/rho, with rho the density level, or 1 when there is none.
+		! conserved by the split form up to time truncation error
+		if (kmass /= -1) then
+		   var(i,j,k,ie) = (elem(ie)%state%p(i,j,k,n0) + pmean)**2/elem(ie)%state%p(i,j,kmass,n0)
+		else
+		   var(i,j,k,ie) = (elem(ie)%state%p(i,j,k,n0) + pmean)**2
+		endif
 	     enddo
 
           end do
@@ -428,6 +437,7 @@ contains
 
     do k=1,nlev
       Imass(k)   = global_integral(elem,mass(:,:,k,nets:nete),hybrid,np,nets,nete)
+      Ivar(k)    = global_integral(elem,var(:,:,k,nets:nete),hybrid,np,nets,nete)
     enddo
     Ikenergy = global_integral(elem,kenergy(:,:,nets:nete),hybrid,np,nets,nete)
     Ipenergy = global_integral(elem,penergy(:,:,nets:nete),hybrid,np,nets,nete)
@@ -452,6 +462,7 @@ contains
     if (hybrid%masterthread) then
        if (tl%nstep==0) then
           Imass_init   = Imass
+          Ivar_init    = Ivar
           Ienergy_init = Ienergy
           Ipenst_init  = Ipenst
           Ipv_init  = Ipv
@@ -466,6 +477,7 @@ contains
        write(iounit+5,*)time/secpday,Idiv
        write(iounit+6,*)time/secpday,sqrt(rms_div/rms_f)
        write(iounit+7,*)time/secpday,sqrt(rms_vor/rms_f)
+       write(iounit+8,*)time/secpday,Ivar   ! rho*q^2 for each level (level kmass: its mass)
 
        !write(6,*)time/secpday,"mass          =",(Imass-Imass_init)/Imass_init
        !write(6,*)time/secpday,"total energy  =",(Ienergy-Ienergy_init)/Ienergy_init
@@ -479,6 +491,11 @@ contains
 	    dm = (Imass(k)-Imass_last(k))/(time-time_last)/Imass(k)
 	    write(6,'(a,i3,a,e11.4,a,e13.6,a,e13.6)') "level =",k,"  M-M0/M0      =",(Imass(k)-Imass_init(k))/Imass_init(k), &
           " dM/dt   /M  = ",dm
+	    if (k /= kmass) then
+	       dm = (Ivar(k)-Ivar_last(k))/(time-time_last)/Ivar(k)
+	       write(6,'(a,i3,a,e11.4,a,e13.6,a,e13.6)') "level =",k,"  V-V0/V0      =",(Ivar(k)-Ivar_init(k))/Ivar_init(k), &
+                    " dV/dt   /V  = ",dm
+	    endif
 	  enddo
           if (test_case(1:5) /= "swtc1") then
              write(6,'(a,e11.4,a,e13.6,a,e13.6)') "ENS-ENS0/ENS0=",(Ipenst-Ipenst_init)/Ipenst_init, " dENS/dt /ENS= ",dENS
@@ -497,6 +514,7 @@ contains
     end if
 
     Imass_last=Imass
+    Ivar_last=Ivar
     Ipenergy_last=Ipenergy
     Ikenergy_last=Ikenergy
     Ipenst_last=Ipenst
@@ -2939,9 +2957,34 @@ contains
 
     time_tmp   = Time_at(tl%nstep)
 
+    ! terminator toy chemistry: Cl and Cl2 change, but the mixing ratio of
+    ! Cly = Cl + 2*Cl2 is constant in space and time, so check it at every call
+    if (toy_chemistry/=0) then
+       do ie=nets,nete
+          pt(:,:,ie)=(swirl_init_tracer(elem(ie)%spherep(:,:),5) + &
+                      2*swirl_init_tracer(elem(ie)%spherep(:,:),6)) / &
+                      swirl_init_tracer(elem(ie)%spherep(:,:),kmass)
+          p(:,:,ie) =(elem(ie)%state%p(:,:,5,tl%n0) + 2*elem(ie)%state%p(:,:,6,tl%n0)) / &
+                      elem(ie)%state%p(:,:,kmass,tl%n0)
+       end do
+       l1   = l1_snorm(elem, p(:,:,nets:nete),  pt(:,:,nets:nete),hybrid,np,nets,nete)
+       l2   = l2_snorm(elem, p(:,:,nets:nete),  pt(:,:,nets:nete),hybrid,np,nets,nete)
+       linf = linf_snorm(p(:,:,nets:nete),pt(:,:,nets:nete),hybrid,np,nets,nete)
+       if (hybrid%masterthread) then
+          write(*,'(a,f6.2,a,3e15.7)') 'Cly ',time_tmp/secpday,' days  l1,l2,linf=',&
+               l1,l2,linf
+       end if
+    endif
+
+    ! for the other levels the exact solution is the initial state, which is only
+    ! correct at whole periods
+    if (abs(time_tmp/Tperiod - nint(time_tmp/Tperiod)) > 1.0D-8) return
+
     if (lonc < 0.0D0) lonc = lonc + 2.0D0*DD_PI
 
     do k=1,nlev
+       ! Cl and Cl2 do not return to their initial state; Cly is checked above
+       if ((toy_chemistry/=0) .and. (k==5 .or. k==6)) cycle
        if((k.ne.kmass).and.(kmass>0))then
          do ie=nets,nete
             pt(:,:,ie)=swirl_init_tracer(elem(ie)%spherep(:,:),k)/&
@@ -2972,9 +3015,6 @@ contains
        if (hybrid%masterthread) then
           write(*,'(a,i2,f6.2,a,3e15.7)') 'k=',k,time_tmp/secpday,' days  l1,l2,linf=',&
                l1,l2,linf
-          if ((toy_chemistry/=0) .and.(k==4)) then
-             print *,'***NOTE***:  Terminator toy-chemistry applied to p5 and p6'
-          endif
        end if
     enddo
 
@@ -3351,7 +3391,7 @@ contains
     real (kind=real_kind) :: cslat(np,np)
     real (kind=real_kind) :: csperiod, PI
     real (kind=real_kind) :: V1,V2
-    integer i,j,k
+    integer i,j
 
     real (kind=real_kind) :: sphlon,sphlat
     real (kind=real_kind) :: v1_old,v2_old,v1_new,v2_new,lonnew,latnew,shift_for_rotation
@@ -3392,7 +3432,6 @@ contains
 	  cslat(i,j) = COS(latnew)
 	  sndoublelat(i,j) = SIN(latnew*2.0D0)
 	  sndoublelon(i,j) = SIN(lonnew*2.0D0)
-	  do k=1,nlev
 	      V1 =  Kcoef*(snhalflon(i,j))**2*sndoublelat(i,j)*csperiod &
 		+cslat(i,j)*2.0D0*DD_PI*rearth/Tperiod*vel_pure_rotation_marker
 
@@ -3409,7 +3448,6 @@ contains
 	      V2=v2_new
 	      v(i,j,1)= V1*D(i,j,1,1) + V2*D(i,j,1,2)
 	      v(i,j,2)= V1*D(i,j,2,1) + V2*D(i,j,2,2)
-	  end do
 	end do
     end do
 
@@ -3424,7 +3462,6 @@ contains
 	cslat(i,j) = COS(latnew)
 	sndoublelat(i,j) = SIN(latnew*2.0D0)
 	sndoublelon(i,j) = SIN(lonnew*2.0D0)
-	do k=1,nlev
 	    V1 = Kcoef*(snlon(i,j))**2*sndoublelat(i,j)*csperiod +&
 	      cslat(i,j)*2.0D0*DD_PI*rearth/Tperiod*vel_pure_rotation_marker
 	    V2 = Kcoef*sndoublelon(i,j)*cslat(i,j)*csperiod
@@ -3441,7 +3478,6 @@ contains
 	    V2=v2_new
 	    v(i,j,1)= V1*D(i,j,1,1) + V2*D(i,j,1,2)
 	    v(i,j,2)= V1*D(i,j,2,1) + V2*D(i,j,2,2)
-	  end do
 	end do
       end do
 
@@ -3456,7 +3492,6 @@ contains
 	  cslat(i,j) = COS(latnew)
 	  sndoublelat(i,j) = SIN(latnew*2.0D0)
 	  sndoublelon(i,j) = SIN(lonnew*2.0D0)
-	  do k=1,nlev
 	    V1 =  -Kcoef*(snhalflon(i,j))**2*sndoublelat(i,j)*cslat(i,j)**2*csperiod &
 		+cslat(i,j)*2.0D0*DD_PI*rearth/Tperiod*vel_pure_rotation_marker
 	    V2 =  Kcoef/2.0D0*snlon(i,j)*cslat(i,j)**3*csperiod
@@ -3472,7 +3507,6 @@ contains
 	    V2=v2_new
 	    v(i,j,1)= V1*D(i,j,1,1) + V2*D(i,j,1,2)
 	    v(i,j,2)= V1*D(i,j,2,1) + V2*D(i,j,2,2)
-	  end do
 	end do
       end do
 
@@ -3487,7 +3521,6 @@ contains
           cslat(i,j) = COS(latnew)
           sndoublelat(i,j) = SIN(latnew*2.0D0)
           sndoublelon(i,j) = SIN(lonnew*2.0D0)
-          do k=1,nlev
 !true case 4
             V1 =  Kcoef*(snlon(i,j))**2*sndoublelat(i,j)*csperiod &
                +cslat(i,j)*2.0D0*DD_PI*rearth/Tperiod*vel_pure_rotation_marker
@@ -3514,7 +3547,6 @@ contains
              V2=v2_new
              v(i,j,1)= V1*D(i,j,1,1) + V2*D(i,j,1,2)
              v(i,j,2)= V1*D(i,j,2,1) + V2*D(i,j,2,2)
-          end do
        end do
       end do
     endif
@@ -3824,7 +3856,7 @@ subroutine toy_chemistry_forcing(elem, nets, nete, tl, dt)
   real (kind=real_kind), intent(in)                           :: dt
 
   real (real_kind)                         :: lat_center, lon_center, k1, k2
-  real (real_kind)                         :: cl, cl2, cly, r, d, e, el, f_cl, f_cl2
+  real (real_kind)                         :: cl, cl2, cly, r, d, e, el, f_cl, f_cl2, rho
   real (real_kind)                         :: lat,lon
   integer                                  :: cl_index,cl2_index,i,j,ie,n0
   integer, parameter                       :: allowNegChem=1
@@ -3842,8 +3874,14 @@ subroutine toy_chemistry_forcing(elem, nets, nete, tl, dt)
            lat = elem(ie)%spherep(i,j)%lat
            lon = elem(ie)%spherep(i,j)%lon
 
-           cl = elem(ie)%state%p(i,j,cl_index,tl%n0)
-           cl2 = elem(ie)%state%p(i,j,cl2_index,tl%n0)
+           ! the chemistry acts on mixing ratios
+           if (kmass /= -1) then
+              rho = elem(ie)%state%p(i,j,kmass,tl%n0)
+           else
+              rho = 1.0d0
+           endif
+           cl = elem(ie)%state%p(i,j,cl_index,tl%n0)/rho
+           cl2 = elem(ie)%state%p(i,j,cl2_index,tl%n0)/rho
            cly = cl + 2.0d0*cl2
            k1 = SIN(lat)*SIN(lat_center) + COS(lat)*COS(lat_center)*COS(lon-lon_center)
            if (k1<0.0) then
@@ -3868,20 +3906,20 @@ subroutine toy_chemistry_forcing(elem, nets, nete, tl, dt)
                 f_cl = (0.0d0 - cl) / dt
                 f_cl2 = -f_cl/2.0d0
                 elem(ie)%state%p(i,j,cl_index,tl%n0) = 0.0d0
-                elem(ie)%state%p(i,j,cl2_index,tl%n0) = cl2 + f_cl2*dt
+                elem(ie)%state%p(i,j,cl2_index,tl%n0) = rho*(cl2 + f_cl2*dt)
               else if (cl2 + f_cl2*dt < 0.0d0) then
                 f_cl2 = (0.0d0 - cl2) / dt
                 f_cl = -f_cl2*2.0d0
-                elem(ie)%state%p(i,j,cl_index,tl%n0) = cl + f_cl*dt
+                elem(ie)%state%p(i,j,cl_index,tl%n0) = rho*(cl + f_cl*dt)
                 elem(ie)%state%p(i,j,cl2_index,tl%n0) = 0.0d0
               else
-                elem(ie)%state%p(i,j,cl_index,tl%n0) = cl + f_cl*dt
-                elem(ie)%state%p(i,j,cl2_index,tl%n0) = cl2 + f_cl2*dt
+                elem(ie)%state%p(i,j,cl_index,tl%n0) = rho*(cl + f_cl*dt)
+                elem(ie)%state%p(i,j,cl2_index,tl%n0) = rho*(cl2 + f_cl2*dt)
               endif
 
            else ! Can allow chemistry to force negative values
-              elem(ie)%state%p(i,j,cl_index,tl%n0) = cl + f_cl*dt
-              elem(ie)%state%p(i,j,cl2_index,tl%n0) = cl2 + f_cl2*dt
+              elem(ie)%state%p(i,j,cl_index,tl%n0) = rho*(cl + f_cl*dt)
+              elem(ie)%state%p(i,j,cl2_index,tl%n0) = rho*(cl2 + f_cl2*dt)
            endif
         enddo
      enddo
