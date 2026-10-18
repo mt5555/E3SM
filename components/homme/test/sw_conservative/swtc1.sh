@@ -106,4 +106,4 @@ else
 fi
 date
 
-python3 $input/plot_swtc1_errors.py .
+python3 $input/python/plot_swtc1_errors.py .
