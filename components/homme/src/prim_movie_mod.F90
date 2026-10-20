@@ -236,7 +236,7 @@ contains
     call nf_variable_attributes(ncdf, 'w', 'vertical wind component','meters/second')
     call nf_variable_attributes(ncdf, 'w_i',  'vertical wind component on interfaces','meters/second')
     call nf_variable_attributes(ncdf, 'mu_i', 'mu=dp/d\pi on interfaces','dimensionless')
-    call nf_variable_attributes(ncdf, 'geo_i','geopotential on interfaces','meters')
+    call nf_variable_attributes(ncdf, 'geo_i','geopotential on interfaces','m^2/s^2')
     call nf_variable_attributes(ncdf, 'pnh',  'total pressure','Pa')
 #ifdef _PRIM
     call nf_variable_attributes(ncdf, 'geos', 'surface geopotential','m^2/s^2')

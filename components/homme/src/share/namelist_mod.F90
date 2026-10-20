@@ -226,6 +226,7 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
 #if !defined(CAM) && !defined(SCREAM)
 #if !defined(HOMME_WITHOUT_PIOLIBRARY)
     integer :: j
+    real(kind=real_kind) :: freq_steps
 #endif
     integer :: interp_type
 #endif
@@ -675,22 +676,30 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
       end if
        do i=1,max_output_streams
           if(output_frequency(i)>0 .and. output_end_time(i)==0) output_end_time(i)=-1
+          freq_steps = output_frequency(i)
           if(output_timeunits(i).eq.1) then  ! per_day
-             output_frequency(i) = output_frequency(i)*(secpday/tstep)
+             freq_steps = output_frequency(i)*(secpday/tstep)
              output_start_time(i)= output_start_time(i)*(secpday/tstep)
              if (output_end_time(i)>=0) &
                   output_end_time(i)  = output_end_time(i)*(secpday/tstep)
           else if(output_timeunits(i).eq.2) then  ! per_hour
-             output_frequency(i) = output_frequency(i)*(secphr/tstep)
+             freq_steps = output_frequency(i)*(secphr/tstep)
              output_start_time(i)= output_start_time(i)*(secphr/tstep)
              if (output_end_time(i)>=0) &
                   output_end_time(i)  = output_end_time(i)*(secphr/tstep)
           else if(output_timeunits(i).eq.3) then  ! per_seconds
-             output_frequency(i) = output_frequency(i)/tstep
+             freq_steps = output_frequency(i)/tstep
              output_start_time(i)= output_start_time(i)/tstep
              if (output_end_time(i)>=0) &
                   output_end_time(i)  = output_end_time(i)/tstep
           end if
+          if (output_frequency(i)>0 .and. abs(freq_steps-nint(freq_steps))>1.0d-6) then
+             write(iulog,*) "output stream",i,": output_frequency =",output_frequency(i), &
+                  " (output_timeunits =",output_timeunits(i),") is",freq_steps, &
+                  " timesteps at tstep =",tstep,"; must be a whole number of timesteps"
+             call abortmp('output_frequency must be a whole number of timesteps')
+          end if
+          output_frequency(i) = nint(freq_steps)
           if(output_end_time(i)<0) output_end_time(i)=nEndStep
           if ( output_start_time(i) > output_end_time(i) ) output_frequency(i)=0
        end do

@@ -23,7 +23,7 @@ module model_init_mod
   use viscosity_mod,      only: make_c0_vector
   use kinds,              only: real_kind,iulog
   use control_mod,        only: qsplit,theta_hydrostatic_mode, hv_ref_profiles, &
-       hv_theta_correction, tom_sponge_start
+       hv_theta_correction, tom_sponge_start, nu_top
   use time_mod,           only: timelevel_qdp, timelevel_t
   use physical_constants, only: g, TREF, Rgas, kappa
   use imex_mod,           only: test_imex_jacobian
@@ -101,7 +101,7 @@ contains
     ! compute scaling of sponge layer damping
     !
     nlev_tom=0
-    if (hybrid%masterthread) write(iulog,*) "sponge layer nu_top viscosity scaling factor"
+    if (hybrid%masterthread) write(iulog,'(A,E0.3)') "sponge layer scaling factor, scaled by nu_top=",nu_top
     do k=1,nlev
        if (tom_sponge_start==0) then
           ! some test cases have ptop=200mb
