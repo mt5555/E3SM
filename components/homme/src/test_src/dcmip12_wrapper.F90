@@ -9,7 +9,7 @@ module dcmip12_wrapper
 
 ! Implementation of the dcmip2012 dycore tests for the preqx dynamics target
 
-use control_mod,          only: test_case, dcmip4_moist, dcmip4_X, vanalytic
+use control_mod,          only: test_case, dcmip4_moist, dcmip4_X, vanalytic, sub_case
 use dcmip2012_test1_2_3,  only: test1_advection_deformation, test1_advection_hadley, test1_advection_orography, &
                                 test2_steady_state_mountain, test2_schaer_mountain,test3_gravity_wave
 use dcmip2012_test1_conv_mod, only: test1_conv_advection, test1_conv_print_results
@@ -43,8 +43,7 @@ real(rl), parameter ::              &
 real(rl), dimension(:,:,:,:), allocatable :: u0, v0                     ! storage for dcmip2-x sponge layer
 real(rl):: zi(nlevp), zm(nlev)                                          ! z coordinates
 real(rl):: ddn_hyai(nlevp), ddn_hybi(nlevp)                             ! vertical derivativess of hybrid coefficients
-real(rl):: tau
-real(rl):: ztop
+real(rl):: tau,ztop_sponge,zc_sponge                                    ! Rayleigh friction sponge layer coefficieints
 contains
 
 !_____________________________________________________________________
@@ -438,6 +437,8 @@ subroutine dcmip2012_test2_x(elem,hybrid,hvcoord,nets,nete,shear)
 
   !set \tau to 25.0, bound to X, [\tau]=[sec]
   tau = 25.0d0
+  ztop_sponge=ztop
+  zc_sponge=20000.d0
 
   if (vanalytic==1) then
      if (hybrid%masterthread) write(iulog,*) 'using analytic veritcal coordinates'
@@ -500,22 +501,60 @@ subroutine mtest_init(elem,hybrid,hvcoord,nets,nete,testid)
   real(rl):: p,z,phis,u,v,w,T,phis_ps,ps,rho,q(1),dp    ! pointwise field values
   real(rl):: ztop
 
-  if (testid .eq. 1) then
-     ztop = 20000.d0
-  else
-     ztop = 30000.d0
-  endif
-
+  
+    
+    
   if (hybrid%masterthread) write(iulog,*) 'initializing m test'
 
+  ! set analytic vertical coordinates
+  if (vanalytic==1) then
+    if (testid .eq. 1) then
+       ztop = 20000.d0
+     else
+       ztop = 30000.d0
+    endif
+     if (hybrid%masterthread) write(iulog,*) 'using analytic veritcal coordinates'
+     call get_evenly_spaced_z(zi,zm, 0.0_rl,ztop)                                    ! get evenly spaced z levels
+     hvcoord%etai  = exp(-zi/H)                                            ! set eta levels from z in orography-free region
+     call set_hybrid_coefficients(hvcoord,hybrid,  hvcoord%etai(1), 1.0_rl)! set hybrid A and B from eta levels
+     call set_layer_locations(hvcoord, .true., hybrid%masterthread)
+  else
+     ! file-based vcoords: hvcoord%etam/etai were already set by hvcoord_init.
+     ! derive zm/zi (used by the Rayleigh friction sponge) from eta using the
+     ! same isothermal relation as the analytic branch above, so the sponge
+     ! layer works correctly regardless of vanalytic.
+     zi = -H*log(hvcoord%etai)
+     zm = -H*log(hvcoord%etam)
+     ztop=zi(1)
+  endif
+
+  ! sponge layer
+  ! test defaults
+  if (testid .eq. 1) then
+    zc_sponge=10000.d0
+  else
+    zc_sponge=20000.d0
+  endif
+  ztop_sponge=ztop
   !set \tau to 25*3 for this test, [\tau]=[sec], X=500/3
   tau = 75.0d0
 
-  ! set analytic vertical coordinates
-  call get_evenly_spaced_z(zi,zm, 0.0_rl,ztop)                                    ! get evenly spaced z levels
-  hvcoord%etai  = exp(-zi/H)                                            ! set eta levels from z in orography-free region
-  call set_hybrid_coefficients(hvcoord,hybrid,  hvcoord%etai(1), 1.0_rl)! set hybrid A and B from eta levels
-  call set_layer_locations(hvcoord, .true., hybrid%masterthread)
+  if (sub_case==2) then   ! disable sponge layer
+    zc_sponge=ztop + 1000.d0    
+    ztop_sponge=ztop + 1000.d0
+  endif
+  if (sub_case>2) then
+    ! sponge layer covers "sub_case" number of vertical levels
+    zc_sponge = zi(1+sub_case)
+    ztop_sponge = ztop
+  endif
+  if (hybrid%masterthread) then
+     write(iulog,*) 'Rayleigh friction sponge layer active levels (zc <= zm(k) <= ztop):'
+     do k=1,nlev
+        if (zm(k) >= zc_sponge .and. zm(k) <= ztop_sponge) write(iulog,*) '  k=',k,' zm(k)=',zm(k)
+     enddo
+  endif
+
 
   ! set initial conditions
   do ie = nets,nete; 
@@ -558,32 +597,15 @@ subroutine dcmip2012_test2_x_forcing(elem,hybrid,hvcoord,nets,nete,n,dt)
   real(rl),           intent(in)            :: dt                       ! time-step size
 
   integer  :: ie, k
-  real(rl) :: ztop, zc, z(np,np,nlev), z_i(np,np,nlevp)
+  real(rl) :: z(np,np,nlev), z_i(np,np,nlevp)
   real(rl) :: f_d(nlev) 
 
-  if (test_case == "mtest1") then
-    ztop    = 20000.d0        ! model top
-    zc      = 10000.d0        ! sponge-layer cutoff height
-  else 
-    ztop    = 30000.d0        ! model top
-    zc      = 20000.d0        ! sponge-layer cutoff height
-  endif
-
+  
   forall(k=1:nlev) z(:,:,k)=zm(k)
   forall(k=1:nlevp) z_i(:,:,k)=zi(k)
 
-  ! Compute damping as a function of layer-midpoint height
-  !where(zm .ge. zh)
-  !  f_d = sin(pi/2 *(zm - zh)/(ztop - zh))**2
-  !elsewhere
-  !  f_d = 0.0d0
-  !end where
-
-  ! apply sponge layer forcing to momentum terms
-  !f_d = -f_d/tau
-
-  do ie=nets,nete
-     call set_forcing_rayleigh_friction(elem(ie),z,z_i,ztop,zc,tau,u0(:,:,:,ie),v0(:,:,:,ie),n)
+    do ie=nets,nete
+     call set_forcing_rayleigh_friction(elem(ie),z,z_i,ztop_sponge,zc_sponge,tau,u0(:,:,:,ie),v0(:,:,:,ie),n)
   enddo
 
 
