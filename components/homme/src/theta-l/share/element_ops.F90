@@ -61,7 +61,7 @@ module element_ops
   use perf_mod,       only: t_startf, t_stopf, t_barrierf, t_adj_detailf ! _EXTERNAL
   use parallel_mod,   only: abortmp
   use physical_constants, only : p0, Cp, Rgas, Rwater_vapor, Cpwater_vapor, kappa, g, dd_pi, TREF
-  use control_mod,    only: use_moisture, theta_hydrostatic_mode, hv_ref_profiles
+  use control_mod,    only: use_moisture, theta_hydrostatic_mode, hv_ref_profiles, sub_case
   use eos,            only: pnh_and_exner_from_eos, phi_from_eos
   implicit none
   private
@@ -680,6 +680,10 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   ! test cases which use rayleigh friciton will call this with the relaxation coefficient
   ! f_d, and the reference state u0,v0.  Currently assume w0 = 0
   !
+  ! sub_case (namelist &ctl_nl) selects whether the friction is applied:
+  !   sub_case=1  friction enabled  (default, matches global sub_case default)
+  !   sub_case=2  friction disabled (f_d forced to zero)
+  !
   implicit none
 
   type(element_t), intent(inout):: elem
@@ -709,6 +713,7 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   where(zi(:,:,1:nlev) .ge. zc);   f_d = sin(dd_pi/2 *(zm - zc)/(ztop - zc))**2; end where
   where(zi(:,:,1:nlev) .ge. ztop); f_d = 1.0d0; end where
   f_d = -f_d/tau
+  if (sub_case==2) f_d = 0   ! sub_case=2: disable Rayleigh friction sponge
   elem%derived%FM(:,:,3,:) = f_d * ( elem%state%w_i(:,:,1:nlev,n)  )
   end subroutine
 
