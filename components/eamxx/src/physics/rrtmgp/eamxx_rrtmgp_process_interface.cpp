@@ -855,7 +855,9 @@ void RRTMGPRadiation::run_impl (const double dt) {
           const auto T_mid          = ekat::subview(d_tmid, icol);
           const auto qv             = ekat::subview(d_qv,   icol);
           const auto dz             = ekat::subview(d_dz,   i);
-          PF::calculate_dz<Real>(team, pseudo_density, pseudo_density_dry, p_mid, T_mid, qv, water_loading, dz);
+          // Dry-air mass fraction, per unit total mass
+          const auto q_dry = [&](const int k) { return pseudo_density_dry(k)/pseudo_density(k); };
+          PF::calculate_dz<Real>(team, pseudo_density, p_mid, T_mid, q_dry, qv, water_loading, dz);
           team.team_barrier();
 
           // Calculate T_int from longwave flux up from the surface, assuming

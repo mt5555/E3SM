@@ -299,7 +299,9 @@ void ZMDeepConvection::run_impl (const double dt)
     const auto z_del_i = ekat::subview(loc_zm_input_z_del, i);
     const auto z_int_i = ekat::subview(loc_zm_input_z_int, i);
     const auto z_surf = 0.0; // ZM expects z_mid & z_int to be altitude above the surface
-    PF::calculate_dz(team, p_del_i, p_del_dry_i, p_mid_i, T_mid_i, qv_i, water_loading, z_del_i);
+    // Dry-air mass fraction, per unit total mass
+    const auto q_dry = [&](const int k) { return p_del_dry_i(k)/p_del_i(k); };
+    PF::calculate_dz(team, p_del_i, p_mid_i, T_mid_i, q_dry, qv_i, water_loading, z_del_i);
     team.team_barrier();
     PF::calculate_z_int(team, nlev_mid, z_del_i, z_surf, z_int_i);
     team.team_barrier();

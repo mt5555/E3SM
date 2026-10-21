@@ -343,23 +343,22 @@ void run(std::mt19937_64& engine)
   tmp = PF::calculate_virtual_temperature(T0,qv0);
   REQUIRE( Check::approx_equal(PF::calculate_temperature_from_virtual_temperature(tmp,qv0),T0,test_tol) );
 
-  // Dry-mass (water loading) virtual temperature property tests:
-  //  - with dp_dry = dp*(1-qv) it matches the qv-only version (up to roundoff errors)
-  //  - with no vapor and dp_dry = dp*(1-qc), T_virt = T*(1-qc): condensate loading
+  // Dry-air mass fraction (water loading) virtual temperature property tests:
+  //  - with q_dry = 1-qv it matches the qv-only version (up to roundoff errors)
+  //  - with no vapor and q_dry = 1-qc, T_virt = T*(1-qc): condensate loading
   //  - forward and inverse are one the inverse of the other (up to roundoff errors)
   {
-    dp0 = pdf_dp(engine);
     const ScalarT qc0 = pdf_qv(engine);
-    const ScalarT dp_dry_vap  = dp0*(one - qv0);
-    const ScalarT dp_dry_cond = dp0*(one - qv0 - qc0);
-    REQUIRE( Check::approx_equal(PF::calculate_virtual_temperature(T0,qv0,dp0,dp_dry_vap),
+    const ScalarT q_dry_vap  = one - qv0;
+    const ScalarT q_dry_cond = one - qv0 - qc0;
+    REQUIRE( Check::approx_equal(PF::calculate_virtual_temperature(T0,q_dry_vap,qv0),
                                  PF::calculate_virtual_temperature(T0,qv0),test_tol) );
-    REQUIRE( Check::approx_equal(PF::calculate_temperature_from_virtual_temperature(T0,qv0,dp0,dp_dry_vap),
+    REQUIRE( Check::approx_equal(PF::calculate_temperature_from_virtual_temperature(T0,q_dry_vap,qv0),
                                  PF::calculate_temperature_from_virtual_temperature(T0,qv0),test_tol) );
-    REQUIRE( Check::approx_equal(PF::calculate_virtual_temperature(T0,zero,dp0,ScalarT(dp0*(one-qc0))),
+    REQUIRE( Check::approx_equal(PF::calculate_virtual_temperature(T0,ScalarT(one-qc0),zero),
                                  ScalarT(T0*(one-qc0)),test_tol) );
-    tmp = PF::calculate_virtual_temperature(T0,qv0,dp0,dp_dry_cond);
-    REQUIRE( Check::approx_equal(PF::calculate_temperature_from_virtual_temperature(tmp,qv0,dp0,dp_dry_cond),T0,test_tol) );
+    tmp = PF::calculate_virtual_temperature(T0,q_dry_cond,qv0);
+    REQUIRE( Check::approx_equal(PF::calculate_temperature_from_virtual_temperature(tmp,q_dry_cond,qv0),T0,test_tol) );
   }
 
   // DSE property tests:
@@ -416,17 +415,17 @@ void run(std::mt19937_64& engine)
   REQUIRE( Check::equal(PF::calculate_dz(ScalarT(p0),ScalarT(p0),one,zero),ScalarT(Rd/g)) );
   REQUIRE( Check::approx_equal(PF::calculate_dz(ScalarT(g),ScalarT(Rd),T0,zero),T0,test_tol) );
 
-  // Dry-mass (water loading) DZ property tests:
+  // Dry-air mass fraction (water loading) DZ property tests:
   //  - with water_loading=false it is exactly the qv-only version
-  //  - with dp_dry = dp*(1-qv) it matches the qv-only version (up to roundoff errors)
-  //  - with no vapor and dp_dry = dp*(1-qc), dz is (1-qc) times the dry dz: condensate loading
+  //  - with q_dry = 1-qv it matches the qv-only version (up to roundoff errors)
+  //  - with no vapor and q_dry = 1-qc, dz is (1-qc) times the dry dz: condensate loading
   {
     const ScalarT qc0 = pdf_qv(engine);
-    const ScalarT dp_dry_vap  = dp0*(one - qv0);
-    const ScalarT dp_dry_cond = dp0*(one - qv0 - qc0);
-    REQUIRE( Check::equal(PF::calculate_dz(dp0,dp_dry_cond,p,T0,qv0,false),PF::calculate_dz(dp0,p,T0,qv0)) );
-    REQUIRE( Check::approx_equal(PF::calculate_dz(dp0,dp_dry_vap,p,T0,qv0,true),PF::calculate_dz(dp0,p,T0,qv0),test_tol) );
-    REQUIRE( Check::approx_equal(PF::calculate_dz(dp0,ScalarT(dp0*(one-qc0)),p,T0,zero,true),
+    const ScalarT q_dry_vap  = one - qv0;
+    const ScalarT q_dry_cond = one - qv0 - qc0;
+    REQUIRE( Check::equal(PF::calculate_dz(dp0,p,T0,q_dry_cond,qv0,false),PF::calculate_dz(dp0,p,T0,qv0)) );
+    REQUIRE( Check::approx_equal(PF::calculate_dz(dp0,p,T0,q_dry_vap,qv0,true),PF::calculate_dz(dp0,p,T0,qv0),test_tol) );
+    REQUIRE( Check::approx_equal(PF::calculate_dz(dp0,p,T0,ScalarT(one-qc0),zero,true),
                                  ScalarT(PF::calculate_dz(dp0,p,T0,zero)*(one-qc0)),test_tol) );
   }
 

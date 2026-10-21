@@ -158,11 +158,12 @@ void AeroComCld::compute_impl()
         auto nc_icol   = ekat::subview(nc, icol);
         auto ni_icol   = ekat::subview(ni, icol);
 
-        // We need dz too. R* from the dry mass, as in the dycore
+        // We need dz too. R* from the dry-air mass fraction, as in the dycore
         // (with water loading, it excludes the condensates)
         auto dz_icol = ekat::subview(dz, icol);
         auto pden_dry_icol = ekat::subview(pden_dry, icol);
-        PF::calculate_dz(team, pden_icol, pden_dry_icol, pmid_icol, tmid_icol, qv_icol,
+        const auto q_dry = [&](const int k) { return pden_dry_icol(k)/pden_icol(k); };
+        PF::calculate_dz(team, pden_icol, pmid_icol, tmid_icol, q_dry, qv_icol,
                          true, dz_icol);
 
         // Initialize the 1D "clear fraction" as 1 (totally clear)

@@ -22,7 +22,6 @@ void compute_r_star_f90(const int& num_elems,
 void compute_r_star_wl_f90(const int& num_elems,
                            const bool& moist,
                            const bool& water_loading,
-                           const Real*& dp,
                            const Real*& q1, const Real*& q2, const Real*& q3,
                            Real*& R_star);
 } // extern "C"
@@ -129,11 +128,9 @@ TEST_CASE("elem_ops", "elem_ops") {
       for (bool water_loading : {false, true}) {
         wl.enabled = water_loading;
 
-        genRandArray(dp_cxx,engine,pdf);
         genRandArray(q0_cxx,engine,q_pdf);
         genRandArray(q1_cxx,engine,q_pdf);
         genRandArray(q2_cxx,engine,q_pdf);
-        sync_to_host(dp_cxx,dp_f90);
         sync_to_host(q0_cxx,q0_f90);
         sync_to_host(q1_cxx,q1_f90);
         sync_to_host(q2_cxx,q2_f90);
@@ -146,7 +143,6 @@ TEST_CASE("elem_ops", "elem_ops") {
             const int igp = idx / NP;
             const int jgp = idx % NP;
 
-            auto dp = Homme::subview(dp_cxx,kv.ie,igp,jgp);
             auto R  = Homme::subview(R_cxx_d,kv.ie,igp,jgp);
             auto q = [&](const int iq, const int ilev) -> Scalar {
               return iq==0 ? q0_cxx(kv.ie,igp,jgp,ilev) :
@@ -154,18 +150,17 @@ TEST_CASE("elem_ops", "elem_ops") {
             };
 
             auto qv = [&](const int ilev) -> Scalar { return q(0,ilev); };
-            elem_ops.get_dry_mass(kv,moist,wl,dp,q,R);
-            elem_ops.get_R_star(kv,moist,wl,R,dp,qv,R);
+            elem_ops.get_q_dry(kv,moist,wl,q,R);
+            elem_ops.get_R_star(kv,moist,wl,R,qv,R);
           });
         });
 
         // Run f90 version
-        const Real* dp_ptr = dp_f90.data();
         const Real* q0_ptr = q0_f90.data();
         const Real* q1_ptr = q1_f90.data();
         const Real* q2_ptr = q2_f90.data();
         Real* R_ptr = R_f90.data();
-        compute_r_star_wl_f90(num_elems,moist,water_loading,dp_ptr,q0_ptr,q1_ptr,q2_ptr,R_ptr);
+        compute_r_star_wl_f90(num_elems,moist,water_loading,q0_ptr,q1_ptr,q2_ptr,R_ptr);
 
         // Compare answers
         auto R_cxx = Kokkos::create_mirror_view(R_cxx_d);

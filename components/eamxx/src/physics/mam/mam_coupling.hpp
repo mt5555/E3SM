@@ -629,11 +629,16 @@ void compute_vertical_layer_heights(const Team &team,
   const auto pseudo_density = ekat::subview(dry_atm.p_del, column_index);
 
   if (dry_atm.water_loading) {
-    // R* uses the dry mass. With dry qv, the vapor mass is qv*pseudo_density_dry,
-    // so the dry mass is passed as both masses.
+    // R* uses the dry-air mass fraction, with q_dry and qv per unit total mass.
+    // qv here is a dry mixing ratio, so it is converted to a wet one.
+    const auto pseudo_density_tot = ekat::subview(dry_atm.pseudo_density, column_index);
     const auto pseudo_density_dry = ekat::subview(dry_atm.pseudo_density_dry, column_index);
-    PF::calculate_dz(team, pseudo_density_dry, pseudo_density_dry, p_mid, T_mid, qv, true,  // inputs
-                     dz);                                                                // output
+    const auto q_dry  = [&](const int k) { return pseudo_density_dry(k)/pseudo_density_tot(k); };
+    const auto qv_wet = [&](const int k) {
+      return PF::calculate_wetmmr_from_drymmr_dp_based(qv(k), pseudo_density_tot(k), pseudo_density_dry(k));
+    };
+    PF::calculate_dz(team, pseudo_density_tot, p_mid, T_mid, q_dry, qv_wet, true,  // inputs
+                     dz);                                                        // output
   } else {
     // BFB-only: legacy form (dry qv with total mass, not algebraically identical to the dry-mass
     // form), kept so water_loading=false matches baselines; remove in follow-up PR
@@ -665,12 +670,14 @@ void compute_updraft_velocities(const Team &team, const WetAtmosphere &wet_atm,
   constexpr int nlev = mam4::nlev;
   int i              = column_index;
   Kokkos::parallel_for(Kokkos::TeamVectorRange(team, nlev), [&](const int k) {
-    // With water loading, R* uses the dry mass (pseudo_density_dry is not used otherwise)
-    const auto p_del_dry_ik = wet_atm.water_loading ? wet_atm.pseudo_density_dry(i, k)
-                                                    : dry_atm.p_del(i, k);
+    // With water loading, R* uses the dry-air mass fraction (pseudo_density_dry is
+    // not used otherwise)
+    const auto q_dry_ik = wet_atm.water_loading
+                              ? wet_atm.pseudo_density_dry(i, k) / wet_atm.pseudo_density(i, k)
+                              : Real(1);
     dry_atm.dz(i, k) =
-        PF::calculate_dz(dry_atm.p_del(i, k), p_del_dry_ik,
-                         dry_atm.p_mid(i, k), dry_atm.T_mid(i, k), wet_atm.qv(i, k),
+        PF::calculate_dz(dry_atm.p_del(i, k), dry_atm.p_mid(i, k),
+                         dry_atm.T_mid(i, k), q_dry_ik, wet_atm.qv(i, k),
                          wet_atm.water_loading);
     const auto rho =
         PF::calculate_density(dry_atm.p_del(i, k), dry_atm.dz(i, k));

@@ -146,28 +146,25 @@ struct PhysicsFunctions
   static ScalarT calculate_virtual_temperature(const ScalarT& temperature, const ScalarT& qv);
 
   //-----------------------------------------------------------------------------------------------//
-  // Virtual temperature from the dry mass (condensate water loading). R* involves only dry air
-  // and vapor, R*·pseudo_density = Rd·pseudo_density_dry + Rv·qv·pseudo_density, so
-  //   T_virtual = temperature * R*/Rd
-  //             = temperature * (pseudo_density_dry + qv*pseudo_density/ep_2) / pseudo_density
+  // Virtual temperature from the dry-air mass fraction (condensate water loading). R* involves
+  // only dry air and vapor, R* = Rd*q_dry + Rv*qv, so
+  //   T_virtual = temperature * R*/Rd = temperature * (q_dry + qv/ep_2)
   // where
-  //   pseudo_density     is the total mass of the level (dry air, vapor and condensates), [Pa]
-  //   pseudo_density_dry is the dry mass of the level, [Pa]
-  //   qv                 is the water vapor mass mixing ratio (per unit pseudo_density), [kg/kg]
-  // With pseudo_density_dry = pseudo_density*(1-qv) this equals the two-argument version.
+  //   q_dry is the dry-air mass fraction, pseudo_density_dry/pseudo_density, [kg/kg]
+  //   qv    is the water vapor mass mixing ratio, [kg/kg]
+  // Both are per unit total mass pseudo_density (dry air, vapor and condensates). With
+  // q_dry = 1-qv this equals the two-argument version.
   //-----------------------------------------------------------------------------------------------//
   template<typename ScalarT>
   KOKKOS_INLINE_FUNCTION
-  static ScalarT calculate_virtual_temperature(const ScalarT& temperature, const ScalarT& qv,
-                                               const ScalarT& pseudo_density,
-                                               const ScalarT& pseudo_density_dry);
+  static ScalarT calculate_virtual_temperature(const ScalarT& temperature, const ScalarT& q_dry,
+                                               const ScalarT& qv);
 
-  // Inverse of the dry-mass calculate_virtual_temperature above.
+  // Inverse of the dry-air mass fraction calculate_virtual_temperature above.
   template<typename ScalarT>
   KOKKOS_INLINE_FUNCTION
-  static ScalarT calculate_temperature_from_virtual_temperature(const ScalarT& T_virtual, const ScalarT& qv,
-                                                                const ScalarT& pseudo_density,
-                                                                const ScalarT& pseudo_density_dry);
+  static ScalarT calculate_temperature_from_virtual_temperature(const ScalarT& T_virtual, const ScalarT& q_dry,
+                                                                const ScalarT& qv);
 
   //-----------------------------------------------------------------------------------------------//
   // Compute dry static energy (DSE).
@@ -282,16 +279,16 @@ struct PhysicsFunctions
                                const ScalarT& T_mid, const ScalarT& qv);
 
   //-----------------------------------------------------------------------------------------------//
-  // Vertical layer thickness from the dry mass (condensate water loading):
-  //   dz = T_mid*(Rd*pseudo_density_dry + Rv*qv*pseudo_density) / (p_mid*g)
-  // which matches the dycore's hydrostatic dphi with R* from the dry mass. pseudo_density is
-  // the total mass (dry air, vapor and condensates). If water_loading is false, this is the
-  // qv-only version above.
+  // Vertical layer thickness from the dry-air mass fraction (condensate water loading):
+  //   dz = (Rd/g)*pseudo_density*T_virtual/p_mid,  T_virtual = T_mid*(q_dry + qv/ep_2)
+  // which matches the dycore's hydrostatic dphi with R* = Rd*q_dry + Rv*qv. pseudo_density is
+  // the total mass (dry air, vapor and condensates), and q_dry (= pseudo_density_dry/pseudo_density)
+  // and qv are per unit pseudo_density. If water_loading is false, this is the qv-only version above.
   //-----------------------------------------------------------------------------------------------//
   template<typename ScalarT>
   KOKKOS_INLINE_FUNCTION
-  static ScalarT calculate_dz (const ScalarT& pseudo_density, const ScalarT& pseudo_density_dry,
-                               const ScalarT& p_mid, const ScalarT& T_mid, const ScalarT& qv,
+  static ScalarT calculate_dz (const ScalarT& pseudo_density, const ScalarT& p_mid,
+                               const ScalarT& T_mid, const ScalarT& q_dry, const ScalarT& qv,
                                const bool water_loading);
 
   //-----------------------------------------------------------------------------------------------//
@@ -569,15 +566,15 @@ struct PhysicsFunctions
                             const view_1d<ScalarT, MT>& dz);
 
   template<typename ScalarT,
-           typename InputProviderPD, typename InputProviderPDD, typename InputProviderP,
-           typename InputProviderT,  typename InputProviderQ,
+           typename InputProviderPD, typename InputProviderP,
+           typename InputProviderT,  typename InputProviderQD, typename InputProviderQ,
            typename MT = ekat::ManagedMemoryTrait>
   KOKKOS_INLINE_FUNCTION
   static void calculate_dz (const MemberType& team,
                             const InputProviderPD& pseudo_density,
-                            const InputProviderPDD& pseudo_density_dry,
                             const InputProviderP& p_mid,
                             const InputProviderT& T_mid,
+                            const InputProviderQD& q_dry,
                             const InputProviderQ& qv,
                             const bool water_loading,
                             const view_1d<ScalarT, MT>& dz);

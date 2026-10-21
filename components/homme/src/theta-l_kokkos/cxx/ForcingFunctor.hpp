@@ -333,15 +333,15 @@ public:
         });
       }
 
-      // Compute Rstar from the dry mass. Rstar first holds dp_dry, then R*
-      // (computed in place). If not moist, qsize might be 0, so Q is not accessed.
+      // Compute Rstar from the dry-air mass fraction. Rstar first holds q_dry, then
+      // R* (computed in place). If not moist, qsize might be 0, so Q is not accessed.
       auto Rstar = Homme::subview(m_Rstar,kv.team_idx,igp,jgp);
       auto q_old = [&](const int iq, const int ilev)->Scalar {
         return m_tracers.Q(kv.ie,iq,igp,jgp,ilev);
       };
       auto qv_old = [&](const int ilev)->Scalar { return q_old(0,ilev); };
-      m_elem_ops.get_dry_mass (kv, m_moist, m_wl, dp, q_old, Rstar);
-      m_elem_ops.get_R_star (kv, m_moist, m_wl, Rstar, dp, qv_old, Rstar);
+      m_elem_ops.get_q_dry (kv, m_moist, m_wl, q_old, Rstar);
+      m_elem_ops.get_R_star (kv, m_moist, m_wl, Rstar, qv_old, Rstar);
 
       // Compute temperature
       auto tn1 = Homme::subview(m_tn1,kv.ie,igp,jgp);
@@ -352,7 +352,7 @@ public:
 
       if (m_moist) {
         // The mass of dp changes with the water species: vapor (tracer 0) and, with
-        // water loading, the condensates. This keeps the dry mass (get_dry_mass) fixed.
+        // water loading, the condensates. This keeps the dry mass fixed.
         // Each sum starts from the vapor term, so without condensates it is unchanged.
         auto fq = Homme::subview(m_tracers.fq,kv.ie,0,igp,jgp);
         auto q = Homme::subview(m_tracers.Q,kv.ie,0,igp,jgp);
@@ -476,21 +476,16 @@ public:
       auto dp     = Homme::subview(m_state.m_dp3d,kv.ie,m_np1,igp,jgp);
       auto dp_adj = Homme::subview(m_dp_adj,kv.ie,igp,jgp);
 
-      // Compute Rstar from the dry mass and the updated Q, which is relative to
-      // dp_adj when moist. Rstar first holds dp_dry, then R* (computed in place).
+      // Compute Rstar from the dry-air mass fraction of the updated Q (relative to
+      // dp_adj when moist). Rstar first holds q_dry, then R* (computed in place).
       // If not moist, qsize might be 0, so Q is not accessed.
       auto Rstar = Homme::subview(m_Rstar,kv.team_idx,igp,jgp);
       auto q_new = [&](const int iq, const int ilev)->Scalar {
         return m_tracers.Q(kv.ie,iq,igp,jgp,ilev);
       };
       auto qv_new = [&](const int ilev)->Scalar { return q_new(0,ilev); };
-      if (m_moist) {
-        m_elem_ops.get_dry_mass (kv, m_moist, m_wl, dp_adj, q_new, Rstar);
-        m_elem_ops.get_R_star (kv, m_moist, m_wl, Rstar, dp_adj, qv_new, Rstar);
-      } else {
-        m_elem_ops.get_dry_mass (kv, m_moist, m_wl, dp, q_new, Rstar);
-        m_elem_ops.get_R_star (kv, m_moist, m_wl, Rstar, dp, qv_new, Rstar);
-      }
+      m_elem_ops.get_q_dry (kv, m_moist, m_wl, q_new, Rstar);
+      m_elem_ops.get_R_star (kv, m_moist, m_wl, Rstar, qv_new, Rstar);
       auto ft     = Homme::subview(m_forcing.m_ft,kv.ie,igp,jgp);
       auto fphi   = Homme::subview(m_forcing.m_fphi,kv.ie,igp,jgp);
       const Real ps = m_state.m_ps_v(kv.ie,m_np1,igp,jgp);

@@ -226,8 +226,7 @@ template<typename DeviceT>
 template<typename ScalarT>
 KOKKOS_INLINE_FUNCTION
 ScalarT PhysicsFunctions<DeviceT>::
-calculate_virtual_temperature(const ScalarT& temperature, const ScalarT& qv,
-                              const ScalarT& pseudo_density, const ScalarT& pseudo_density_dry)
+calculate_virtual_temperature(const ScalarT& temperature, const ScalarT& q_dry, const ScalarT& qv)
 {
   using C = scream::physics::Constants<Real>;
 
@@ -235,15 +234,14 @@ calculate_virtual_temperature(const ScalarT& temperature, const ScalarT& qv,
   static constexpr auto one   = C::ONE;
   static constexpr auto rv_rd = one/ep_2;
 
-  return temperature * (pseudo_density_dry + rv_rd*qv*pseudo_density) / pseudo_density;
+  return temperature * ( q_dry + rv_rd*qv );
 }
 
 template<typename DeviceT>
 template<typename ScalarT>
 KOKKOS_INLINE_FUNCTION
 ScalarT PhysicsFunctions<DeviceT>::
-calculate_temperature_from_virtual_temperature(const ScalarT& T_virtual, const ScalarT& qv,
-                                               const ScalarT& pseudo_density, const ScalarT& pseudo_density_dry)
+calculate_temperature_from_virtual_temperature(const ScalarT& T_virtual, const ScalarT& q_dry, const ScalarT& qv)
 {
   using C = scream::physics::Constants<Real>;
 
@@ -251,7 +249,7 @@ calculate_temperature_from_virtual_temperature(const ScalarT& T_virtual, const S
   static constexpr auto one   = C::ONE;
   static constexpr auto rv_rd = one/ep_2;
 
-  return T_virtual * pseudo_density / (pseudo_density_dry + rv_rd*qv*pseudo_density);
+  return T_virtual / ( q_dry + rv_rd*qv );
 }
 
 template<typename DeviceT>
@@ -463,9 +461,8 @@ template<typename DeviceT>
 template<typename ScalarT>
 KOKKOS_INLINE_FUNCTION
 ScalarT PhysicsFunctions<DeviceT>::
-calculate_dz(const ScalarT& pseudo_density, const ScalarT& pseudo_density_dry,
-             const ScalarT& p_mid, const ScalarT& T_mid, const ScalarT& qv,
-             const bool water_loading)
+calculate_dz(const ScalarT& pseudo_density, const ScalarT& p_mid, const ScalarT& T_mid,
+             const ScalarT& q_dry, const ScalarT& qv, const bool water_loading)
 {
   if (not water_loading) {
     // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
@@ -474,32 +471,31 @@ calculate_dz(const ScalarT& pseudo_density, const ScalarT& pseudo_density_dry,
 
   using C = scream::physics::Constants<Real>;
 
-  static constexpr auto ep_2  = C::ep_2.value;
-  static constexpr auto one   = C::ONE;
-  static constexpr auto rv_rd = one/ep_2;
-  static constexpr auto rd    = C::RD.value;
-  static constexpr auto g     = C::gravit.value;
-  return (rd/g)*T_mid*(pseudo_density_dry + rv_rd*qv*pseudo_density) / p_mid;
+  const ScalarT& T_virtual = calculate_virtual_temperature(T_mid,q_dry,qv);
+
+  static constexpr auto rd = C::RD.value;
+  static constexpr auto g  = C::gravit.value;
+  return (rd/g)*pseudo_density*T_virtual / p_mid;
 }
 
 template<typename DeviceT>
 template<typename ScalarT,
-         typename InputProviderPD, typename InputProviderPDD, typename InputProviderP,
-         typename InputProviderT,  typename InputProviderQ,
+         typename InputProviderPD, typename InputProviderP,
+         typename InputProviderT,  typename InputProviderQD, typename InputProviderQ,
          typename MT>
 KOKKOS_INLINE_FUNCTION
 void PhysicsFunctions<DeviceT>::calculate_dz(const MemberType& team,
                                              const InputProviderPD& pseudo_density,
-                                             const InputProviderPDD& pseudo_density_dry,
                                              const InputProviderP& p_mid,
                                              const InputProviderT& T_mid,
+                                             const InputProviderQD& q_dry,
                                              const InputProviderQ& qv,
                                              const bool water_loading,
                                              const view_1d<ScalarT, MT>& dz)
 {
   Kokkos::parallel_for(Kokkos::TeamVectorRange(team,dz.extent(0)),
                        [&] (const int k) {
-    dz(k) = calculate_dz(pseudo_density(k),pseudo_density_dry(k),p_mid(k),T_mid(k),qv(k),water_loading);
+    dz(k) = calculate_dz(pseudo_density(k),p_mid(k),T_mid(k),q_dry(k),qv(k),water_loading);
   });
 }
 

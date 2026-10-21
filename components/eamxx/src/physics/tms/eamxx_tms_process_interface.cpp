@@ -122,7 +122,9 @@ void TurbulentMountainStress::run_impl (const double /* dt */)
     PF::exner_function<Pack>(team, p_mid_i, exner_i);
 
     // Calculate z_mid
-    PF::calculate_dz(team, pseudo_density_i, pseudo_density_dry_i, p_mid_i, T_mid_i, qv_i, water_loading, dz_i);
+    // Dry-air mass fraction, per unit total mass
+    const auto q_dry = [&](const int k) { return pseudo_density_dry_i(k)/pseudo_density_i(k); };
+    PF::calculate_dz(team, pseudo_density_i, p_mid_i, T_mid_i, q_dry, qv_i, water_loading, dz_i);
     const Real z_surf = 0.0; // For now, set z_int(i,nlevs) = z_surf = 0
     team.team_barrier();
     PF::calculate_z_int(team, nlevs, dz_i, z_surf, z_int_i);

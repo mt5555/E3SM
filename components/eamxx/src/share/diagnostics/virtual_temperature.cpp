@@ -42,10 +42,10 @@ void VirtualTemperature::compute_impl()
   const int nlevs = m_grid->get_num_vertical_levels();
 
   auto lambda = KOKKOS_LAMBDA(const int icol, const int ilev) {
-    // R* from the dry mass, as in the dycore. With water loading the dry mass
-    // also excludes the condensates.
-    virtualT(icol,ilev) = PF::calculate_virtual_temperature(T_mid(icol,ilev),qv_mid(icol,ilev),
-                                                            dp(icol,ilev),dp_dry(icol,ilev));
+    // R* from the dry-air mass fraction, as in the dycore. With water loading
+    // the dry air also excludes the condensates.
+    const Real q_dry = dp_dry(icol,ilev)/dp(icol,ilev);
+    virtualT(icol,ilev) = PF::calculate_virtual_temperature(T_mid(icol,ilev),q_dry,qv_mid(icol,ilev));
   };
   MDRange policy ({0,0},{ncols,nlevs});
   Kokkos::parallel_for("VirtualTemperature",policy,lambda);

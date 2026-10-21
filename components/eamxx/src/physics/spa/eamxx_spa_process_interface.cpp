@@ -152,8 +152,9 @@ void SPA::run_impl (const double /* dt */)
     const auto qv_icol = ekat::subview(qv, icol);
     auto dz_icol = ekat::subview(dz, icol);
 
-    PF::calculate_dz(team, pseudo_density_icol, pseudo_density_dry_icol, p_mid_icol,
-                      T_mid_icol, qv_icol, water_loading, dz_icol);
+    // Dry-air mass fraction, per unit total mass
+    const auto q_dry = [&](const int k) { return pseudo_density_dry_icol(k)/pseudo_density_icol(k); };
+    PF::calculate_dz(team, pseudo_density_icol, p_mid_icol, T_mid_icol, q_dry, qv_icol, water_loading, dz_icol);
     team.team_barrier();
 
     Kokkos::parallel_for(Kokkos::TeamVectorRange(team, nswbands*nlev), [&] (const int&idx) {

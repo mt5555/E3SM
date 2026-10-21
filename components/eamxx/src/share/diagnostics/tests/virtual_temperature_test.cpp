@@ -113,8 +113,8 @@ void run(std::mt19937_64& engine)
     Kokkos::parallel_for("", policy, KOKKOS_LAMBDA(const MemberType& team) {
       const int icol = team.league_rank();
       Kokkos::parallel_for(Kokkos::TeamVectorRange(team,nlevs), [&] (const Int& ilev) {
-        virtualT_v(icol,ilev) = PF::calculate_virtual_temperature(T_mid_v(icol,ilev),qv_mid_v(icol,ilev),
-                                                                  dp_v(icol,ilev),dp_dry_v(icol,ilev));
+        const Real q_dry = dp_dry_v(icol,ilev)/dp_v(icol,ilev);
+        virtualT_v(icol,ilev) = PF::calculate_virtual_temperature(T_mid_v(icol,ilev),q_dry,qv_mid_v(icol,ilev));
       });
       team.team_barrier();
     });

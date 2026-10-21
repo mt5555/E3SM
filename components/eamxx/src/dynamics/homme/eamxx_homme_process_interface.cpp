@@ -870,7 +870,10 @@ void HommeDynamics::homme_post_process (const double dt) {
       auto& T_val = T(ilev);
       T_val /= dp(ilev);
       if (wl.enabled) {
-        T_val = PF::calculate_temperature_from_virtual_temperature(T_val,qv(ilev),dp(ilev),dp_dry(ilev));
+        // R* from the dry-air mass fraction, as in HOMME
+        const auto qcond = condensate_sum<Pack>(wl,Q_view,icol,ilev);
+        const auto q_dry = Homme::ElementOps::compute_q_dry(qv(ilev),qcond);
+        T_val = PF::calculate_temperature_from_virtual_temperature(T_val,q_dry,qv(ilev));
       } else {
         // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
         T_val = PF::calculate_temperature_from_virtual_temperature(T_val,qv(ilev));
@@ -1216,10 +1219,10 @@ void HommeDynamics::restart_homme_state () {
       auto& T_prev = T_prev_view(icol,ilev);
       T_prev /= dp_view(icol,ilev);
       if (wl.enabled) {
-        // Same dry mass as in homme_post_process
+        // Same dry-air mass fraction as in homme_post_process
         const auto qcond = condensate_sum<Pack>(wl,Q_view,icol,ilev);
-        const auto dp_dry = Homme::ElementOps::compute_dp_dry(dp_view(icol,ilev),qv(ilev),qcond);
-        T_prev = PF::calculate_temperature_from_virtual_temperature(T_prev,qv(ilev),dp_view(icol,ilev),dp_dry);
+        const auto q_dry = Homme::ElementOps::compute_q_dry(qv(ilev),qcond);
+        T_prev = PF::calculate_temperature_from_virtual_temperature(T_prev,q_dry,qv(ilev));
       } else {
         // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
         T_prev = PF::calculate_temperature_from_virtual_temperature(T_prev,qv(ilev));
@@ -1343,13 +1346,13 @@ void HommeDynamics::initialize_homme_state () {
                          [&](const int ilev) {
       const auto th = PF::calculate_theta_from_T(T(ilev),p_mid(ilev));
       if (wl.enabled) {
-        // Water loading: dp is total mass, and R* uses the dry mass
+        // Water loading: dp is total mass, and R* uses the dry-air mass fraction
         Pack qcond(0);
         for (int ic=0; ic<wl.num_condensates; ++ic) {
           qcond += Q_view(ie,wl.condensate_idx[ic],igp,jgp,ilev);
         }
-        const auto dp_dry = Homme::ElementOps::compute_dp_dry(dp(ilev),qv(ilev),qcond);
-        vTh_dp(ilev) = PF::calculate_virtual_temperature(th,qv(ilev),dp(ilev),dp_dry)*dp(ilev);
+        const auto q_dry = Homme::ElementOps::compute_q_dry(qv(ilev),qcond);
+        vTh_dp(ilev) = PF::calculate_virtual_temperature(th,q_dry,qv(ilev))*dp(ilev);
       } else {
         // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
         vTh_dp(ilev) = PF::calculate_virtual_temperature(th,qv(ilev))*dp(ilev);

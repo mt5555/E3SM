@@ -58,8 +58,8 @@ void run (const std::string& diag_name, const std::string& location)
   // Note: we are not testing the calculate_dz utility. We are testing
   //       the diag class, so use some inputs that make checking results easier
   //       With these inputs, T_virt=T, and dz=8*rd/g. With qv=0, the dry mass is
-  //       pseudo_density, and the dry-mass dz is the same (exactly, since T and rho
-  //       are powers of 2)
+  //       pseudo_density (q_dry=1), and the dry-air dz is the same (exactly, since T
+  //       and rho are powers of 2)
   const Real g = PC::gravit.value;
   const Real rho_val = 4;
   const Real qv_val = 0;

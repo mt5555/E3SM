@@ -1513,7 +1513,7 @@ contains
   use hybvcoord_mod,      only : hvcoord_t
 #ifdef MODEL_THETA_L
   use physical_constants, only : cp, g, kappa, Rgas, p0
-  use element_ops,        only : get_temperature, get_dry_mass, get_R_star, get_hydro_pressure
+  use element_ops,        only : get_temperature, get_q_dry, get_R_star, get_hydro_pressure
   use eos,                only : pnh_and_exner_from_eos
 #ifdef HOMMEXX_BFB_TESTING
   use bfb_mod,            only : bfb_pow
@@ -1541,7 +1541,7 @@ contains
   real (kind=real_kind)  :: pnh(np,np,nlev)
   real (kind=real_kind)  :: phi_n1(np,np,nlevp)
   real (kind=real_kind)  :: rstarn1(np,np,nlev)
-  real (kind=real_kind)  :: dp_dry(np,np,nlev)
+  real (kind=real_kind)  :: q_dry(np,np,nlev)
   real (kind=real_kind)  :: exner(np,np,nlev)
   real (kind=real_kind)  :: dpnh_dp_i(np,np,nlevp)
 #endif
@@ -1591,13 +1591,13 @@ contains
    do k=1,nlev
       pprime(:,:,k) = pnh(:,:,k)-phydro(:,:,k)
    enddo
-   call get_dry_mass(dp_dry,dp,elem%state%Q)
-   call get_R_star(rstarn1,dp_dry,dp,elem%state%Q(:,:,:,1))
+   call get_q_dry(q_dry,elem%state%Q)
+   call get_R_star(rstarn1,q_dry,elem%state%Q(:,:,:,1))
    tn1=exner* elem%state%vtheta_dp(:,:,:,np1)*(Rgas/rstarn1) / dp
 #endif
 
    ! the water species change the mass of dp: vapor (Q1) and, with water_loading,
-   ! the condensates. This keeps the dry mass (get_dry_mass) fixed. Each sum starts
+   ! the condensates. This keeps the dry mass fixed. Each sum starts
    ! from the vapor term, so without condensates it is unchanged.
    ncond = 0
    if (water_loading) ncond = num_condensates
@@ -1720,8 +1720,8 @@ contains
    endif
    
    !update temperature
-   call get_dry_mass(dp_dry,elem%state%dp3d(:,:,:,np1),elem%state%Q)
-   call get_R_star(rstarn1,dp_dry,elem%state%dp3d(:,:,:,np1),elem%state%Q(:,:,:,1))
+   call get_q_dry(q_dry,elem%state%Q)
+   call get_R_star(rstarn1,q_dry,elem%state%Q(:,:,:,1))
    tn1(:,:,:) = tn1(:,:,:) + dt*elem%derived%FT(:,:,:)
    
    

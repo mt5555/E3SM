@@ -52,22 +52,22 @@ contains
     enddo
   end subroutine compute_R_star_f90
 
-  ! R* from the dry mass, with 3 tracers: vapor (1) and condensates (3,2)
-  subroutine compute_r_star_wl_f90(num_elems, moist, wl, dp_ptr, q1_ptr, q2_ptr, q3_ptr, R_ptr) bind(c)
-    use element_ops, only: get_dry_mass, get_R_star
+  ! R* from the dry-air mass fraction, with 3 tracers: vapor (1) and condensates (3,2)
+  subroutine compute_r_star_wl_f90(num_elems, moist, wl, q1_ptr, q2_ptr, q3_ptr, R_ptr) bind(c)
+    use element_ops, only: get_q_dry, get_R_star
     use control_mod, only: use_moisture, water_loading, num_condensates, condensate_idx
     !
     ! Inputs
     !
     integer (kind=c_int), intent(in) :: num_elems
     logical (kind=c_bool), intent(in) :: moist, wl
-    type (c_ptr), intent(in) :: dp_ptr, q1_ptr, q2_ptr, q3_ptr, R_ptr
+    type (c_ptr), intent(in) :: q1_ptr, q2_ptr, q3_ptr, R_ptr
 
     !
     ! Locals
     !
-    real (kind=real_kind), dimension(:,:,:,:),  pointer :: dp, q1, q2, q3, R
-    real (kind=real_kind) :: Q(np,np,nlev,3), dp_dry(np,np,nlev)
+    real (kind=real_kind), dimension(:,:,:,:),  pointer :: q1, q2, q3, R
+    real (kind=real_kind) :: Q(np,np,nlev,3), q_dry(np,np,nlev)
     integer :: ie
 
     use_moisture = moist
@@ -76,7 +76,6 @@ contains
     condensate_idx = 0
     condensate_idx(1:2) = [3,2]
 
-    call c_f_pointer(dp_ptr, dp, [np,np,nlev,num_elems])
     call c_f_pointer(q1_ptr, q1, [np,np,nlev,num_elems])
     call c_f_pointer(q2_ptr, q2, [np,np,nlev,num_elems])
     call c_f_pointer(q3_ptr, q3, [np,np,nlev,num_elems])
@@ -86,8 +85,8 @@ contains
       Q(:,:,:,1) = q1(:,:,:,ie)
       Q(:,:,:,2) = q2(:,:,:,ie)
       Q(:,:,:,3) = q3(:,:,:,ie)
-      call get_dry_mass(dp_dry,dp(:,:,:,ie),Q)
-      call get_R_star(R(:,:,:,ie),dp_dry,dp(:,:,:,ie),Q(:,:,:,1))
+      call get_q_dry(q_dry,Q)
+      call get_R_star(R(:,:,:,ie),q_dry,Q(:,:,:,1))
     enddo
 
     water_loading = .false.

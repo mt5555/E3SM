@@ -48,9 +48,11 @@ void AtmDensity::compute_impl()
                        KOKKOS_LAMBDA(const int& idx) {
       const int icol  = idx / nlevs;
       const int ilev = idx % nlevs;
-      // R* from the dry mass, as in the dycore (with water loading, it excludes the condensates)
-      auto dz = PF::calculate_dz(pseudo_density(icol,ilev),pseudo_density_dry(icol,ilev),
-                                 p(icol,ilev),T(icol,ilev),qv(icol,ilev),true);
+      // R* from the dry-air mass fraction, as in the dycore (with water loading, it
+      // excludes the condensates)
+      const Real q_dry = pseudo_density_dry(icol,ilev)/pseudo_density(icol,ilev);
+      auto dz = PF::calculate_dz(pseudo_density(icol,ilev),p(icol,ilev),T(icol,ilev),
+                                 q_dry,qv(icol,ilev),true);
       atm_dens(icol,ilev) = PF::calculate_density(pseudo_density(icol,ilev),dz);
   });
 }

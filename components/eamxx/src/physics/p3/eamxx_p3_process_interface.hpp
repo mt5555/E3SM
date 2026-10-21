@@ -82,9 +82,10 @@ public:
         const Pack& pseudo_density_pack(pseudo_density(icol,ipack));
         const Pack& pseudo_density_dry_pack(pseudo_density_dry(icol,ipack));
 
-        //compute dz from full pressure (with water loading, R* uses the dry mass)
-        dz(icol,ipack) = PF::calculate_dz(pseudo_density_pack, pseudo_density_dry_pack, pmid_pack,
-                                          T_atm_pack, qv(icol,ipack), water_loading);
+        //compute dz from full pressure (with water loading, R* uses the dry-air mass fraction)
+        const Pack q_dry_pack = pseudo_density_dry_pack/pseudo_density_pack;
+        dz(icol,ipack) = PF::calculate_dz(pseudo_density_pack, pmid_pack, T_atm_pack,
+                                          q_dry_pack, qv(icol,ipack), water_loading);
 
         /*----------------------------------------------------------------------------------------------------------------------
          *Wet to dry mixing ratios:

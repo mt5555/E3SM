@@ -134,12 +134,16 @@ void VerticalLayer::compute_impl()
     const int icol = team.league_rank();
 
     // Whatever the output needs, the first thing to compute is dz.
-    // R* from the dry mass, as in the dycore (with water loading, it excludes the condensates)
+    // R* from the dry-air mass fraction, as in the dycore (with water loading, it
+    // excludes the condensates)
     const auto& dz = ekat::subview(tmp_mid, icol);
-    PF::calculate_dz(team,ekat::subview(rho,icol),
-                          ekat::subview(rho_dry,icol),
+    const auto rho_icol     = ekat::subview(rho,icol);
+    const auto rho_dry_icol = ekat::subview(rho_dry,icol);
+    const auto q_dry = [&](const int k) { return rho_dry_icol(k)/rho_icol(k); };
+    PF::calculate_dz(team,rho_icol,
                           ekat::subview(p,icol),
                           ekat::subview(T,icol),
+                          q_dry,
                           ekat::subview(qv,icol),
                           true,
                           dz);

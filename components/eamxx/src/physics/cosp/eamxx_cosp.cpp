@@ -277,7 +277,9 @@ void Cosp::run_impl (const double dt)
 
         // 1. Compute dz (recycle z_mid_s as a temporary)
         const auto dz_s = z_mid_s; // 
-        PF::calculate_dz(team, pseudo_density_s, pseudo_density_dry_s, p_mid_s, T_mid_s, qv_s, water_loading, dz_s);
+        // Dry-air mass fraction, per unit total mass
+        const auto q_dry = [&](const int k) { return pseudo_density_dry_s(k)/pseudo_density_s(k); };
+        PF::calculate_dz(team, pseudo_density_s, p_mid_s, T_mid_s, q_dry, qv_s, water_loading, dz_s);
         team.team_barrier();
 
         // 2. Compute z_int (vertical scan)

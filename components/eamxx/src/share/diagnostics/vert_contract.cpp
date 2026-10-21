@@ -159,8 +159,10 @@ void VertContract::compute_impl()
           auto pm_icol   = ekat::subview(pm_v, icol);
           auto tm_icol   = ekat::subview(tm_v, icol);
           auto qv_icol   = ekat::subview(qv_v, icol);
-          // R* from the dry mass, as in the dycore (with water loading, it excludes the condensates)
-          PF::calculate_dz(team, dp_icol, dp_dry_icol, pm_icol, tm_icol, qv_icol, true, dz_icol);
+          // R* from the dry-air mass fraction, as in the dycore (with water loading, it
+          // excludes the condensates)
+          const auto q_dry = [&](const int k) { return dp_dry_icol(k)/dp_icol(k); };
+          PF::calculate_dz(team, dp_icol, pm_icol, tm_icol, q_dry, qv_icol, true, dz_icol);
         });
   }
 
