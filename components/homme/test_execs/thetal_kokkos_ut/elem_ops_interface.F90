@@ -54,7 +54,7 @@ contains
 
   ! R* from the dry mass, with 3 tracers: vapor (1) and condensates (3,2)
   subroutine compute_r_star_wl_f90(num_elems, moist, wl, dp_ptr, q1_ptr, q2_ptr, q3_ptr, R_ptr) bind(c)
-    use element_ops, only: compute_R_star
+    use element_ops, only: get_dry_mass, get_R_star
     use control_mod, only: use_moisture, water_loading, num_condensates, condensate_idx
     !
     ! Inputs
@@ -67,7 +67,7 @@ contains
     ! Locals
     !
     real (kind=real_kind), dimension(:,:,:,:),  pointer :: dp, q1, q2, q3, R
-    real (kind=real_kind) :: Q(np,np,nlev,3)
+    real (kind=real_kind) :: Q(np,np,nlev,3), dp_dry(np,np,nlev)
     integer :: ie
 
     use_moisture = moist
@@ -86,7 +86,8 @@ contains
       Q(:,:,:,1) = q1(:,:,:,ie)
       Q(:,:,:,2) = q2(:,:,:,ie)
       Q(:,:,:,3) = q3(:,:,:,ie)
-      call compute_R_star(R(:,:,:,ie),dp(:,:,:,ie),Q)
+      call get_dry_mass(dp_dry,dp(:,:,:,ie),Q)
+      call get_R_star(R(:,:,:,ie),dp_dry,dp(:,:,:,ie),Q(:,:,:,1))
     enddo
 
     water_loading = .false.

@@ -34,13 +34,23 @@ public:
   // Dry mass of each level. dp is total mass (dry air + vapor + condensates), and
   // q(iq,ilev) returns the mixing ratio (per unit dp) of tracer iq, with vapor in
   // tracer 0. The condensates are the tracers listed in wl (none if disabled).
+  // If use_moisture is false, dp is all dry air (q is not called, since qsize
+  // might be 0).
   template<typename QProvider>
   KOKKOS_INLINE_FUNCTION
   void get_dry_mass (const KernelVariables& kv,
+                     const bool use_moisture,
                      const WaterLoading& wl,
                      const ExecViewUnmanaged<const Scalar[NUM_LEV]>& dp,
                      const QProvider& q,
                      const ExecViewUnmanaged<Scalar[NUM_LEV]>& dp_dry) const {
+    if (not use_moisture) {
+      Kokkos::parallel_for(Kokkos::ThreadVectorRange(kv.team,NUM_LEV),
+                           [&](const int ilev) {
+        dp_dry(ilev) = dp(ilev);
+      });
+      return;
+    }
     Kokkos::parallel_for(Kokkos::ThreadVectorRange(kv.team,NUM_LEV),
                          [&](const int ilev) {
       Scalar qcond(0.0);
@@ -53,43 +63,31 @@ public:
     });
   }
 
-  // R* involves only dry air and vapor: R*·dp = Rd·dp_dry + Rv·qv·dp,
-  // with dp_dry from get_dry_mass. R may alias dp_dry.
+  // R* involves only dry air and vapor: R*·dp = Rd·dp_dry + Rv·qv·dp, with
+  // dp_dry from get_dry_mass. With water loading, dp_dry also excludes the
+  // condensates. R may alias dp_dry. qv is not called if use_moisture is false.
   template<typename InputProvider>
   KOKKOS_INLINE_FUNCTION
   void get_R_star (const KernelVariables& kv,
+                   const bool use_moisture,
+                   const WaterLoading& wl,
                    const ExecViewUnmanaged<const Scalar[NUM_LEV]>& dp_dry,
                    const ExecViewUnmanaged<const Scalar[NUM_LEV]>& dp,
                    const InputProvider& qv,
                    const ExecViewUnmanaged<Scalar[NUM_LEV]>& R) const {
     using namespace PhysicalConstants;
-    Kokkos::parallel_for(Kokkos::ThreadVectorRange(kv.team,NUM_LEV),
-                         [&](const int ilev) {
-      R(ilev) = (Rgas*dp_dry(ilev) + Rwater_vapor*qv(ilev)*dp(ilev)) / dp(ilev);
-    });
-  }
-
-  // R* for a column. With water loading, dry mass removes the condensates from dp
-  // (get_dry_mass), and R* follows from the dry mass. q(iq,ilev) is as in
-  // get_dry_mass; it is not called if use_moisture is false.
-  template<typename QProvider>
-  KOKKOS_INLINE_FUNCTION
-  void compute_R_star (const KernelVariables& kv,
-                       const bool use_moisture,
-                       const WaterLoading& wl,
-                       const ExecViewUnmanaged<const Scalar[NUM_LEV]>& dp,
-                       const QProvider& q,
-                       const ExecViewUnmanaged<Scalar[NUM_LEV]>& R) const {
-    auto qv = [&](const int ilev)->Scalar { return q(0,ilev); };
     if (use_moisture && wl.enabled) {
-      get_dry_mass(kv,wl,dp,q,R);
-      get_R_star(kv,R,dp,qv,R);
+      Kokkos::parallel_for(Kokkos::ThreadVectorRange(kv.team,NUM_LEV),
+                           [&](const int ilev) {
+        R(ilev) = (Rgas*dp_dry(ilev) + Rwater_vapor*qv(ilev)*dp(ilev)) / dp(ilev);
+      });
     } else {
       // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
       get_R_star(kv,use_moisture,qv,R);
     }
   }
 
+  // Legacy qv-only R*, R* = Rd + (Rv-Rd)*qv.
   template<typename InputProvider>
   KOKKOS_INLINE_FUNCTION
   void get_R_star (const KernelVariables& kv,
@@ -121,25 +119,8 @@ public:
     ColumnOps::compute_midpoint_values(kv,p_i,pi);
   }
 
-  KOKKOS_FUNCTION
-  void get_temperature (const KernelVariables& kv,
-                        const EquationOfState& eos,
-                        const bool use_moisture,
-                        const ExecViewUnmanaged<const Scalar[NUM_LEV]>& dp,
-                        const ExecViewUnmanaged<const Scalar[NUM_LEV]>& exner,
-                        const ExecViewUnmanaged<const Scalar[NUM_LEV]>& vtheta_dp,
-                        const ExecViewUnmanaged<const Scalar[NUM_LEV]>& qv,
-                        const ExecViewUnmanaged<Scalar[NUM_LEV]>& Rstar,
-                        const ExecViewUnmanaged<Scalar[NUM_LEV]>& T) const {
-    using namespace PhysicalConstants;
-    get_R_star(kv, use_moisture, qv, Rstar);
-    Kokkos::parallel_for(
-      Kokkos::ThreadVectorRange(kv.team, NUM_LEV),
-      [&] (const int k) { T(k) = Rgas * vtheta_dp(k) * exner(k) / (Rstar(k) * dp(k)); });
-  }
-
-  // As above, but with R* from compute_R_star, so that water loading is honored.
-  // q(iq,ilev) is as in get_dry_mass.
+  // Temperature from vtheta_dp, with R* from the dry mass (get_dry_mass, then
+  // get_R_star). q(iq,ilev) is as in get_dry_mass. Rstar is scratch.
   template<typename QProvider>
   KOKKOS_INLINE_FUNCTION
   void get_temperature (const KernelVariables& kv,
@@ -153,7 +134,10 @@ public:
                         const ExecViewUnmanaged<Scalar[NUM_LEV]>& Rstar,
                         const ExecViewUnmanaged<Scalar[NUM_LEV]>& T) const {
     using namespace PhysicalConstants;
-    compute_R_star(kv, use_moisture, wl, dp, q, Rstar);
+    // Rstar holds dp_dry, then R* (computed in place)
+    get_dry_mass(kv, use_moisture, wl, dp, q, Rstar);
+    const auto qv = [&](const int ilev)->Scalar { return q(0,ilev); };
+    get_R_star(kv, use_moisture, wl, Rstar, dp, qv, Rstar);
     Kokkos::parallel_for(
       Kokkos::ThreadVectorRange(kv.team, NUM_LEV),
       [&] (const int k) { T(k) = Rgas * vtheta_dp(k) * exner(k) / (Rstar(k) * dp(k)); });

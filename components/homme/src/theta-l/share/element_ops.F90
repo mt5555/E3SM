@@ -49,7 +49,6 @@
 !  get_cp_star()
 !  get_R_star()
 !  get_dry_mass()
-!  compute_R_star()
 !  set_theta_ref()
 !
 !
@@ -73,7 +72,14 @@ module element_ops
 
   public get_field, get_field_i, get_state, get_pottemp
   public get_temperature, get_phi, get_R_star, get_hydro_pressure, get_hydro_pressure_i
-  public get_dry_mass, compute_R_star
+  public get_dry_mass
+
+  ! get_R_star(R_star,dp_dry,dp,qv): R* from the dry mass (see get_dry_mass)
+  ! get_R_star(R_star,Q):            legacy R* from vapor only
+  interface get_R_star
+     module procedure get_R_star_dry
+     module procedure get_R_star_qv
+  end interface
   public set_thermostate, set_state, set_state_i, set_elem_state
   public set_forcing_rayleigh_friction
   public initialize_reference_states, set_theta_ref
@@ -96,6 +102,7 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
 
   integer :: k
   real(kind=real_kind), dimension(np,np,nlev) :: tmp, p, pnh, dp, omega, rho, T, cp_star, Rstar
+  real(kind=real_kind), dimension(np,np,nlev) :: dp_dry
   real(kind=real_kind), dimension(np,np,nlevp) :: phi_i,pi_i
 
 
@@ -120,7 +127,8 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
     case('rho')
 
       call get_nonhydro_pressure(elem,pnh,tmp,hvcoord,nt)
-      call compute_R_star(Rstar,elem%state%dp3d(:,:,:,nt),elem%state%Q)
+      call get_dry_mass(dp_dry,elem%state%dp3d(:,:,:,nt),elem%state%Q)
+      call get_R_star(Rstar,dp_dry,elem%state%dp3d(:,:,:,nt),elem%state%Q(:,:,:,1))
       call get_temperature(elem,T,hvcoord,nt)
       field = pnh/(Rstar*T)
 
@@ -191,9 +199,11 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   !   local
   real (kind=real_kind) :: dp(np,np,nlev)
   real (kind=real_kind) :: Rstar(np,np,nlev)
+  real (kind=real_kind) :: dp_dry(np,np,nlev)
   integer :: k
 
-  call compute_R_star(Rstar,elem%state%dp3d(:,:,:,nt),elem%state%Q)
+  call get_dry_mass(dp_dry,elem%state%dp3d(:,:,:,nt),elem%state%Q)
+  call get_R_star(Rstar,dp_dry,elem%state%dp3d(:,:,:,nt),elem%state%Q(:,:,:,1))
 
   pottemp(:,:,:) = Rgas*elem%state%vtheta_dp(:,:,:,nt)/(Rstar(:,:,:)*elem%state%dp3d(:,:,:,nt))
 
@@ -214,6 +224,7 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
 
   !   local
   real (kind=real_kind) :: dp(np,np,nlev)
+  real (kind=real_kind) :: dp_dry(np,np,nlev)
   real (kind=real_kind) :: Rstar(np,np,nlev)
   real (kind=real_kind) :: exner(np,np,nlev)
   real (kind=real_kind) :: pnh(np,np,nlev)
@@ -222,7 +233,8 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
 
 
   dp=elem%state%dp3d(:,:,:,nt)
-  call compute_R_star(Rstar,dp,elem%state%Q)
+  call get_dry_mass(dp_dry,dp,elem%state%Q)
+  call get_R_star(Rstar,dp_dry,dp,elem%state%Q(:,:,:,1))
 
   call pnh_and_exner_from_eos(hvcoord,elem%state%vtheta_dp(:,:,:,nt),&
           dp,elem%state%phinh_i(:,:,:,nt),pnh,exner,dpnh_dp_i)
@@ -423,7 +435,7 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   !
   ! dry mass of each level. dp is total mass (dry air + vapor + condensates),
   ! Q(:,:,:,1) is vapor, and with water_loading the condensates are the
-  ! tracers listed in condensate_idx
+  ! tracers listed in condensate_idx. Without moisture, dp is all dry air.
   !
   implicit none
   real (kind=real_kind), intent(out):: dp_dry(np,np,nlev)
@@ -432,6 +444,12 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
 
   real (kind=real_kind) :: qcond(np,np,nlev)
   integer :: ic
+
+  if (.not. use_moisture) then
+     ! dp is all dry air (Q is not used, since qsize might be 0)
+     dp_dry(:,:,:) = dp(:,:,:)
+     return
+  endif
 
   qcond(:,:,:) = 0
   if (water_loading) then
@@ -444,30 +462,29 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
 
 
   !_____________________________________________________________________
-  subroutine compute_R_star(R_star,dp,Q)
+  subroutine get_R_star_dry(R_star,dp_dry,dp,qv)
   !
-  ! R* involves only dry air and vapor: R*·dp = Rd·dp_dry + Rv·qv·dp.
-  ! With water_loading, the dry mass also removes the condensates from dp.
+  ! R* involves only dry air and vapor: R*·dp = Rd·dp_dry + Rv·qv·dp, with
+  ! dp_dry from get_dry_mass. With water_loading, dp_dry also excludes the
+  ! condensates.
   !
   implicit none
   real (kind=real_kind), intent(out):: R_star(np,np,nlev)
+  real (kind=real_kind), intent(in) :: dp_dry(np,np,nlev)
   real (kind=real_kind), intent(in) :: dp(np,np,nlev)
-  real (kind=real_kind), intent(in) :: Q(:,:,:,:)
-
-  real (kind=real_kind) :: dp_dry(np,np,nlev)
+  real (kind=real_kind), intent(in) :: qv(np,np,nlev)
 
   if (use_moisture .and. water_loading) then
-     call get_dry_mass(dp_dry,dp,Q)
-     R_star(:,:,:) = (Rgas*dp_dry(:,:,:) + Rwater_vapor*Q(:,:,:,1)*dp(:,:,:))/dp(:,:,:)
+     R_star(:,:,:) = (Rgas*dp_dry(:,:,:) + Rwater_vapor*qv(:,:,:)*dp(:,:,:))/dp(:,:,:)
   else
      ! BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
-     call get_R_star(R_star,Q(:,:,:,1))
+     call get_R_star_qv(R_star,qv)
   endif
   end subroutine
 
 
   !_____________________________________________________________________
-  subroutine get_R_star(R_star,Q)
+  subroutine get_R_star_qv(R_star,Q)
   !
   implicit none
   real (kind=real_kind), intent(out):: R_star(np,np,nlev)
@@ -627,10 +644,11 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   integer,          intent(in)    :: n0,n1,ntQ
   type(element_t),  intent(inout) :: elem
   integer :: n
-  real(real_kind), dimension(np,np,nlev) :: Rstar
+  real(real_kind), dimension(np,np,nlev) :: Rstar, dp_dry
 
   ! get cp and kappa for dry or moist cases
-  call compute_R_star(Rstar,dp,elem%state%Q)
+  call get_dry_mass(dp_dry,dp,elem%state%Q)
+  call get_R_star(Rstar,dp_dry,dp,elem%state%Q(:,:,:,1))
 
   do n=n0,n1
     ! set prognostic state variables at level midpoints
@@ -663,7 +681,7 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
     type(element_t), intent(inout) :: elem
     type (hvcoord_t),intent(in)    :: hvcoord                      ! hybrid vertical coordinate struct
 
-    real(real_kind) , dimension(np,np,nlev) :: Rstar,exner,temp
+    real(real_kind) , dimension(np,np,nlev) :: Rstar,exner,temp,dp_dry
     real(real_kind) , dimension(np,np,nlevp):: dpnh_dp_i,phi_i
 
     integer :: k
@@ -678,7 +696,8 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
        w(:,:,k) = (elem%state%w_i(:,:,k,nt) + elem%state%w_i(:,:,k+1,nt))/2
     end do
 
-    call compute_R_star(Rstar,dp,elem%state%Q)
+    call get_dry_mass(dp_dry,dp,elem%state%Q)
+    call get_R_star(Rstar,dp_dry,dp,elem%state%Q(:,:,:,1))
     call pnh_and_exner_from_eos(hvcoord,elem%state%vtheta_dp(:,:,:,nt),dp,phi_i,&
          pnh,exner,dpnh_dp_i)
 

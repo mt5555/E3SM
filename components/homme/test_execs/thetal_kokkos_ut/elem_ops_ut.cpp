@@ -153,7 +153,9 @@ TEST_CASE("elem_ops", "elem_ops") {
                      (iq==1 ? q1_cxx(kv.ie,igp,jgp,ilev) : q2_cxx(kv.ie,igp,jgp,ilev));
             };
 
-            elem_ops.compute_R_star(kv,moist,wl,dp,q,R);
+            auto qv = [&](const int ilev) -> Scalar { return q(0,ilev); };
+            elem_ops.get_dry_mass(kv,moist,wl,dp,q,R);
+            elem_ops.get_R_star(kv,moist,wl,R,dp,qv,R);
           });
         });
 
