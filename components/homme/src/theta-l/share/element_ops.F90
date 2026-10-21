@@ -73,13 +73,6 @@ module element_ops
   public get_field, get_field_i, get_state, get_pottemp
   public get_temperature, get_phi, get_R_star, get_hydro_pressure, get_hydro_pressure_i
   public get_q_dry
-
-  ! get_R_star(R_star,q_dry,qv): R* from the dry-air mass fraction (see get_q_dry)
-  ! get_R_star(R_star,Q):        legacy R* from vapor only
-  interface get_R_star
-     module procedure get_R_star_dry
-     module procedure get_R_star_qv
-  end interface
   public set_thermostate, set_state, set_state_i, set_elem_state
   public set_forcing_rayleigh_friction
   public initialize_reference_states, set_theta_ref
@@ -462,40 +455,27 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
 
 
   !_____________________________________________________________________
-  subroutine get_R_star_dry(R_star,q_dry,qv)
+  subroutine get_R_star(R_star,q_dry,qv)
   !
   ! R* involves only dry air and vapor: R* = Rd·q_dry + Rv·qv, with q_dry from
   ! get_q_dry and qv both per unit total mass. With water_loading, q_dry also
-  ! excludes the condensates.
+  ! excludes the condensates. Without moisture, the air is all dry and R* = Rd.
   !
   implicit none
   real (kind=real_kind), intent(out):: R_star(np,np,nlev)
   real (kind=real_kind), intent(in) :: q_dry(np,np,nlev)
   real (kind=real_kind), intent(in) :: qv(np,np,nlev)
 
-  if (use_moisture .and. water_loading) then
+  integer :: k
+  if (.not. use_moisture) then
+     R_star(:,:,:)=Rgas
+  else if (water_loading) then
      R_star(:,:,:) = Rgas*q_dry(:,:,:) + Rwater_vapor*qv(:,:,:)
   else
      ! BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
-     call get_R_star_qv(R_star,qv)
-  endif
-  end subroutine
-
-
-  !_____________________________________________________________________
-  subroutine get_R_star_qv(R_star,Q)
-  !
-  implicit none
-  real (kind=real_kind), intent(out):: R_star(np,np,nlev)
-  real (kind=real_kind), intent(in) :: Q(np,np,nlev)
-
-  integer :: k
-  if (use_moisture) then
      do k=1,nlev
-        R_star(:,:,k) =(Rgas + (Rwater_vapor - Rgas)*Q(:,:,k))
+        R_star(:,:,k) =(Rgas + (Rwater_vapor - Rgas)*qv(:,:,k))
      enddo
-  else
-     R_star(:,:,:)=Rgas
   endif
   end subroutine
 

@@ -71,8 +71,8 @@ public:
 
   // R* involves only dry air and vapor: R* = Rd*q_dry + Rv*qv, with q_dry from
   // get_q_dry and qv both per unit total mass. With water loading, q_dry also
-  // excludes the condensates. R may alias q_dry. qv is not called if
-  // use_moisture is false.
+  // excludes the condensates. R may alias q_dry. If use_moisture is false, the
+  // air is all dry, R* = Rd, and qv is not called (qsize might be 0).
   template<typename InputProvider>
   KOKKOS_INLINE_FUNCTION
   void get_R_star (const KernelVariables& kv,
@@ -82,34 +82,21 @@ public:
                    const InputProvider& qv,
                    const ExecViewUnmanaged<Scalar[NUM_LEV]>& R) const {
     using namespace PhysicalConstants;
-    if (use_moisture && wl.enabled) {
+    if (not use_moisture) {
+      Kokkos::parallel_for(Kokkos::ThreadVectorRange(kv.team,NUM_LEV),
+                           [&](const int ilev) {
+        R(ilev) = Rgas;
+      });
+    } else if (wl.enabled) {
       Kokkos::parallel_for(Kokkos::ThreadVectorRange(kv.team,NUM_LEV),
                            [&](const int ilev) {
         R(ilev) = Rgas*q_dry(ilev) + Rwater_vapor*qv(ilev);
       });
     } else {
       // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
-      get_R_star(kv,use_moisture,qv,R);
-    }
-  }
-
-  // Legacy qv-only R*, R* = Rd + (Rv-Rd)*qv.
-  template<typename InputProvider>
-  KOKKOS_INLINE_FUNCTION
-  void get_R_star (const KernelVariables& kv,
-                   const bool use_moisture,
-                   const InputProvider& Q,
-                   const ExecViewUnmanaged<Scalar[NUM_LEV]>& R) const {
-    using namespace PhysicalConstants;
-    if (use_moisture) {
       Kokkos::parallel_for(Kokkos::ThreadVectorRange(kv.team,NUM_LEV),
                            [&](const int ilev) {
-        R(ilev) = (Rgas + (Rwater_vapor-Rgas)*Q(ilev));
-      });
-    } else {
-      Kokkos::parallel_for(Kokkos::ThreadVectorRange(kv.team,NUM_LEV),
-                           [&](const int ilev) {
-        R(ilev) = Rgas;
+        R(ilev) = (Rgas + (Rwater_vapor-Rgas)*qv(ilev));
       });
     }
   }
