@@ -146,6 +146,30 @@ struct PhysicsFunctions
   static ScalarT calculate_virtual_temperature(const ScalarT& temperature, const ScalarT& qv);
 
   //-----------------------------------------------------------------------------------------------//
+  // Virtual temperature from the dry mass (condensate water loading). R* involves only dry air
+  // and vapor, R*·pseudo_density = Rd·pseudo_density_dry + Rv·qv·pseudo_density, so
+  //   T_virtual = temperature * R*/Rd
+  //             = temperature * (pseudo_density_dry + qv*pseudo_density/ep_2) / pseudo_density
+  // where
+  //   pseudo_density     is the total mass of the level (dry air, vapor and condensates), [Pa]
+  //   pseudo_density_dry is the dry mass of the level, [Pa]
+  //   qv                 is the water vapor mass mixing ratio (per unit pseudo_density), [kg/kg]
+  // With pseudo_density_dry = pseudo_density*(1-qv) this equals the two-argument version.
+  //-----------------------------------------------------------------------------------------------//
+  template<typename ScalarT>
+  KOKKOS_INLINE_FUNCTION
+  static ScalarT calculate_virtual_temperature(const ScalarT& temperature, const ScalarT& qv,
+                                               const ScalarT& pseudo_density,
+                                               const ScalarT& pseudo_density_dry);
+
+  // Inverse of the dry-mass calculate_virtual_temperature above.
+  template<typename ScalarT>
+  KOKKOS_INLINE_FUNCTION
+  static ScalarT calculate_temperature_from_virtual_temperature(const ScalarT& T_virtual, const ScalarT& qv,
+                                                                const ScalarT& pseudo_density,
+                                                                const ScalarT& pseudo_density_dry);
+
+  //-----------------------------------------------------------------------------------------------//
   // Compute dry static energy (DSE).
   //   DSE = Cp*temperature + g*z + surf_geopotential
   // where
@@ -258,6 +282,19 @@ struct PhysicsFunctions
                                const ScalarT& T_mid, const ScalarT& qv);
 
   //-----------------------------------------------------------------------------------------------//
+  // Vertical layer thickness from the dry mass (condensate water loading):
+  //   dz = T_mid*(Rd*pseudo_density_dry + Rv*qv*pseudo_density) / (p_mid*g)
+  // which matches the dycore's hydrostatic dphi with R* from the dry mass. pseudo_density is
+  // the total mass (dry air, vapor and condensates). If water_loading is false, this is the
+  // qv-only version above.
+  //-----------------------------------------------------------------------------------------------//
+  template<typename ScalarT>
+  KOKKOS_INLINE_FUNCTION
+  static ScalarT calculate_dz (const ScalarT& pseudo_density, const ScalarT& pseudo_density_dry,
+                               const ScalarT& p_mid, const ScalarT& T_mid, const ScalarT& qv,
+                               const bool water_loading);
+
+  //-----------------------------------------------------------------------------------------------//
   // Calculate the volume mixing ratio given the wet mass mixing ratio:
   //   X_vmr = X_mmr / (1 - qv) * mol_weight_air/mol_weight_X
   // where
@@ -270,6 +307,18 @@ struct PhysicsFunctions
   template<typename ScalarT>
   KOKKOS_INLINE_FUNCTION
   static ScalarT calculate_vmr_from_mmr(const Real& gas_mol_weight, const ScalarT& qv, const ScalarT& mmr);
+
+  //-----------------------------------------------------------------------------------------------//
+  // Calculate the volume mixing ratio given the wet mass mixing ratio, using the dry mass:
+  //   X_vmr = X_mmr * pseudo_density/pseudo_density_dry * mol_weight_air/mol_weight_X
+  // With pseudo_density_dry = pseudo_density*(1-qv) this equals calculate_vmr_from_mmr.
+  //-----------------------------------------------------------------------------------------------//
+  template<typename ScalarT>
+  KOKKOS_INLINE_FUNCTION
+  static ScalarT calculate_vmr_from_mmr_dp_based(const Real& gas_mol_weight,
+                                                 const ScalarT& pseudo_density,
+                                                 const ScalarT& pseudo_density_dry,
+                                                 const ScalarT& mmr);
 
   //-----------------------------------------------------------------------------------------------//
   // Calculate wet mass mixing ratio the given the volume mixing ratio:
@@ -517,6 +566,20 @@ struct PhysicsFunctions
                             const InputProviderP& p_mid,
                             const InputProviderT& T_mid,
                             const InputProviderQ& qv,
+                            const view_1d<ScalarT, MT>& dz);
+
+  template<typename ScalarT,
+           typename InputProviderPD, typename InputProviderPDD, typename InputProviderP,
+           typename InputProviderT,  typename InputProviderQ,
+           typename MT = ekat::ManagedMemoryTrait>
+  KOKKOS_INLINE_FUNCTION
+  static void calculate_dz (const MemberType& team,
+                            const InputProviderPD& pseudo_density,
+                            const InputProviderPDD& pseudo_density_dry,
+                            const InputProviderP& p_mid,
+                            const InputProviderT& T_mid,
+                            const InputProviderQ& qv,
+                            const bool water_loading,
                             const view_1d<ScalarT, MT>& dz);
 
   template<typename ScalarT, typename InputProviderQ, typename InputProviderX>

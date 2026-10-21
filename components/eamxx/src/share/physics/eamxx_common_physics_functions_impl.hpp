@@ -223,6 +223,38 @@ ScalarT PhysicsFunctions<DeviceT>::calculate_virtual_temperature(const ScalarT& 
 }
 
 template<typename DeviceT>
+template<typename ScalarT>
+KOKKOS_INLINE_FUNCTION
+ScalarT PhysicsFunctions<DeviceT>::
+calculate_virtual_temperature(const ScalarT& temperature, const ScalarT& qv,
+                              const ScalarT& pseudo_density, const ScalarT& pseudo_density_dry)
+{
+  using C = scream::physics::Constants<Real>;
+
+  static constexpr auto ep_2  = C::ep_2.value;
+  static constexpr auto one   = C::ONE;
+  static constexpr auto rv_rd = one/ep_2;
+
+  return temperature * (pseudo_density_dry + rv_rd*qv*pseudo_density) / pseudo_density;
+}
+
+template<typename DeviceT>
+template<typename ScalarT>
+KOKKOS_INLINE_FUNCTION
+ScalarT PhysicsFunctions<DeviceT>::
+calculate_temperature_from_virtual_temperature(const ScalarT& T_virtual, const ScalarT& qv,
+                                               const ScalarT& pseudo_density, const ScalarT& pseudo_density_dry)
+{
+  using C = scream::physics::Constants<Real>;
+
+  static constexpr auto ep_2  = C::ep_2.value;
+  static constexpr auto one   = C::ONE;
+  static constexpr auto rv_rd = one/ep_2;
+
+  return T_virtual * pseudo_density / (pseudo_density_dry + rv_rd*qv*pseudo_density);
+}
+
+template<typename DeviceT>
 template<typename ScalarT, typename InputProviderT, typename InputProviderQ>
 KOKKOS_INLINE_FUNCTION
 void PhysicsFunctions<DeviceT>::
@@ -428,6 +460,50 @@ void PhysicsFunctions<DeviceT>::calculate_dz(const MemberType& team,
 }
 
 template<typename DeviceT>
+template<typename ScalarT>
+KOKKOS_INLINE_FUNCTION
+ScalarT PhysicsFunctions<DeviceT>::
+calculate_dz(const ScalarT& pseudo_density, const ScalarT& pseudo_density_dry,
+             const ScalarT& p_mid, const ScalarT& T_mid, const ScalarT& qv,
+             const bool water_loading)
+{
+  if (not water_loading) {
+    // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
+    return calculate_dz(pseudo_density,p_mid,T_mid,qv);
+  }
+
+  using C = scream::physics::Constants<Real>;
+
+  static constexpr auto ep_2  = C::ep_2.value;
+  static constexpr auto one   = C::ONE;
+  static constexpr auto rv_rd = one/ep_2;
+  static constexpr auto rd    = C::RD.value;
+  static constexpr auto g     = C::gravit.value;
+  return (rd/g)*T_mid*(pseudo_density_dry + rv_rd*qv*pseudo_density) / p_mid;
+}
+
+template<typename DeviceT>
+template<typename ScalarT,
+         typename InputProviderPD, typename InputProviderPDD, typename InputProviderP,
+         typename InputProviderT,  typename InputProviderQ,
+         typename MT>
+KOKKOS_INLINE_FUNCTION
+void PhysicsFunctions<DeviceT>::calculate_dz(const MemberType& team,
+                                             const InputProviderPD& pseudo_density,
+                                             const InputProviderPDD& pseudo_density_dry,
+                                             const InputProviderP& p_mid,
+                                             const InputProviderT& T_mid,
+                                             const InputProviderQ& qv,
+                                             const bool water_loading,
+                                             const view_1d<ScalarT, MT>& dz)
+{
+  Kokkos::parallel_for(Kokkos::TeamVectorRange(team,dz.extent(0)),
+                       [&] (const int k) {
+    dz(k) = calculate_dz(pseudo_density(k),pseudo_density_dry(k),p_mid(k),T_mid(k),qv(k),water_loading);
+  });
+}
+
+template<typename DeviceT>
 template<typename ScalarT, typename InputProviderZ, typename MT>
 KOKKOS_INLINE_FUNCTION
 void PhysicsFunctions<DeviceT>::calculate_z_int(const MemberType& team,
@@ -464,6 +540,19 @@ ScalarT PhysicsFunctions<DeviceT>::calculate_vmr_from_mmr(const Real& gas_mol_we
 
   return mmr / (sp(1.0) - qv) * air_mol_weight/gas_mol_weight;
 
+}
+
+template<typename DeviceT>
+template<typename ScalarT>
+KOKKOS_INLINE_FUNCTION
+ScalarT PhysicsFunctions<DeviceT>::
+calculate_vmr_from_mmr_dp_based(const Real& gas_mol_weight, const ScalarT& pseudo_density,
+                                const ScalarT& pseudo_density_dry, const ScalarT& mmr)
+{
+  using C = scream::physics::Constants<Real>;
+  constexpr Real air_mol_weight   = C::MWdry.value;
+
+  return mmr * pseudo_density / pseudo_density_dry * air_mol_weight/gas_mol_weight;
 }
 
 template<typename DeviceT>
