@@ -141,6 +141,19 @@ contains
     theta_hydrostatic_mode = thm_save
   end subroutine get_temperature_f90
 
+  subroutine set_water_loading_f90(wl, ncond, cond_idx) bind(c)
+    use control_mod, only: water_loading, num_condensates, condensate_idx
+
+    logical (c_bool), value, intent(in) :: wl
+    integer (c_int), value, intent(in) :: ncond
+    integer (c_int), intent(in) :: cond_idx(ncond) ! 0-based (C++) indices
+
+    water_loading = wl
+    num_condensates = ncond
+    condensate_idx = 0
+    condensate_idx(1:ncond) = cond_idx + 1
+  end subroutine set_water_loading_f90
+
   subroutine init_dyn_data_f90(nk, nkp, nq, ps, phis, dp3d, vthdp, uv, omega, q, phinh_i) bind(c)
     use element_state, only: timelevels
 

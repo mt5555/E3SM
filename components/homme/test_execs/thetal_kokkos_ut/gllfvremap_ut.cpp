@@ -33,6 +33,7 @@ extern "C" {
   void limiter1_clip_and_sum_f90(int n, Real* spheremp, Real* qmin, Real* qmax, Real* dp, Real* q);
   void calc_dp_fv_f90(int nf, Real* ps, Real* dp_fv);
   void get_temperature_f90(int ie, int nf, bool theta_hydrostatic_mode, Real* T);
+  void set_water_loading_f90(bool water_loading, int num_condensates, const int* condensate_idx);
 
   void init_gllfvremap_f90(int ne, const Real* hyai, const Real* hybi, const Real* hyam,
                            const Real* hybm, Real ps0, Real* dvv, Real* mp, int qsize,
@@ -717,6 +718,18 @@ static void test_get_temperature (Session& s) {
   using g = GllFvRemapImpl;
   const int nt = NUM_TIME_LEVELS;
 
+  for (const bool water_loading : {false, true}) {
+  // Water loading needs at least one tracer besides vapor
+  if (water_loading && s.qsize < 2) continue;
+
+  // Condensates: tracers qsize-1,...,1 (at most 3), in decreasing order
+  WaterLoading wl;
+  wl.enabled = water_loading;
+  if (water_loading)
+    for (int iq = s.qsize-1; iq >= 1 && wl.num_condensates < 3; --iq)
+      wl.condensate_idx[wl.num_condensates++] = iq;
+  set_water_loading_f90(wl.enabled, wl.num_condensates, wl.condensate_idx);
+
   for (const bool theta_hydrostatic_mode : {false, true}) {
     init_dyn_data(s);
   
@@ -755,8 +768,9 @@ static void test_get_temperature (Session& s) {
                   eos.compute_pnh_and_exner(kv, vthdp_ij, Homme::subview(phi_i,ie,t,i,j), wrk_ij,
                                             exner_ij);
                 }
-                ops.get_temperature(kv, eos, use_moisture, dp3d_ij, exner_ij,
-                                    vthdp_ij, Homme::subview(q,ie,0,i,j), wrk_ij,
+                const auto q_ij = [&] (const int iq, const int k) -> Scalar { return q(ie,iq,i,j,k); };
+                ops.get_temperature(kv, eos, use_moisture, wl, dp3d_ij, exner_ij,
+                                    vthdp_ij, q_ij, wrk_ij,
                                     Homme::subview(Td,ie,t,i,j));
               });
           });
@@ -777,6 +791,11 @@ static void test_get_temperature (Session& s) {
             for (int k = 0; k < s.nlev; ++k)
               REQUIRE(equal(T(ie,t,i,j,k), Tf90(ie,t,k,i,j)));
   }
+  } // water_loading
+
+  // Leave water loading off for the remaining tests
+  const WaterLoading wl_off;
+  set_water_loading_f90(false, 0, wl_off.condensate_idx);
 }
 
 static void

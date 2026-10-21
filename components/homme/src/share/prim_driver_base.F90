@@ -1508,11 +1508,12 @@ contains
   !    remap                    remap back to ref levels.  ps_v now valid
   !    write restart files      ps_v ok for restart
   !
-  use control_mod,        only : use_moisture, dt_remap_factor
+  use control_mod,        only : use_moisture, dt_remap_factor, water_loading, &
+                                 num_condensates, condensate_idx
   use hybvcoord_mod,      only : hvcoord_t
 #ifdef MODEL_THETA_L
   use physical_constants, only : cp, g, kappa, Rgas, p0
-  use element_ops,        only : get_temperature, get_r_star, get_hydro_pressure
+  use element_ops,        only : get_temperature, compute_R_star, get_hydro_pressure
   use eos,                only : pnh_and_exner_from_eos
 #ifdef HOMMEXX_BFB_TESTING
   use bfb_mod,            only : bfb_pow
@@ -1526,8 +1527,10 @@ contains
   logical,                intent(in)    :: adjustment
 
   ! local
-  integer :: i,j,k,q
-  real (kind=real_kind)  :: fq
+  integer :: i,j,k,q,ic,ncond
+  real (kind=real_kind)  :: fq, dq
+  real (kind=real_kind)  :: dqdp(np,np,nlev,qsize) ! applied Qdp increments (no adjustment)
+  real (kind=real_kind)  :: fq_water(np,np,nlev)   ! sum of dqdp over the water species
   real (kind=real_kind)  :: dp(np,np,nlev), ps(np,np), dp_adj(np,np,nlev)
   real (kind=real_kind)  :: phydro(np,np,nlev)  ! hydrostatic pressure
   logical :: adjust_ps   ! adjust PS or DP3D to conserve dry mass
@@ -1587,9 +1590,15 @@ contains
    do k=1,nlev
       pprime(:,:,k) = pnh(:,:,k)-phydro(:,:,k)
    enddo
-   call get_R_star(rstarn1,elem%state%Q(:,:,:,1))
+   call compute_R_star(rstarn1,dp,elem%state%Q)
    tn1=exner* elem%state%vtheta_dp(:,:,:,np1)*(Rgas/rstarn1) / dp
 #endif
+
+   ! the water species change the mass of dp: vapor (Q1) and, with water_loading,
+   ! the condensates. This keeps the dry mass (get_dry_mass) fixed. Each sum starts
+   ! from the vapor term, so without condensates it is unchanged.
+   ncond = 0
+   if (water_loading) ncond = num_condensates
 
    if (adjustment) then 
 
@@ -1603,19 +1612,23 @@ contains
                   !        dyn_in%elem(ie)%state%Qdp(i,j,k,q,tl_fQdp) + fq 
                   elem%state%Qdp(i,j,k,q,np1_qdp) = &
                        dp(i,j,k)*elem%derived%FQ(i,j,k,q)
-                  
-                  if (q==1) then
-                     fq = dp(i,j,k)*( elem%derived%FQ(i,j,k,q) -&
-                          elem%state%Q(i,j,k,q))
-                     ! force ps to conserve mass:  
-#ifdef HOMMEXX_BFB_TESTING
-                     sum_fq(i,j) = sum_fq(i,j) + fq
-#else
-                     ps(i,j)=ps(i,j) + fq
-#endif
-                     dp_adj(i,j,k)=dp_adj(i,j,k) + fq   !  ps =  ps0+sum(dp(k))
-                  endif
                enddo
+
+               if (qsize>0) then
+                  dq = elem%derived%FQ(i,j,k,1) - elem%state%Q(i,j,k,1)
+                  do ic=1,ncond
+                     q = condensate_idx(ic)
+                     dq = dq + (elem%derived%FQ(i,j,k,q) - elem%state%Q(i,j,k,q))
+                  enddo
+                  fq = dp(i,j,k)*dq
+                  ! force ps to conserve mass:  
+#ifdef HOMMEXX_BFB_TESTING
+                  sum_fq(i,j) = sum_fq(i,j) + fq
+#else
+                  ps(i,j)=ps(i,j) + fq
+#endif
+                  dp_adj(i,j,k)=dp_adj(i,j,k) + fq   !  ps =  ps0+sum(dp(k))
+               endif
             end do
          end do
       end do
@@ -1642,14 +1655,22 @@ contains
                      endif
                   endif
                   elem%state%Qdp(i,j,k,q,np1_qdp) = elem%state%Qdp(i,j,k,q,np1_qdp)+fq
-                  if (q==1) then
-                     elem%derived%FQps(i,j)=elem%derived%FQps(i,j)+fq/dt
-                     dp_adj(i,j,k)=dp_adj(i,j,k) + fq
-                  endif
+                  dqdp(i,j,k,q) = fq
                enddo
             enddo
          enddo
       enddo
+
+      if (qsize>0) then
+         fq_water(:,:,:) = dqdp(:,:,:,1)
+         do ic=1,ncond
+            fq_water(:,:,:) = fq_water(:,:,:) + dqdp(:,:,:,condensate_idx(ic))
+         enddo
+         do k=1,nlev
+            elem%derived%FQps(:,:)=elem%derived%FQps(:,:)+fq_water(:,:,k)/dt
+            dp_adj(:,:,k)=dp_adj(:,:,k) + fq_water(:,:,k)
+         enddo
+      endif
 
       ! to conserve dry mass in the precese of Q1 forcing:
       ps(:,:) = ps(:,:) + dt*elem%derived%FQps(:,:)
@@ -1697,7 +1718,7 @@ contains
    endif
    
    !update temperature
-   call get_R_star(rstarn1,elem%state%Q(:,:,:,1))
+   call compute_R_star(rstarn1,elem%state%dp3d(:,:,:,np1),elem%state%Q)
    tn1(:,:,:) = tn1(:,:,:) + dt*elem%derived%FT(:,:,:)
    
    

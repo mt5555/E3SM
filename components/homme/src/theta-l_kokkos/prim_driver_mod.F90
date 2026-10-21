@@ -87,7 +87,8 @@ contains
   subroutine prim_create_c_data_structures (tl, hvcoord, mp)
     use iso_c_binding, only : c_loc, c_ptr, C_NULL_CHAR
     use theta_f2c_mod, only : init_reference_element_c, init_simulation_params_c, &
-                              init_time_level_c, init_hvcoord_c, init_elements_c
+                              init_time_level_c, init_hvcoord_c, init_elements_c, &
+                              init_water_loading_c
     use time_mod,      only : TimeLevel_t, nsplit
     use hybvcoord_mod, only : hvcoord_t
     use control_mod,   only : limiter_option, rsplit, qsplit, tstep_type, statefreq,   &
@@ -100,7 +101,8 @@ contains
                               MAX_STRING_LEN, dt_remap_factor, dt_tracer_factor,       &
                               pgrad_correction, dp3d_thresh, vtheta_thresh,            &
                               internal_diagnostics_level, do_3d_turbulence,            &
-                              tom_sponge_start
+                              tom_sponge_start, water_loading, num_condensates,        &
+                              condensate_idx
     !
     ! Input(s)
     !
@@ -115,6 +117,7 @@ contains
     character(len=MAX_STRING_LEN), target :: test_name
 
     integer :: disable_diagnostics_int, theta_hydrostatic_mode_int, use_moisture_int, do_3d_turbulence_int
+    integer :: water_loading_int
 
     ! Initialize the C++ reference element structure (i.e., pseudo-spectral deriv matrix and ref element mass matrix)
     dvv = deriv1%dvv
@@ -152,6 +155,10 @@ contains
                                    dp3d_thresh, vtheta_thresh, internal_diagnostics_level,        &
                                    do_3d_turbulence_int,                                          &
                                    tom_sponge_start)
+
+    water_loading_int = 0
+    if (water_loading) water_loading_int = 1
+    call init_water_loading_c (water_loading_int, num_condensates, condensate_idx)
 
     ! Initialize time level structure in C++
     call init_time_level_c(tl%nm1, tl%n0, tl%np1, tl%nstep, tl%nstep0)
