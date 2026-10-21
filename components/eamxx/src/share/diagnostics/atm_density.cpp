@@ -14,6 +14,7 @@ AtmDensity(const ekat::Comm& comm, const ekat::ParameterList& params,
   // The fields required for this diagnostic to be computed
   m_field_in_names.push_back("T_mid");
   m_field_in_names.push_back("pseudo_density");
+  m_field_in_names.push_back("pseudo_density_dry");
   m_field_in_names.push_back("p_mid");
   m_field_in_names.push_back("qv");
 }
@@ -38,6 +39,7 @@ void AtmDensity::compute_impl()
   const auto p    = m_fields_in.at("p_mid").get_view<const Real**>();
   const auto qv   = m_fields_in.at("qv").get_view<const Real**>();
   const auto pseudo_density = m_fields_in.at("pseudo_density").get_view<const Real**>();
+  const auto pseudo_density_dry = m_fields_in.at("pseudo_density_dry").get_view<const Real**>();
 
   int nlevs = m_grid->get_num_vertical_levels();
   int ncols = m_grid->get_num_local_dofs();
@@ -46,7 +48,9 @@ void AtmDensity::compute_impl()
                        KOKKOS_LAMBDA(const int& idx) {
       const int icol  = idx / nlevs;
       const int ilev = idx % nlevs;
-      auto dz = PF::calculate_dz(pseudo_density(icol,ilev),p(icol,ilev),T(icol,ilev),qv(icol,ilev));
+      // R* from the dry mass, as in the dycore (with water loading, it excludes the condensates)
+      auto dz = PF::calculate_dz(pseudo_density(icol,ilev),pseudo_density_dry(icol,ilev),
+                                 p(icol,ilev),T(icol,ilev),qv(icol,ilev),true);
       atm_dens(icol,ilev) = PF::calculate_density(pseudo_density(icol,ilev),dz);
   });
 }

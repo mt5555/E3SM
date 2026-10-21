@@ -50,6 +50,7 @@ AeroComCld(const ekat::Comm &comm,
   m_field_in_names = {
    "T_mid"          ,
    "pseudo_density" ,
+   "pseudo_density_dry" ,
    "p_mid"          ,
    "qv"             ,
    "qc"             ,
@@ -98,6 +99,7 @@ void AeroComCld::compute_impl()
   // Get the input fields
   const auto tmid = m_fields_in.at("T_mid").get_view<const Real **>();
   const auto pden = m_fields_in.at("pseudo_density").get_view<const Real **>();
+  const auto pden_dry = m_fields_in.at("pseudo_density_dry").get_view<const Real **>();
   const auto pmid = m_fields_in.at("p_mid").get_view<const Real **>();
   const auto qv   = m_fields_in.at("qv").get_view<const Real **>();
   const auto qc   = m_fields_in.at("qc").get_view<const Real **>();
@@ -156,10 +158,12 @@ void AeroComCld::compute_impl()
         auto nc_icol   = ekat::subview(nc, icol);
         auto ni_icol   = ekat::subview(ni, icol);
 
-        // We need dz too
+        // We need dz too. R* from the dry mass, as in the dycore
+        // (with water loading, it excludes the condensates)
         auto dz_icol = ekat::subview(dz, icol);
-        PF::calculate_dz(team, pden_icol, pmid_icol, tmid_icol, qv_icol,
-                         dz_icol);
+        auto pden_dry_icol = ekat::subview(pden_dry, icol);
+        PF::calculate_dz(team, pden_icol, pden_dry_icol, pmid_icol, tmid_icol, qv_icol,
+                         true, dz_icol);
 
         // Initialize the 1D "clear fraction" as 1 (totally clear)
         auto clr_icol = 1.0;
