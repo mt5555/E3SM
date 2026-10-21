@@ -44,6 +44,9 @@ void SurfaceCouplingExporter::create_requests()
   // These fields are required for computation/exports
   add_field<Required>("p_int",                scalar3d_layout_int,  Pa,     grid_name);
   add_field<Required>("pseudo_density",       scalar3d_layout_mid,  Pa,     grid_name, ps);
+  if (m_params.get<bool>("water_loading", false)) {
+    add_field<Required>("pseudo_density_dry", scalar3d_layout_mid, Pa, grid_name, ps);
+  }
   add_field<Required>("phis",                 scalar2d_layout,      m2/s2,  grid_name);
   add_field<Required>("p_mid",                scalar3d_layout_mid,  Pa,     grid_name, ps);
   add_field<Required>("T_mid",                scalar3d_layout_mid,  K,      grid_name, ps);
@@ -382,6 +385,11 @@ void SurfaceCouplingExporter::compute_eamxx_exports(const double dt, const bool 
   const auto& p_int                = get_field_in("p_int").get_view<const Real**>();
   const auto& pseudo_density       = get_field_in("pseudo_density").get_view<const Pack**>();
   const auto& qv                   = get_field_in("qv").get_view<const Pack**>();
+  // Condensate water loading: R* uses the dry mass (pseudo_density_dry is not used if disabled)
+  const bool  water_loading        = m_params.get<bool>("water_loading", false);
+  const auto  pseudo_density_dry   = water_loading
+                                   ? get_field_in("pseudo_density_dry").get_view<const Pack**>()
+                                   : pseudo_density;
   const auto& T_mid                = get_field_in("T_mid").get_view<const Pack**>();
   // TODO: This will need to change if we ever switch from horiz_winds to U and V
   const auto& horiz_winds          = get_field_in("horiz_winds").get_view<const Real***>();
@@ -467,6 +475,7 @@ void SurfaceCouplingExporter::compute_eamxx_exports(const double dt, const bool 
     const auto p_mid_i          = ekat::subview(p_mid, i);
     const auto p_int_i          = ekat::subview(p_int, i);
     const auto pseudo_density_i = ekat::subview(pseudo_density, i);
+    const auto pseudo_density_dry_i = ekat::subview(pseudo_density_dry, i);
     const auto dz_i             = ekat::subview(dz, i);
 
     const auto s_p_mid_i = ekat::scalarize(p_mid_i);
@@ -482,7 +491,7 @@ void SurfaceCouplingExporter::compute_eamxx_exports(const double dt, const bool 
                                || export_source(idx_Sa_dens)==FROM_MODEL
                                || export_source(idx_Sa_pslv)==FROM_MODEL;
     if (calculate_z_vars) {
-      PF::calculate_dz(team, pseudo_density_i, p_mid_i, T_mid_i, qv_i, dz_i);
+      PF::calculate_dz(team, pseudo_density_i, pseudo_density_dry_i, p_mid_i, T_mid_i, qv_i, water_loading, dz_i);
       team.team_barrier();
       const Real z_surf = 0.0;
       PF::calculate_z_int(team, num_levs, dz_i, z_surf, z_int_i);

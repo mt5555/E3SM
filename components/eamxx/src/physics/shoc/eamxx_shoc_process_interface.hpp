@@ -115,8 +115,9 @@ public:
         thlm(i,k) = PF::calculate_thetal_from_theta(theta_zt,T_mid(i,k),qc(i,k));
         thv(i,k)  = theta_zt*(1 + zvir*qv(i,k) - qc(i,k));
 
-        // Vertical layer thickness
-        dz(i,k) = PF::calculate_dz(pseudo_density(i,k), p_mid(i,k), T_mid(i,k), qv(i,k));
+        // Vertical layer thickness (with water loading, R* uses the dry mass)
+        dz(i,k) = PF::calculate_dz(pseudo_density(i,k), pseudo_density_dry(i,k), p_mid(i,k),
+                                   T_mid(i,k), qv(i,k), water_loading);
 
         rrho(i,k) = inv_ggr*(pseudo_density(i,k)/dz(i,k));
         wm_zt(i,k) = -1*omega(i,k)/(rrho(i,k)*ggr);
@@ -187,6 +188,10 @@ public:
     view_2d_const  p_mid;
     view_2d_const  p_int;
     view_2d_const  pseudo_density;
+    // Condensate water loading. If disabled, pseudo_density_dry is not used
+    // (it is set to pseudo_density, so it can be safely read).
+    bool           water_loading = false;
+    view_2d_const  pseudo_density_dry;
     view_2d_const  omega;
     view_1d_const  phis;
     view_1d_const  surf_sens_flux;

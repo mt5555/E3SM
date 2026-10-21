@@ -141,6 +141,9 @@ void RRTMGPRadiation::create_requests() {
   add_field<Required>("p_mid" , scalar3d_mid, Pa, grid_name);
   add_field<Required>("p_int", scalar3d_int, Pa, grid_name);
   add_field<Required>("pseudo_density", scalar3d_mid, Pa, grid_name);
+  if (m_params.get<bool>("water_loading", false)) {
+    add_field<Required>("pseudo_density_dry", scalar3d_mid, Pa, grid_name);
+  }
   add_field<Required>("sfc_alb_dir_vis", scalar2d, none, grid_name);
   add_field<Required>("sfc_alb_dir_nir", scalar2d, none, grid_name);
   add_field<Required>("sfc_alb_dif_vis", scalar2d, none, grid_name);
@@ -554,6 +557,10 @@ void RRTMGPRadiation::run_impl (const double dt) {
   auto d_pmid = get_field_in("p_mid").get_view<const Real**>();
   auto d_pint = get_field_in("p_int").get_view<const Real**>();
   auto d_pdel = get_field_in("pseudo_density").get_view<const Real**>();
+  // Condensate water loading: dry mass also excludes the condensates
+  // (d_pdel_dry is not used if water loading is disabled)
+  const bool water_loading = m_params.get<bool>("water_loading", false);
+  auto d_pdel_dry = water_loading ? get_field_in("pseudo_density_dry").get_view<const Real**>() : d_pdel;
   auto d_sfc_alb_dir_vis = get_field_in("sfc_alb_dir_vis").get_view<const Real*>();
   auto d_sfc_alb_dir_nir = get_field_in("sfc_alb_dir_nir").get_view<const Real*>();
   auto d_sfc_alb_dif_vis = get_field_in("sfc_alb_dif_vis").get_view<const Real*>();
@@ -704,7 +711,13 @@ void RRTMGPRadiation::run_impl (const double dt) {
         Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const MemberType& team) {
           const int icol = team.league_rank();
           Kokkos::parallel_for(Kokkos::TeamVectorRange(team, nlay), [&] (const int& k) {
-            d_vmr(icol,k) = PF::calculate_vmr_from_mmr(gas_mol_weights[igas],d_qv(icol,k),d_qv(icol,k));
+            if (water_loading) {
+              d_vmr(icol,k) = PF::calculate_vmr_from_mmr_dp_based(gas_mol_weights[igas],d_pdel(icol,k),
+                                                                  d_pdel_dry(icol,k),d_qv(icol,k));
+            } else {
+              // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
+              d_vmr(icol,k) = PF::calculate_vmr_from_mmr(gas_mol_weights[igas],d_qv(icol,k),d_qv(icol,k));
+            }
           });
         });
         Kokkos::fence();
@@ -837,11 +850,12 @@ void RRTMGPRadiation::run_impl (const double dt) {
 
           // Calculate dz
           const auto pseudo_density = ekat::subview(d_pdel, icol);
+          const auto pseudo_density_dry = ekat::subview(d_pdel_dry, icol);
           const auto p_mid          = ekat::subview(d_pmid, icol);
           const auto T_mid          = ekat::subview(d_tmid, icol);
           const auto qv             = ekat::subview(d_qv,   icol);
           const auto dz             = ekat::subview(d_dz,   i);
-          PF::calculate_dz<Real>(team, pseudo_density, p_mid, T_mid, qv, dz);
+          PF::calculate_dz<Real>(team, pseudo_density, pseudo_density_dry, p_mid, T_mid, qv, water_loading, dz);
           team.team_barrier();
 
           // Calculate T_int from longwave flux up from the surface, assuming

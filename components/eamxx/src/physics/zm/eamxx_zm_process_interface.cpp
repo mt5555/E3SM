@@ -56,6 +56,9 @@ void ZMDeepConvection::create_requests ()
   add_field<Required>("p_mid",                scalar3d_mid, Pa,    grid_name, pack_size);
   add_field<Required>("p_int",                scalar3d_int, Pa,    grid_name, pack_size);
   add_field<Required>("pseudo_density",       scalar3d_mid, Pa,    grid_name, pack_size);
+  if (m_params.get<bool>("water_loading", false)) {
+    add_field<Required>("pseudo_density_dry", scalar3d_mid, Pa, grid_name, pack_size);
+  }
   add_field<Required>("phis",                 scalar2d    , m2/s2, grid_name);
   add_field<Required>("omega",                scalar3d_mid, Pa/s,  grid_name, pack_size);
   add_field<Required>("cldfrac_tot",          scalar3d_mid, none,  grid_name, pack_size);
@@ -218,6 +221,12 @@ void ZMDeepConvection::run_impl (const double dt)
   const auto loc_zm_input_p_mid     = zm_input.p_mid;
   const auto loc_zm_input_p_int     = zm_input.p_int;
   const auto loc_zm_input_p_del     = zm_input.p_del;
+  // Condensate water loading: R* uses the dry mass (p_del_dry is not used if disabled)
+  const bool water_loading = m_params.get<bool>("water_loading", false);
+  auto loc_p_del_dry = loc_zm_input_p_del;
+  if (water_loading) {
+    loc_p_del_dry = get_field_in("pseudo_density_dry").get_view<const Real**>();
+  }
   const auto loc_zm_input_T_mid     = zm_input.T_mid;
   const auto loc_zm_input_qv        = zm_input.qv;
   const auto loc_zm_input_cldfrac   = zm_input.cldfrac;
@@ -283,13 +292,14 @@ void ZMDeepConvection::run_impl (const double dt)
     const int i = team.league_rank();
     const auto p_mid_i = ekat::subview(loc_zm_input_p_mid, i);
     const auto p_del_i = ekat::subview(loc_zm_input_p_del, i);
+    const auto p_del_dry_i = ekat::subview(loc_p_del_dry, i);
     const auto T_mid_i = ekat::subview(loc_zm_input_T_mid, i);
     const auto qv_i    = ekat::subview(loc_zm_input_qv,    i);
     const auto z_mid_i = ekat::subview(loc_zm_input_z_mid, i);
     const auto z_del_i = ekat::subview(loc_zm_input_z_del, i);
     const auto z_int_i = ekat::subview(loc_zm_input_z_int, i);
     const auto z_surf = 0.0; // ZM expects z_mid & z_int to be altitude above the surface
-    PF::calculate_dz(team, p_del_i, p_mid_i, T_mid_i, qv_i, z_del_i);
+    PF::calculate_dz(team, p_del_i, p_del_dry_i, p_mid_i, T_mid_i, qv_i, water_loading, z_del_i);
     team.team_barrier();
     PF::calculate_z_int(team, nlev_mid, z_del_i, z_surf, z_int_i);
     team.team_barrier();
