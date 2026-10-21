@@ -518,10 +518,11 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
 
 
   !_____________________________________________________________________
-  subroutine set_thermostate(elem,ps,temperature,hvcoord,qv)
+  subroutine set_thermostate(elem,ps,temperature,hvcoord,Q)
   !
   ! Assuming a hydrostatic intital state and given surface pressure,
-  ! and no moisture, compute theta and phi
+  ! compute theta and phi. Without Q, the state is dry. With Q, R* is
+  ! computed from the dry mass (get_dry_mass, then get_R_star).
   !
   ! input:  ps_v, temperature
   ! ouput:  state variables:   vtheta_dp, phi
@@ -532,13 +533,14 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   real (kind=real_kind), intent(in) :: temperature(np,np,nlev)
   type (hvcoord_t),     intent(in)  :: hvcoord                      ! hybrid vertical coordinate struct
   real (kind=real_kind), intent(in) :: ps(np,np)
-  real (kind=real_kind), intent(in), optional :: qv(np,np,nlev)  ! water vapor mixing ratio
+  real (kind=real_kind), intent(in), optional :: Q(:,:,:,:)  ! tracer mixing ratios, vapor in Q(:,:,:,1)
 
   !   local
   real (kind=real_kind) :: p(np,np,nlev)
   real (kind=real_kind) :: pi_i(np,np,nlevp)
   real (kind=real_kind) :: dp(np,np,nlev)
   real (kind=real_kind) :: Rstar(np,np,nlev)
+  real (kind=real_kind) :: dp_dry(np,np,nlev)
   integer :: k, nt
 
   nt = 1
@@ -567,8 +569,9 @@ recursive subroutine get_field(elem,name,field,hvcoord,nt,ntQ)
   enddo
   elem%state%ps_v(:,:,nt)=ps
 
-  if (present(qv)) then
-     call get_R_star(Rstar,qv)
+  if (present(Q)) then
+     call get_dry_mass(dp_dry,dp,Q)
+     call get_R_star(Rstar,dp_dry,dp,Q(:,:,:,1))
      elem%state%vtheta_dp(:,:,:,nt)=elem%state%vtheta_dp(:,:,:,nt)*Rstar(:,:,:)/Rgas
   endif
 
