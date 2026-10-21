@@ -39,6 +39,7 @@ VerticalLayer (const ekat::Comm& comm, const ekat::ParameterList& params,
 
   m_field_in_names.push_back("T_mid");
   m_field_in_names.push_back("pseudo_density");
+  m_field_in_names.push_back("pseudo_density_dry");
   m_field_in_names.push_back("p_mid");
   m_field_in_names.push_back("qv");
 
@@ -119,6 +120,7 @@ void VerticalLayer::compute_impl()
   const auto& p    = m_fields_in.at("p_mid").get_view<const Real**>();
   const auto& qv   = m_fields_in.at("qv").get_view<const Real**>();
   const auto& rho  = m_fields_in.at("pseudo_density").get_view<const Real**>();
+  const auto& rho_dry = m_fields_in.at("pseudo_density_dry").get_view<const Real**>();
   const auto  phis = m_from_sea_level ? m_fields_in.at("phis").get_view<const Real*>() : typename KT::view_1d<const Real>();
 
   constexpr Real g = scream::physics::Constants<Real>::gravit.value;
@@ -132,11 +134,18 @@ void VerticalLayer::compute_impl()
     const int icol = team.league_rank();
 
     // Whatever the output needs, the first thing to compute is dz.
+    // R* from the dry-air mass fraction, as in the dycore (with water loading, it
+    // excludes the condensates)
     const auto& dz = ekat::subview(tmp_mid, icol);
-    PF::calculate_dz(team,ekat::subview(rho,icol),
+    const auto rho_icol     = ekat::subview(rho,icol);
+    const auto rho_dry_icol = ekat::subview(rho_dry,icol);
+    const auto q_dry = [&](const int k) { return rho_dry_icol(k)/rho_icol(k); };
+    PF::calculate_dz(team,rho_icol,
                           ekat::subview(p,icol),
                           ekat::subview(T,icol),
+                          q_dry,
                           ekat::subview(qv,icol),
+                          true,
                           dz);
     team.team_barrier();
 

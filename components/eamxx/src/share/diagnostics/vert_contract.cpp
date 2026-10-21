@@ -36,6 +36,7 @@ VertContract(const ekat::Comm &comm,
     m_field_in_names.push_back("pseudo_density");
   } else if (m_weighting_method == "dz") {
     m_field_in_names.push_back("pseudo_density");
+    m_field_in_names.push_back("pseudo_density_dry");
     m_field_in_names.push_back("qv");
     m_field_in_names.push_back("p_mid");
     m_field_in_names.push_back("T_mid");
@@ -145,6 +146,7 @@ void VertContract::compute_impl()
 
     auto dz_v = m_weight.get_view<Real **>();
     auto dp_v = m_fields_in.at("pseudo_density").get_view<const Real **>();
+    auto dp_dry_v = m_fields_in.at("pseudo_density_dry").get_view<const Real **>();
     auto pm_v = m_fields_in.at("p_mid").get_view<const Real **>();
     auto tm_v = m_fields_in.at("T_mid").get_view<const Real **>();
     auto qv_v = m_fields_in.at("qv").get_view<const Real **>();
@@ -153,10 +155,14 @@ void VertContract::compute_impl()
           const int icol = team.league_rank();
           auto dz_icol   = ekat::subview(dz_v, icol);
           auto dp_icol   = ekat::subview(dp_v, icol);
+          auto dp_dry_icol = ekat::subview(dp_dry_v, icol);
           auto pm_icol   = ekat::subview(pm_v, icol);
           auto tm_icol   = ekat::subview(tm_v, icol);
           auto qv_icol   = ekat::subview(qv_v, icol);
-          PF::calculate_dz(team, dp_icol, pm_icol, tm_icol, qv_icol, dz_icol);
+          // R* from the dry-air mass fraction, as in the dycore (with water loading, it
+          // excludes the condensates)
+          const auto q_dry = [&](const int k) { return dp_dry_icol(k)/dp_icol(k); };
+          PF::calculate_dz(team, dp_icol, pm_icol, tm_icol, q_dry, qv_icol, true, dz_icol);
         });
   }
 
