@@ -59,7 +59,10 @@ void MAMOptics::create_requests() {
   // layout for 2D (1d horiz X 1d vertical) variables
   FieldLayout scalar2d = grid_->get_2d_scalar_layout();
 
-  add_field<Required>("pseudo_density_dry", scalar3d_mid, Pa, grid_name);
+  // With water loading, add_fields_dry_atm already requested it
+  if(not m_params.get<bool>("water_loading", false)) {
+    add_field<Required>("pseudo_density_dry", scalar3d_mid, Pa, grid_name);
+  }
 
   add_field<Required>("phis", scalar2d, m2 / s2, grid_name);
 

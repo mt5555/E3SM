@@ -334,6 +334,15 @@ void MAMGenericInterface::populate_wet_atm(
   wet_atm.nc = get_field_in("nc").get_view<const Real **>();
   wet_atm.qi = get_field_in("qi").get_view<const Real **>();
   wet_atm.ni = get_field_in("ni").get_view<const Real **>();
+
+  // Condensate water loading: wet<->dry conversions use the dry mass
+  // (pseudo_density_dry is not used if water loading is disabled)
+  wet_atm.water_loading  = m_params.get<bool>("water_loading", false);
+  wet_atm.pseudo_density = get_field_in("pseudo_density").get_view<const Real **>();
+  wet_atm.pseudo_density_dry =
+      wet_atm.water_loading
+          ? get_field_in("pseudo_density_dry").get_view<const Real **>()
+          : wet_atm.pseudo_density;
 }
 void MAMGenericInterface::populate_dry_atm(mam_coupling::DryAtmosphere &dry_atm,
                                            mam_coupling::Buffer &buffer) {
@@ -344,6 +353,15 @@ void MAMGenericInterface::populate_dry_atm(mam_coupling::DryAtmosphere &dry_atm,
   dry_atm.p_int  = get_field_in("p_int").get_view<const Real **>();
   dry_atm.p_del  = get_field_in("pseudo_density").get_view<const Real **>();
   dry_atm.omega  = get_field_in("omega").get_view<const Real **>();
+
+  // Condensate water loading: wet<->dry conversions and dz use the dry mass
+  // (pseudo_density_dry is not used if water loading is disabled)
+  dry_atm.water_loading  = m_params.get<bool>("water_loading", false);
+  dry_atm.pseudo_density = dry_atm.p_del;
+  dry_atm.pseudo_density_dry =
+      dry_atm.water_loading
+          ? get_field_in("pseudo_density_dry").get_view<const Real **>()
+          : dry_atm.p_del;
 
   // store fields converted to dry mmr from wet mmr in dry_atm
   dry_atm.qv = buffer.qv_dry;
@@ -422,6 +440,11 @@ void MAMGenericInterface::add_fields_dry_atm() {
 
   // Layer thickness(pdel) [Pa] at midpoints
   add_field<Required>("pseudo_density", scalar3d_mid, Pa, grid_name);
+
+  // Dry mass of each level [Pa], needed with condensate water loading
+  if(m_params.get<bool>("water_loading", false)) {
+    add_field<Required>("pseudo_density_dry", scalar3d_mid, Pa, grid_name);
+  }
 
   // planetary boundary layer height
   add_field<Required>("pbl_height", scalar2d_layout_col, m, grid_name);
