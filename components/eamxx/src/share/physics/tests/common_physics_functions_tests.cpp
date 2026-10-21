@@ -343,6 +343,24 @@ void run(std::mt19937_64& engine)
   tmp = PF::calculate_virtual_temperature(T0,qv0);
   REQUIRE( Check::approx_equal(PF::calculate_temperature_from_virtual_temperature(tmp,qv0),T0,test_tol) );
 
+  // Dry-air mass fraction (water loading) virtual temperature property tests:
+  //  - with q_dry = 1-qv it matches the qv-only version (up to roundoff errors)
+  //  - with no vapor and q_dry = 1-qc, T_virt = T*(1-qc): condensate loading
+  //  - forward and inverse are one the inverse of the other (up to roundoff errors)
+  {
+    const ScalarT qc0 = pdf_qv(engine);
+    const ScalarT q_dry_vap  = one - qv0;
+    const ScalarT q_dry_cond = one - qv0 - qc0;
+    REQUIRE( Check::approx_equal(PF::calculate_virtual_temperature(T0,q_dry_vap,qv0),
+                                 PF::calculate_virtual_temperature(T0,qv0),test_tol) );
+    REQUIRE( Check::approx_equal(PF::calculate_temperature_from_virtual_temperature(T0,q_dry_vap,qv0),
+                                 PF::calculate_temperature_from_virtual_temperature(T0,qv0),test_tol) );
+    REQUIRE( Check::approx_equal(PF::calculate_virtual_temperature(T0,ScalarT(one-qc0),zero),
+                                 ScalarT(T0*(one-qc0)),test_tol) );
+    tmp = PF::calculate_virtual_temperature(T0,q_dry_cond,qv0);
+    REQUIRE( Check::approx_equal(PF::calculate_temperature_from_virtual_temperature(tmp,q_dry_cond,qv0),T0,test_tol) );
+  }
+
   // DSE property tests:
   //  - calculate_dse(T=0.0, z=0.0) = surf_height
   //  - calculate_dse(T=1/cp, z=1/gravity) = surf_height+2
@@ -397,6 +415,20 @@ void run(std::mt19937_64& engine)
   REQUIRE( Check::equal(PF::calculate_dz(ScalarT(p0),ScalarT(p0),one,zero),ScalarT(Rd/g)) );
   REQUIRE( Check::approx_equal(PF::calculate_dz(ScalarT(g),ScalarT(Rd),T0,zero),T0,test_tol) );
 
+  // Dry-air mass fraction (water loading) DZ property tests:
+  //  - with water_loading=false it is exactly the qv-only version
+  //  - with q_dry = 1-qv it matches the qv-only version (up to roundoff errors)
+  //  - with no vapor and q_dry = 1-qc, dz is (1-qc) times the dry dz: condensate loading
+  {
+    const ScalarT qc0 = pdf_qv(engine);
+    const ScalarT q_dry_vap  = one - qv0;
+    const ScalarT q_dry_cond = one - qv0 - qc0;
+    REQUIRE( Check::equal(PF::calculate_dz(dp0,p,T0,q_dry_cond,qv0,false),PF::calculate_dz(dp0,p,T0,qv0)) );
+    REQUIRE( Check::approx_equal(PF::calculate_dz(dp0,p,T0,q_dry_vap,qv0,true),PF::calculate_dz(dp0,p,T0,qv0),test_tol) );
+    REQUIRE( Check::approx_equal(PF::calculate_dz(dp0,p,T0,ScalarT(one-qc0),zero,true),
+                                 ScalarT(PF::calculate_dz(dp0,p,T0,zero)*(one-qc0)),test_tol) );
+  }
+
   // MMR and VMR property tests:
   //  - calculate_vmr_from_mmr(mmr=0) = 0
   //  - calculate_mmr_from_vmr(vmr=0) = 0
@@ -417,6 +449,11 @@ void run(std::mt19937_64& engine)
   tmp = PF::calculate_mmr_from_vmr(h2o_mol,qv0,vmr0);
   REQUIRE( Check::approx_equal(PF::calculate_vmr_from_mmr(h2o_mol,qv0,tmp),vmr0,test_tol) );
   REQUIRE( !Check::approx_equal(PF::calculate_vmr_from_mmr(o2_mol,qv0,tmp),vmr0,test_tol) );
+
+  // Dry-mass VMR: with dp_dry = dp*(1-qv) it matches the qv-only version (up to roundoff errors)
+  dp0 = pdf_dp(engine);
+  REQUIRE( Check::approx_equal(PF::calculate_vmr_from_mmr_dp_based(h2o_mol,dp0,ScalarT(dp0*(one-qv0)),mmr0),
+                               PF::calculate_vmr_from_mmr(h2o_mol,qv0,mmr0),test_tol) );
 
   // --------- Run tests on full columns of data ----------- //
   auto policy = TPF::get_default_team_policy(1, 1);

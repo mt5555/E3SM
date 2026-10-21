@@ -35,6 +35,7 @@
 
 #include <cmath>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <random>
 #include <ranges>
@@ -320,6 +321,9 @@ void AtmosphereDriver::create_grids()
     setup_shoc_3d_turbulence_link();
   }
 
+  // Processes read the water loading options in set_grids, so set them first
+  setup_water_loading();
+
   // IOP object needs the grids_manager to have been created, but is then needed in set_grids()
   // implementation of some processes, so setup here.
   const bool enable_iop =
@@ -540,6 +544,31 @@ void AtmosphereDriver::setup_shoc_3d_turbulence_link ()
     auto shoc_process = m_atm_process_group->get_process_nonconst("shoc");
     shoc_process->get_params().set<bool>("do_3d_turbulence_shoc", do_3d_turbulence);
   }
+}
+
+void AtmosphereDriver::setup_water_loading ()
+{
+  // With condensate water loading, pseudo_density (dp3d in Homme) is total mass:
+  // dry air, vapor and the condensates listed here. Every process that derives dry
+  // mass from it reads these options, so give them to all processes.
+  auto& driver_options = m_atm_params.sublist("driver_options");
+  const bool water_loading = driver_options.get<bool>("water_loading", false);
+  const auto condensates = driver_options.get<strvec_t>("water_loading_condensates",
+                                                        {"qc","qr","qi"});
+
+  std::function<void(const AtmosphereProcessGroup&)> set_options =
+    [&](const AtmosphereProcessGroup& group) {
+    for (int i=0; i<group.get_num_processes(); ++i) {
+      auto proc = group.get_process_nonconst(i);
+      if (proc->type()==AtmosphereProcessType::Group) {
+        set_options(dynamic_cast<const AtmosphereProcessGroup&>(*proc));
+      } else {
+        proc->get_params().set<bool>("water_loading", water_loading);
+        proc->get_params().set<strvec_t>("water_loading_condensates", condensates);
+      }
+    }
+  };
+  set_options(*m_atm_process_group);
 }
 
 void AtmosphereDriver::add_additional_column_data_to_property_checks () {

@@ -46,6 +46,22 @@
 namespace scream
 {
 
+namespace {
+// Total condensate mixing ratio at (icol,jpack) of a monolithic tracers view Q(col,cmp,lev),
+// summed over the water loading condensates (zero if water loading is disabled).
+template<typename PackT, typename QView>
+KOKKOS_INLINE_FUNCTION
+PackT condensate_sum (const Homme::WaterLoading& wl, const QView& Q, const int icol, const int jpack) {
+  PackT qcond(0);
+  if (wl.enabled) {
+    for (int ic=0; ic<wl.num_condensates; ++ic) {
+      qcond += Q(icol,wl.condensate_idx[ic],jpack);
+    }
+  }
+  return qcond;
+}
+} // anonymous namespace
+
 HommeDynamics::HommeDynamics (const ekat::Comm& comm, const ekat::ParameterList& params)
   : AtmosphereProcess(comm, params), m_phys_grid_pgN(-1)
 {
@@ -92,6 +108,9 @@ void HommeDynamics::create_requests ()
     // Set moisture in homme base on input file:
     const auto& moisture = m_params.get<std::string>("moisture");
     set_homme_param("moisture",ekat::upper_case(moisture)!="DRY");
+
+    // Condensate water loading (the condensate indices are set once the tracers are known)
+    set_homme_param("water_loading",m_params.get<bool>("water_loading",false));
 
     prim_init_data_structures_f90 ();
   }
@@ -618,6 +637,36 @@ void HommeDynamics::set_computed_group_impl (const FieldGroup& group)
     params.qsize = qsize;           // Set in the CXX data structure
     set_homme_param("qsize",qsize); // Set in the F90 module
     tracers.init(tracers.num_elems(),qsize);
+
+    // Condensate water loading: dp3d is total mass, and dry mass also removes the
+    // condensates, given by name. Store their indices in this group (and so in Homme's Q).
+    auto& wl = params.water_loading;
+    wl = Homme::WaterLoading();
+    wl.enabled = m_params.get<bool>("water_loading",false);
+    if (wl.enabled) {
+      EKAT_REQUIRE_MSG(params.use_moisture,
+          "Error! water_loading requires moist dynamics (moisture != dry).\n");
+      using strvec_t = std::vector<std::string>;
+      const auto names = m_params.get<strvec_t>("water_loading_condensates",{"qc","qr","qi"});
+      EKAT_REQUIRE_MSG(static_cast<int>(names.size())<=Homme::WaterLoading::max_condensates,
+          "Error! Too many water_loading_condensates.\n"
+          "  - max: " + std::to_string(Homme::WaterLoading::max_condensates) + "\n");
+
+      // If the group is a subfield of a larger field, slice indices are relative to that
+      const auto& group_ap = group.monolithic_field().get_header().get_alloc_properties();
+      const int offset = group_ap.is_subfield() ? group_ap.get_subview_info().slice_idx : 0;
+      for (const auto& name : names) {
+        EKAT_REQUIRE_MSG(name!="qv",
+            "Error! water_loading_condensates must not contain qv.\n");
+        EKAT_REQUIRE_MSG(group.individual_fields().count(name)==1,
+            "Error! water_loading condensate '" + name + "' is not a tracer.\n");
+        const auto& f = group.individual_fields().at(name);
+        const int idx = f.get_header().get_alloc_properties().get_subview_info().slice_idx - offset;
+        wl.condensate_idx[wl.num_condensates++] = idx;
+      }
+    }
+    set_homme_param("water_loading",wl.enabled);
+    set_homme_condensate_idx_f90(wl.num_condensates,wl.condensate_idx);
   }
 }
 
@@ -766,6 +815,7 @@ void HommeDynamics::homme_post_process (const double dt) {
 
   const auto T_view  = get_field_out("T_mid").get_view<Pack**>();
   const auto T_prev_view = m_helper_fields.at("FT_phys").get_view<Pack**>();
+  const auto wl = params.water_loading;
 
   m_helper_fields.at("FM_phys").deep_copy(get_field_out("horiz_winds"));
 
@@ -802,7 +852,8 @@ void HommeDynamics::homme_post_process (const double dt) {
     auto p_dry_int = ekat::subview(p_dry_int_view,icol);
 
     Kokkos::parallel_for(Kokkos::TeamVectorRange(team,npacks), [&](const int& jpack) {
-      dp_dry(jpack) = dp(jpack) * (1.0 - qv(jpack));
+      const auto qcond = condensate_sum<Pack>(wl,Q_view,icol,jpack);
+      dp_dry(jpack) = Homme::ElementOps::compute_dp_dry(dp(jpack),qv(jpack),qcond);
     });
     ColOps::column_scan<true>(team,nlevs,dp_dry,p_dry_int,ps0);
     team.team_barrier();
@@ -818,7 +869,15 @@ void HommeDynamics::homme_post_process (const double dt) {
       // VTheta_dp->VTheta->Theta->T
       auto& T_val = T(ilev);
       T_val /= dp(ilev);
-      T_val = PF::calculate_temperature_from_virtual_temperature(T_val,qv(ilev));
+      if (wl.enabled) {
+        // R* from the dry-air mass fraction, as in HOMME
+        const auto qcond = condensate_sum<Pack>(wl,Q_view,icol,ilev);
+        const auto q_dry = Homme::ElementOps::compute_q_dry(qv(ilev),qcond);
+        T_val = PF::calculate_temperature_from_virtual_temperature(T_val,q_dry,qv(ilev));
+      } else {
+        // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
+        T_val = PF::calculate_temperature_from_virtual_temperature(T_val,qv(ilev));
+      }
       T_val = PF::calculate_T_from_theta(T_val,p_mid(ilev));
 
       // Store T at end of the dyn timestep (to back out tendencies later)
@@ -1102,6 +1161,9 @@ void HommeDynamics::restart_homme_state () {
   m_ic_remapper->register_field(m_helper_fields.at("FM_phys"),get_internal_field("v_dyn"));
   m_ic_remapper->register_field(get_field_out("pseudo_density",pgn),get_internal_field("dp3d_dyn"));
   auto qv_prev_ref = std::make_shared<Field>();
+  // With water loading, the conversion also needs the end-of-homme-step condensates
+  const auto wl = params.water_loading;
+  auto Q_prev_ref = std::make_shared<Field>();
   auto Q_dyn = m_helper_fields.at("Q_dyn");
   if (params.ftype==Homme::ForcingAlg::FORCING_2) {
     auto Q_old = get_group_in("Q",pgn).monolithic_field();
@@ -1109,6 +1171,16 @@ void HommeDynamics::restart_homme_state () {
 
     // Grab qv_ref_old from Q_old
     *qv_prev_ref = Q_old.get_component(0);
+    *Q_prev_ref = Q_old;
+  } else if (wl.enabled) {
+    using namespace ShortFieldTagsNames;
+
+    // As below, but for all tracers, since the condensates are needed too
+    create_helper_field("Q_prev_phys",{COL,CMP,LEV},{ncols,qsize,nlevs},pgn);
+    m_ic_remapper->register_field(m_helper_fields.at("Q_prev_phys"),Q_dyn);
+
+    *Q_prev_ref = m_helper_fields.at("Q_prev_phys");
+    *qv_prev_ref = Q_prev_ref->get_component(0);
   } else {
     using namespace ShortFieldTagsNames;
 
@@ -1131,6 +1203,8 @@ void HommeDynamics::restart_homme_state () {
   auto dp_view     = get_field_out("pseudo_density",pgn).get_view<const Pack**>();
   auto p_mid_view  = get_field_out("p_mid").get_view<Pack**>();
   auto qv_view     = qv_prev_ref->get_view<Pack**>();
+  using view_3d_t   = decltype(Q_prev_ref->get_view<const Pack***>());
+  const auto Q_view = wl.enabled ? Q_prev_ref->get_view<const Pack***>() : view_3d_t();
 
   const auto policy = TPF::get_default_team_policy(ncols,npacks);
   Kokkos::parallel_for(policy, KOKKOS_LAMBDA (const KT::MemberType& team){
@@ -1144,14 +1218,23 @@ void HommeDynamics::restart_homme_state () {
       // T_prev as of now contains vtheta_dp. Convert to temperature
       auto& T_prev = T_prev_view(icol,ilev);
       T_prev /= dp_view(icol,ilev);
-      T_prev = PF::calculate_temperature_from_virtual_temperature(T_prev,qv(ilev));
+      if (wl.enabled) {
+        // Same dry-air mass fraction as in homme_post_process
+        const auto qcond = condensate_sum<Pack>(wl,Q_view,icol,ilev);
+        const auto q_dry = Homme::ElementOps::compute_q_dry(qv(ilev),qcond);
+        T_prev = PF::calculate_temperature_from_virtual_temperature(T_prev,q_dry,qv(ilev));
+      } else {
+        // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
+        T_prev = PF::calculate_temperature_from_virtual_temperature(T_prev,qv(ilev));
+      }
       T_prev = PF::calculate_T_from_theta(T_prev,p_mid(ilev));
     });
   });
   Kokkos::fence();
 
-  // Erase also qv_prev_phys (if we created it).
+  // Erase also qv_prev_phys and Q_prev_phys (if we created them).
   m_helper_fields.erase("qv_prev_phys");
+  m_helper_fields.erase("Q_prev_phys");
 
   // Update the time stamp of the fields we inited in here (to avoid triggering invalid output in IO)
   get_field_out("pseudo_density",pgn).get_header().get_tracking().update_time_stamp(start_of_step_ts());
@@ -1222,6 +1305,7 @@ void HommeDynamics::initialize_homme_state () {
   const auto dp_view  = m_helper_fields.at("dp3d_dyn").get_view<Pack*****>();
   const auto vth_view = m_helper_fields.at("vtheta_dp_dyn").get_view<Pack*****>();
   const auto Q_view   = m_helper_fields.at("Q_dyn").get_view<Pack*****>();
+  const auto wl = params.water_loading;
 
   // State time slices
   const auto& tl = c.get<Homme::TimeLevel>();
@@ -1261,7 +1345,18 @@ void HommeDynamics::initialize_homme_state () {
     Kokkos::parallel_for(Kokkos::TeamVectorRange(team,npacks_mid),
                          [&](const int ilev) {
       const auto th = PF::calculate_theta_from_T(T(ilev),p_mid(ilev));
-      vTh_dp(ilev) = PF::calculate_virtual_temperature(th,qv(ilev))*dp(ilev);
+      if (wl.enabled) {
+        // Water loading: dp is total mass, and R* uses the dry-air mass fraction
+        Pack qcond(0);
+        for (int ic=0; ic<wl.num_condensates; ++ic) {
+          qcond += Q_view(ie,wl.condensate_idx[ic],igp,jgp,ilev);
+        }
+        const auto q_dry = Homme::ElementOps::compute_q_dry(qv(ilev),qcond);
+        vTh_dp(ilev) = PF::calculate_virtual_temperature(th,q_dry,qv(ilev))*dp(ilev);
+      } else {
+        // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
+        vTh_dp(ilev) = PF::calculate_virtual_temperature(th,qv(ilev))*dp(ilev);
+      }
     });
     team.team_barrier();
 
@@ -1410,6 +1505,10 @@ void HommeDynamics::update_pressure(const std::shared_ptr<const AbstractGrid>& g
   const auto p_dry_int_view = get_field_out("p_dry_int").get_view<Pack**>();
   const auto p_dry_mid_view = get_field_out("p_dry_mid").get_view<Pack**>();
 
+  // Condensate water loading: dry mass also removes the condensates
+  const auto wl = c.get<Homme::SimulationParams>().water_loading;
+  const auto Q_view = get_group_out("Q",gn).monolithic_field().get_view<const Pack***>();
+
   const auto policy = TPF::get_thread_range_parallel_scan_team_policy(ncols,npacks);
   Kokkos::parallel_for(policy, KOKKOS_LAMBDA (const KT::MemberType& team) {
     const int& icol = team.league_rank();
@@ -1424,7 +1523,8 @@ void HommeDynamics::update_pressure(const std::shared_ptr<const AbstractGrid>& g
     auto p_dry_int = ekat::subview(p_dry_int_view,icol);
 
     Kokkos::parallel_for(Kokkos::TeamVectorRange(team,npacks), [&](const int& jpack) {
-      dp_dry(jpack) = dp(jpack) * (1.0 - qv(jpack));
+      const auto qcond = condensate_sum<Pack>(wl,Q_view,icol,jpack);
+      dp_dry(jpack) = Homme::ElementOps::compute_dp_dry(dp(jpack),qv(jpack),qcond);
     });
 
     ColOps::column_scan<true>(team,nlevs,dp,p_int,ps0);
