@@ -89,8 +89,17 @@ The two-argument `calculate_virtual_temperature(T, qv)` and the four-argument
 `calculate_dz(pseudo_density, p_mid, T_mid, qv)` compute
 $R^* = R_d + (R_v - R_d) \, q_v$. That equals the formula above only when
 there are no condensates ($q_{dry} = 1 - q_v$). With water loading off, the
-$(q_{dry}, q_v)$ functions use this formula, so results are bit-for-bit with
-earlier versions. Those branches are marked `BFB-only` in the code.
+model uses this formula, so results are bit-for-bit with earlier versions:
+
+- HOMME's `get_R_star` and `PhysicsFunctions::calculate_dz` switch to it
+  internally (through `use_moisture`/`WaterLoading` and the `water_loading`
+  argument).
+- `calculate_virtual_temperature(T, q_dry, qv)` and its inverse take no flag
+  and always use the $(q_{dry}, q_v)$ form. Callers that must stay
+  bit-for-bit, such as HommeDynamics, call the two-argument functions when
+  water loading is off.
+
+Those branches are marked `BFB-only` in the code.
 
 The `VirtualTemperature`, `AtmosphereDensity`, `VerticalLayer` (z, geopotential,
 height, dz), `VertContract` (dz weighting) and `AeroComCld` diagnostics always

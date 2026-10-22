@@ -714,6 +714,18 @@ static void init_dyn_data (Session& s) {
                     omega.data(), q.data(), phinh_i.data());
 }
 
+// Water loading settings for the tests, also set in the F90 control_mod. The
+// condensates are tracers qsize-1,...,1 (at most 3), in decreasing order.
+static WaterLoading set_test_water_loading (const Session& s, const bool water_loading) {
+  WaterLoading wl;
+  wl.enabled = water_loading;
+  if (water_loading)
+    for (int iq = s.qsize-1; iq >= 1 && wl.num_condensates < 3; --iq)
+      wl.condensate_idx[wl.num_condensates++] = iq;
+  set_water_loading_f90(wl.enabled, wl.num_condensates, wl.condensate_idx);
+  return wl;
+}
+
 static void test_get_temperature (Session& s) {
   using g = GllFvRemapImpl;
   const int nt = NUM_TIME_LEVELS;
@@ -721,14 +733,7 @@ static void test_get_temperature (Session& s) {
   for (const bool water_loading : {false, true}) {
   // Water loading needs at least one tracer besides vapor
   if (water_loading && s.qsize < 2) continue;
-
-  // Condensates: tracers qsize-1,...,1 (at most 3), in decreasing order
-  WaterLoading wl;
-  wl.enabled = water_loading;
-  if (water_loading)
-    for (int iq = s.qsize-1; iq >= 1 && wl.num_condensates < 3; --iq)
-      wl.condensate_idx[wl.num_condensates++] = iq;
-  set_water_loading_f90(wl.enabled, wl.num_condensates, wl.condensate_idx);
+  const auto wl = set_test_water_loading(s, water_loading);
 
   for (const bool theta_hydrostatic_mode : {false, true}) {
     init_dyn_data(s);
@@ -794,8 +799,7 @@ static void test_get_temperature (Session& s) {
   } // water_loading
 
   // Leave water loading off for the remaining tests
-  const WaterLoading wl_off;
-  set_water_loading_f90(false, 0, wl_off.condensate_idx);
+  set_test_water_loading(s, false);
 }
 
 static void
@@ -1011,12 +1015,22 @@ TEST_CASE ("gllfvremap_testing") {
       REQUIRE(nerr == 0);
     }
 
-    // Main remap routines.
+    // Main remap routines. The dyn->phys temperature uses R*, so also run it
+    // with water loading.
     for (const bool theta_hydrostatic_mode : {false, true}) {
-      for (const int nf : {2,3,4}) {
-        printf("ut> g2f nf %d thm %d\n", nf, (int) theta_hydrostatic_mode);
-        test_dyn_to_fv_phys(s, nf, theta_hydrostatic_mode);
+      for (const bool water_loading : {false, true}) {
+        // Water loading needs at least one tracer besides vapor
+        if (water_loading && s.qsize < 2) continue;
+        Context::singleton().get<SimulationParams>().water_loading =
+          set_test_water_loading(s, water_loading);
+        for (const int nf : {2,3,4}) {
+          printf("ut> g2f nf %d thm %d wl %d\n", nf, (int) theta_hydrostatic_mode,
+                 (int) water_loading);
+          test_dyn_to_fv_phys(s, nf, theta_hydrostatic_mode);
+        }
       }
+      Context::singleton().get<SimulationParams>().water_loading =
+        set_test_water_loading(s, false);
 
       for (const int nf : {2,3,4}) {
         printf("ut> f2g nf %d thm %d\n", nf, (int) theta_hydrostatic_mode);

@@ -109,7 +109,9 @@ void HommeDynamics::create_requests ()
     const auto& moisture = m_params.get<std::string>("moisture");
     set_homme_param("moisture",ekat::upper_case(moisture)!="DRY");
 
-    // Condensate water loading (the condensate indices are set once the tracers are known)
+    // Condensate water loading. The condensate indices are set in set_computed_group_impl,
+    // once the tracers are known (in SimulationParams and in control_mod). Until then
+    // Homme sees water loading with no condensates, but nothing reads it.
     set_homme_param("water_loading",m_params.get<bool>("water_loading",false));
 
     prim_init_data_structures_f90 ();
@@ -662,6 +664,10 @@ void HommeDynamics::set_computed_group_impl (const FieldGroup& group)
             "Error! water_loading condensate '" + name + "' is not a tracer.\n");
         const auto& f = group.individual_fields().at(name);
         const int idx = f.get_header().get_alloc_properties().get_subview_info().slice_idx - offset;
+        for (int ic=0; ic<wl.num_condensates; ++ic) {
+          EKAT_REQUIRE_MSG(wl.condensate_idx[ic]!=idx,
+              "Error! water_loading condensate '" + name + "' is listed more than once.\n");
+        }
         wl.condensate_idx[wl.num_condensates++] = idx;
       }
     }

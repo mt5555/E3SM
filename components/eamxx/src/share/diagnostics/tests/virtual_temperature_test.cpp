@@ -23,6 +23,7 @@ template<typename DeviceT>
 void run(std::mt19937_64& engine)
 {
   using PF         = scream::PhysicsFunctions<DeviceT>;
+  using PC         = scream::physics::Constants<Real>;
   using KT         = ekat::KokkosTypes<DeviceT>;
   using ExecSpace  = typename KT::ExeSpace;
   using MemberType = typename KT::MemberType;
@@ -110,16 +111,33 @@ void run(std::mt19937_64& engine)
     Field virtualT_f = diag_out.clone();
     virtualT_f.deep_copy(0);
     const auto& virtualT_v = virtualT_f.get_view<Real**>();
+    // Reference written out, Tv = T*R*/Rd = T*(q_dry + qv*Rv/Rd), rather than
+    // calling the PhysicsFunctions helper the diagnostic uses
+    const Real rv_rd = 1/PC::ep_2.value;
     Kokkos::parallel_for("", policy, KOKKOS_LAMBDA(const MemberType& team) {
       const int icol = team.league_rank();
       Kokkos::parallel_for(Kokkos::TeamVectorRange(team,nlevs), [&] (const Int& ilev) {
         const Real q_dry = dp_dry_v(icol,ilev)/dp_v(icol,ilev);
-        virtualT_v(icol,ilev) = PF::calculate_virtual_temperature(T_mid_v(icol,ilev),q_dry,qv_mid_v(icol,ilev));
+        virtualT_v(icol,ilev) = T_mid_v(icol,ilev)*(q_dry + rv_rd*qv_mid_v(icol,ilev));
       });
       team.team_barrier();
     });
     Kokkos::fence();
     REQUIRE(views_are_equal(diag_out,virtualT_f));
+
+    // With condensate, the result differs from the qv-only virtual temperature
+    if (condensate) {
+      Field virtualT_qv_f = diag_out.clone();
+      const auto& virtualT_qv_v = virtualT_qv_f.get_view<Real**>();
+      Kokkos::parallel_for("", policy, KOKKOS_LAMBDA(const MemberType& team) {
+        const int icol = team.league_rank();
+        Kokkos::parallel_for(Kokkos::TeamVectorRange(team,nlevs), [&] (const Int& ilev) {
+          virtualT_qv_v(icol,ilev) = PF::calculate_virtual_temperature(T_mid_v(icol,ilev),qv_mid_v(icol,ilev));
+        });
+      });
+      Kokkos::fence();
+      REQUIRE(not views_are_equal(diag_out,virtualT_qv_f));
+    }
   }
  
 } // run()

@@ -97,12 +97,13 @@ void run(std::mt19937_64& engine)
       ekat::genRandArray(p_sub,      engine, pdf_pres);
       ekat::genRandArray(qv_sub,     engine, pdf_qv);
     } 
-    // Dry mass, here without condensate: dp*(1-qv)
+    // Dry mass with a condensate, as with water loading: dp*(1-qv-qc)
     const auto& pseudo_dens_dry_v = input_fields["pseudo_density_dry"].get_view<Real**>();
+    const Real qc = pdf_qv(engine);
     Kokkos::parallel_for("", policy, KOKKOS_LAMBDA(const MemberType& team) {
       const int icol = team.league_rank();
       Kokkos::parallel_for(Kokkos::TeamVectorRange(team,nlevs), [&] (const Int& ilev) {
-        pseudo_dens_dry_v(icol,ilev) = pseudo_dens_v(icol,ilev)*(1 - qv_mid_v(icol,ilev));
+        pseudo_dens_dry_v(icol,ilev) = pseudo_dens_v(icol,ilev)*(1 - qv_mid_v(icol,ilev) - qc);
       });
     });
     Kokkos::fence();

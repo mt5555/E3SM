@@ -947,8 +947,14 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
     num_condensates = count(condensate_idx > 0)
     if (water_loading) then
        if (.not. use_moisture) call abortmp('water_loading requires moisture')
+       if (any(condensate_idx(num_condensates+1:) /= 0)) &
+            call abortmp('water_loading: condensate_idx entries must be listed first, with no gaps')
        if (any(condensate_idx(1:num_condensates) < 2) .or. any(condensate_idx(1:num_condensates) > qsize)) &
             call abortmp('water_loading: condensate_idx entries must be in [2,qsize]')
+       do i=2,num_condensates
+          if (any(condensate_idx(1:i-1) == condensate_idx(i))) &
+               call abortmp('water_loading: condensate_idx entries must not repeat')
+       enddo
        if(par%masterproc) print *, "water loading condensates:", condensate_idx(1:num_condensates)
     endif
 

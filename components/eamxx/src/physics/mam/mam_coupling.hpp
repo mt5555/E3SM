@@ -670,17 +670,20 @@ void compute_updraft_velocities(const Team &team, const WetAtmosphere &wet_atm,
   constexpr int nlev = mam4::nlev;
   int i              = column_index;
   Kokkos::parallel_for(Kokkos::TeamVectorRange(team, nlev), [&](const int k) {
-    // With water loading, R* uses the dry-air mass fraction (pseudo_density_dry is
-    // not used otherwise)
+    // With water loading, dz and rho use the total mass (p_del is the dry mass in
+    // MAM optics) and R* uses the dry-air mass fraction. pseudo_density_dry is not
+    // used otherwise.
+    const auto dp_ik = wet_atm.water_loading ? dry_atm.pseudo_density(i, k)
+                                             : dry_atm.p_del(i, k);
     const auto q_dry_ik = wet_atm.water_loading
                               ? wet_atm.pseudo_density_dry(i, k) / wet_atm.pseudo_density(i, k)
                               : Real(1);
     dry_atm.dz(i, k) =
-        PF::calculate_dz(dry_atm.p_del(i, k), dry_atm.p_mid(i, k),
+        PF::calculate_dz(dp_ik, dry_atm.p_mid(i, k),
                          dry_atm.T_mid(i, k), q_dry_ik, wet_atm.qv(i, k),
                          wet_atm.water_loading);
     const auto rho =
-        PF::calculate_density(dry_atm.p_del(i, k), dry_atm.dz(i, k));
+        PF::calculate_density(dp_ik, dry_atm.dz(i, k));
     dry_atm.w_updraft(i, k) =
         PF::calculate_vertical_velocity(dry_atm.omega(i, k), rho);
   });

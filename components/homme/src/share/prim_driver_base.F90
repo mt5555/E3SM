@@ -1509,7 +1509,7 @@ contains
   !    write restart files      ps_v ok for restart
   !
   use control_mod,        only : use_moisture, dt_remap_factor, water_loading, &
-                                 num_condensates, condensate_idx
+                                 num_condensates, condensate_idx, max_condensates
   use hybvcoord_mod,      only : hvcoord_t
 #ifdef MODEL_THETA_L
   use physical_constants, only : cp, g, kappa, Rgas, p0
@@ -1527,9 +1527,11 @@ contains
   logical,                intent(in)    :: adjustment
 
   ! local
-  integer :: i,j,k,q,ic,ncond
+  integer :: i,j,k,q,ic,ncond,iw
   real (kind=real_kind)  :: fq, dq
-  real (kind=real_kind)  :: dqdp(np,np,nlev,qsize) ! applied Qdp increments (no adjustment)
+  ! applied Qdp increments of the water species (no adjustment): vapor in slot 0,
+  ! condensate ic in slot ic
+  real (kind=real_kind)  :: dqdp(np,np,nlev,0:max_condensates)
   real (kind=real_kind)  :: fq_water(np,np,nlev)   ! sum of dqdp over the water species
   real (kind=real_kind)  :: dp(np,np,nlev), ps(np,np), dp_adj(np,np,nlev)
   real (kind=real_kind)  :: phydro(np,np,nlev)  ! hydrostatic pressure
@@ -1645,6 +1647,12 @@ contains
       ! apply forcing to Qdp
       elem%derived%FQps(:,:)=0
       do q=1,qsize
+         ! slot of tracer q in dqdp, or -1 if it is not a water species
+         iw = -1
+         if (q==1) iw = 0
+         do ic=1,ncond
+            if (condensate_idx(ic)==q) iw = ic
+         enddo
          do k=1,nlev
             do j=1,np
                do i=1,np
@@ -1657,16 +1665,16 @@ contains
                      endif
                   endif
                   elem%state%Qdp(i,j,k,q,np1_qdp) = elem%state%Qdp(i,j,k,q,np1_qdp)+fq
-                  dqdp(i,j,k,q) = fq
+                  if (iw>=0) dqdp(i,j,k,iw) = fq
                enddo
             enddo
          enddo
       enddo
 
       if (qsize>0) then
-         fq_water(:,:,:) = dqdp(:,:,:,1)
+         fq_water(:,:,:) = dqdp(:,:,:,0)
          do ic=1,ncond
-            fq_water(:,:,:) = fq_water(:,:,:) + dqdp(:,:,:,condensate_idx(ic))
+            fq_water(:,:,:) = fq_water(:,:,:) + dqdp(:,:,:,ic)
          enddo
          do k=1,nlev
             elem%derived%FQps(:,:)=elem%derived%FQps(:,:)+fq_water(:,:,k)/dt
