@@ -15,6 +15,20 @@ namespace Homme
 {
 
 /*
+ * Condensate water loading. When enabled, dp3d is total mass (dry air + vapor
+ * + condensates), and dry mass removes the listed condensate tracers as well as
+ * vapor (tracer 0). Small and trivially copyable, so kernels capture it by value.
+ */
+struct WaterLoading
+{
+  static constexpr int max_condensates = 10; // matches control_mod::max_condensates
+
+  bool enabled = false;
+  int  num_condensates = 0;
+  int  condensate_idx[max_condensates] = {}; // 0-based tracer indices
+};
+
+/*
  * A struct to hold simulation parameters.
  *
  */
@@ -24,6 +38,7 @@ struct SimulationParams
 
   TimeStepType  time_step_type;
   bool          use_moisture;
+  WaterLoading  water_loading;
   RemapAlg      remap_alg;
   TestCase      test_case;
   ForcingAlg    ftype = ForcingAlg::FORCING_OFF;
@@ -86,6 +101,14 @@ inline void SimulationParams::print (std::ostream& out) {
   out << "\n************** CXX SimulationParams **********************\n\n";
   out << "   time_step_type: " << etoi(time_step_type) << "\n";
   out << "   use_moisture: " << (use_moisture ? "moist" : "dry") << "\n";
+  out << "   water_loading: " << (water_loading.enabled ? "yes" : "no") << "\n";
+  if (water_loading.enabled) {
+    out << "   condensate_idx:";
+    for (int i=0; i<water_loading.num_condensates; ++i) {
+      out << " " << water_loading.condensate_idx[i];
+    }
+    out << "\n";
+  }
   out << "   remap_alg: " << etoi(remap_alg) << "\n";
   out << "   test case: " << etoi(test_case) << "\n";
   out << "   ftype: " << etoi(ftype) << "\n";

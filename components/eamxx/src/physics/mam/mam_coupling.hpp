@@ -225,6 +225,12 @@ struct WetAtmosphere {
                      // water / kg moist air]
   const_view_2d
       ni;  // wet cloud ice water number mixing ratio [# / kg moist air]
+  // Condensate water loading: pseudo_density is total mass (dry air, vapor and
+  // condensates), and wet<->dry conversions use the dry mass pseudo_density_dry.
+  // If water_loading is false, pseudo_density_dry is not used.
+  bool water_loading = false;
+  const_view_2d pseudo_density;      // total mass of each level [Pa]
+  const_view_2d pseudo_density_dry;  // dry mass of each level [Pa]
 };
 
 // This type stores multi-column views related to the dry atmospheric state
@@ -251,6 +257,11 @@ struct DryAtmosphere {
   const_view_1d pblh;     // planetary boundary layer height [m]
   const_view_1d phis;     // surface geopotential [m2/s2]
   const_view_2d omega;    // vertical pressure velocity [Pa/s]
+  // Condensate water loading (as in WetAtmosphere). p_del may be dry mass in some
+  // processes, so the total mass is stored separately.
+  bool water_loading = false;
+  const_view_2d pseudo_density;      // total mass of each level [Pa]
+  const_view_2d pseudo_density_dry;  // dry mass of each level [Pa]
 };
 
 // This type stores aerosol number and mass mixing ratios evolved by MAM. It
@@ -617,9 +628,24 @@ void compute_vertical_layer_heights(const Team &team,
   const auto T_mid          = ekat::subview(dry_atm.T_mid, column_index);
   const auto pseudo_density = ekat::subview(dry_atm.p_del, column_index);
 
-  // NOTE: we are using dry qv. Does calculate_dz require dry or wet?
-  PF::calculate_dz(team, pseudo_density, p_mid, T_mid, qv,  // inputs
-                   dz);                                     // output
+  if (dry_atm.water_loading) {
+    // R* uses the dry-air mass fraction, with q_dry and qv per unit total mass.
+    // qv here is a dry mixing ratio, so it is converted to a wet one.
+    const auto pseudo_density_tot = ekat::subview(dry_atm.pseudo_density, column_index);
+    const auto pseudo_density_dry = ekat::subview(dry_atm.pseudo_density_dry, column_index);
+    const auto q_dry  = [&](const int k) { return pseudo_density_dry(k)/pseudo_density_tot(k); };
+    const auto qv_wet = [&](const int k) {
+      return PF::calculate_wetmmr_from_drymmr_dp_based(qv(k), pseudo_density_tot(k), pseudo_density_dry(k));
+    };
+    PF::calculate_dz(team, pseudo_density_tot, p_mid, T_mid, q_dry, qv_wet, true,  // inputs
+                     dz);                                                        // output
+  } else {
+    // BFB-only: legacy form (dry qv with total mass, not algebraically identical to the dry-mass
+    // form), kept so water_loading=false matches baselines; remove in follow-up PR
+    // NOTE: we are using dry qv. Does calculate_dz require dry or wet?
+    PF::calculate_dz(team, pseudo_density, p_mid, T_mid, qv,  // inputs
+                     dz);                                     // output
+  }
   team.team_barrier();
   // NOTE: we are not currently allowing surface topography:
   EKAT_KERNEL_ASSERT_MSG(dry_atm.z_surf == 0, "dry_atm.z_surf must be zero");
@@ -644,11 +670,20 @@ void compute_updraft_velocities(const Team &team, const WetAtmosphere &wet_atm,
   constexpr int nlev = mam4::nlev;
   int i              = column_index;
   Kokkos::parallel_for(Kokkos::TeamVectorRange(team, nlev), [&](const int k) {
+    // With water loading, dz and rho use the total mass (p_del is the dry mass in
+    // MAM optics) and R* uses the dry-air mass fraction. pseudo_density_dry is not
+    // used otherwise.
+    const auto dp_ik = wet_atm.water_loading ? dry_atm.pseudo_density(i, k)
+                                             : dry_atm.p_del(i, k);
+    const auto q_dry_ik = wet_atm.water_loading
+                              ? wet_atm.pseudo_density_dry(i, k) / wet_atm.pseudo_density(i, k)
+                              : Real(1);
     dry_atm.dz(i, k) =
-        PF::calculate_dz(dry_atm.p_del(i, k), dry_atm.p_mid(i, k),
-                         dry_atm.T_mid(i, k), wet_atm.qv(i, k));
+        PF::calculate_dz(dp_ik, dry_atm.p_mid(i, k),
+                         dry_atm.T_mid(i, k), q_dry_ik, wet_atm.qv(i, k),
+                         wet_atm.water_loading);
     const auto rho =
-        PF::calculate_density(dry_atm.p_del(i, k), dry_atm.dz(i, k));
+        PF::calculate_density(dp_ik, dry_atm.dz(i, k));
     dry_atm.w_updraft(i, k) =
         PF::calculate_vertical_velocity(dry_atm.omega(i, k), rho);
   });
@@ -668,6 +703,23 @@ void compute_dry_mixing_ratios(const Team &team, const WetAtmosphere &wet_atm,
   constexpr int nlev = mam4::nlev;
   int i              = column_index;
   Kokkos::parallel_for(Kokkos::TeamVectorRange(team, nlev), [&](const int k) {
+    if (wet_atm.water_loading) {
+      // The dry mass also excludes the condensates
+      const auto dp_ik     = wet_atm.pseudo_density(i, k);
+      const auto dp_dry_ik = wet_atm.pseudo_density_dry(i, k);
+      dry_atm.qv(i, k) =
+          PF::calculate_drymmr_from_wetmmr_dp_based(wet_atm.qv(i, k), dp_ik, dp_dry_ik);
+      dry_atm.qc(i, k) =
+          PF::calculate_drymmr_from_wetmmr_dp_based(wet_atm.qc(i, k), dp_ik, dp_dry_ik);
+      dry_atm.nc(i, k) =
+          PF::calculate_drymmr_from_wetmmr_dp_based(wet_atm.nc(i, k), dp_ik, dp_dry_ik);
+      dry_atm.qi(i, k) =
+          PF::calculate_drymmr_from_wetmmr_dp_based(wet_atm.qi(i, k), dp_ik, dp_dry_ik);
+      dry_atm.ni(i, k) =
+          PF::calculate_drymmr_from_wetmmr_dp_based(wet_atm.ni(i, k), dp_ik, dp_dry_ik);
+      return;
+    }
+    // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
     const auto qv_ik = wet_atm.qv(i, k);
     dry_atm.qv(i, k) =
         PF::calculate_drymmr_from_wetmmr(wet_atm.qv(i, k), qv_ik);
@@ -698,27 +750,32 @@ void compute_dry_mixing_ratios(const Team &team, const WetAtmosphere &wet_atm,
   int i              = column_index;
   Kokkos::parallel_for(Kokkos::TeamVectorRange(team, nlev), [&](const int k) {
     const auto qv_ik = wet_atm.qv(i, k);
+    // With water loading, the dry mass also excludes the condensates
+    const auto to_dry = [&](const Real wetmmr) -> Real {
+      if (wet_atm.water_loading) {
+        return PF::calculate_drymmr_from_wetmmr_dp_based(
+            wetmmr, wet_atm.pseudo_density(i, k), wet_atm.pseudo_density_dry(i, k));
+      }
+      // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
+      return PF::calculate_drymmr_from_wetmmr(wetmmr, qv_ik);
+    };
     for(int m = 0; m < num_aero_modes(); ++m) {
-      dry_aero.int_aero_nmr[m](i, k) = PF::calculate_drymmr_from_wetmmr(
-          wet_aero.int_aero_nmr[m](i, k), qv_ik);
+      dry_aero.int_aero_nmr[m](i, k) = to_dry(wet_aero.int_aero_nmr[m](i, k));
       if(dry_aero.cld_aero_nmr[m].data()) {
-        dry_aero.cld_aero_nmr[m](i, k) = PF::calculate_drymmr_from_wetmmr(
-            wet_aero.cld_aero_nmr[m](i, k), qv_ik);
+        dry_aero.cld_aero_nmr[m](i, k) = to_dry(wet_aero.cld_aero_nmr[m](i, k));
       }
       for(int a = 0; a < num_aero_species(); ++a) {
         if(dry_aero.int_aero_mmr[m][a].data()) {
-          dry_aero.int_aero_mmr[m][a](i, k) = PF::calculate_drymmr_from_wetmmr(
-              wet_aero.int_aero_mmr[m][a](i, k), qv_ik);
+          dry_aero.int_aero_mmr[m][a](i, k) = to_dry(wet_aero.int_aero_mmr[m][a](i, k));
         }
         if(dry_aero.cld_aero_mmr[m][a].data()) {
-          dry_aero.cld_aero_mmr[m][a](i, k) = PF::calculate_drymmr_from_wetmmr(
-              wet_aero.cld_aero_mmr[m][a](i, k), qv_ik);
+          dry_aero.cld_aero_mmr[m][a](i, k) = to_dry(wet_aero.cld_aero_mmr[m][a](i, k));
         }
       }
     }
     for(int g = 0; g < num_aero_gases(); ++g) {
       dry_aero.gas_mmr[g](i, k) =
-          PF::calculate_drymmr_from_wetmmr(wet_aero.gas_mmr[g](i, k), qv_ik);
+          to_dry(wet_aero.gas_mmr[g](i, k));
     }
   });
 }
@@ -739,27 +796,32 @@ void compute_wet_mixing_ratios(const Team &team, const DryAtmosphere &dry_atm,
   int i              = column_index;
   Kokkos::parallel_for(Kokkos::TeamVectorRange(team, nlev), [&](const int k) {
     const auto qv_ik = dry_atm.qv(i, k);
+    // With water loading, the dry mass also excludes the condensates
+    const auto to_wet = [&](const Real drymmr) -> Real {
+      if (dry_atm.water_loading) {
+        return PF::calculate_wetmmr_from_drymmr_dp_based(
+            drymmr, dry_atm.pseudo_density(i, k), dry_atm.pseudo_density_dry(i, k));
+      }
+      // BFB-only: legacy qv-only form, kept so water_loading=false matches baselines; remove in follow-up PR
+      return PF::calculate_wetmmr_from_drymmr(drymmr, qv_ik);
+    };
     for(int m = 0; m < num_aero_modes(); ++m) {
-      wet_aero.int_aero_nmr[m](i, k) = PF::calculate_wetmmr_from_drymmr(
-          dry_aero.int_aero_nmr[m](i, k), qv_ik);
+      wet_aero.int_aero_nmr[m](i, k) = to_wet(dry_aero.int_aero_nmr[m](i, k));
       if(wet_aero.cld_aero_nmr[m].data()) {
-        wet_aero.cld_aero_nmr[m](i, k) = PF::calculate_wetmmr_from_drymmr(
-            dry_aero.cld_aero_nmr[m](i, k), qv_ik);
+        wet_aero.cld_aero_nmr[m](i, k) = to_wet(dry_aero.cld_aero_nmr[m](i, k));
       }
       for(int a = 0; a < num_aero_species(); ++a) {
         if(wet_aero.int_aero_mmr[m][a].data()) {
-          wet_aero.int_aero_mmr[m][a](i, k) = PF::calculate_wetmmr_from_drymmr(
-              dry_aero.int_aero_mmr[m][a](i, k), qv_ik);
+          wet_aero.int_aero_mmr[m][a](i, k) = to_wet(dry_aero.int_aero_mmr[m][a](i, k));
         }
         if(wet_aero.cld_aero_mmr[m][a].data()) {
-          wet_aero.cld_aero_mmr[m][a](i, k) = PF::calculate_wetmmr_from_drymmr(
-              dry_aero.cld_aero_mmr[m][a](i, k), qv_ik);
+          wet_aero.cld_aero_mmr[m][a](i, k) = to_wet(dry_aero.cld_aero_mmr[m][a](i, k));
         }
       }
     }
     for(int g = 0; g < num_aero_gases(); ++g) {
       wet_aero.gas_mmr[g](i, k) =
-          PF::calculate_wetmmr_from_drymmr(dry_aero.gas_mmr[g](i, k), qv_ik);
+          to_wet(dry_aero.gas_mmr[g](i, k));
     }
   });
 }

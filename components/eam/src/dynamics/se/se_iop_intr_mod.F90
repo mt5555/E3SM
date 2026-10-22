@@ -22,7 +22,7 @@ use ppgrid, only: begchunk
 use pmgrid
 use parallel_mod, only: par
 #ifdef MODEL_THETA_L
-use element_ops, only: get_R_star, get_pottemp
+use element_ops, only: get_q_dry, get_R_star, get_pottemp
 use eos, only: pnh_and_exner_from_eos
 #endif
 use element_ops, only: get_temperature
@@ -258,7 +258,7 @@ subroutine apply_iop_forcing(elem,hvcoord,hybrid,tl,n,t_before_advance,nets,nete
   integer :: nelemd_todo, np_todo
   real (kind=real_kind), dimension(np,np,nlev)  :: p, T_v, phi, pnh
   real (kind=real_kind), dimension(np,np,nlev+1) :: dpnh_dp_i
-  real (kind=real_kind), dimension(np,np,nlev)  :: dp, exner, vtheta_dp, Rstar
+  real (kind=real_kind), dimension(np,np,nlev)  :: dp, exner, vtheta_dp, Rstar, q_dry
   real (kind=real_kind), dimension(np,np,nlev) :: dpscm
   real (kind=real_kind) :: cp_star1, cp_star2, qval_t1, qval_t2, dt
   real (kind=real_kind), dimension(nlev,pcnst) :: stateQ_in, q_update, stateQ_sub
@@ -390,7 +390,8 @@ subroutine apply_iop_forcing(elem,hvcoord,hybrid,tl,n,t_before_advance,nets,nete
         ! If running theta-l model then the updated temperature needs
         !   to be converted back to potential temperature on reference levels,
         !   which is what dp_coupling expects
-        call get_R_star(Rstar,elem(ie)%state%Q(:,:,:,1))
+        call get_q_dry(q_dry,elem(ie)%state%Q)
+        call get_R_star(Rstar,q_dry,elem(ie)%state%Q(:,:,:,1))
         elem(ie)%state%vtheta_dp(i,j,:,t1) = (t_update(:)*Rstar(i,j,:)*dp(i,j,:))/&
               (Rgas*exner(i,j,:))
 #else
@@ -479,7 +480,7 @@ subroutine iop_domain_relaxation(elem,hvcoord,hybrid,t1,dp,nelemd_todo,np_todo,d
   real (kind=real_kind), dimension(np,np,nlev+1) :: dpnh_dp_i
   real (kind=real_kind), dimension(nlev) :: domain_q, domain_t, domain_u, domain_v, rtau
   real (kind=real_kind), dimension(nlev) :: relax_t, relax_q, relax_u, relax_v, iop_pres
-  real (kind=real_kind), dimension(np,np,nlev) :: temperature, Rstar, pnh, exner, dp
+  real (kind=real_kind), dimension(np,np,nlev) :: temperature, Rstar, pnh, exner, dp, q_dry
   real (kind=real_kind) :: uref, vref
   integer :: ie, i, j, k
 
@@ -563,7 +564,8 @@ subroutine iop_domain_relaxation(elem,hvcoord,hybrid,t1,dp,nelemd_todo,np_todo,d
 #ifdef MODEL_THETA_L
     dp(:,:,:) = elem(ie)%state%dp3d(:,:,:,t1)
     ! Get updated Rstar to convert to density weighted potential temperature
-    call get_R_star(Rstar,elem(ie)%state%Q(:,:,:,1))
+    call get_q_dry(q_dry,elem(ie)%state%Q)
+    call get_R_star(Rstar,q_dry,elem(ie)%state%Q(:,:,:,1))
     ! Get updated exner
     call pnh_and_exner_from_eos(hvcoord,elem(ie)%state%vtheta_dp(:,:,:,t1),&
            dp,elem(ie)%state%phinh_i(:,:,:,t1),pnh,exner,dpnh_dp_i)

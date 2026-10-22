@@ -97,6 +97,16 @@ void run(std::mt19937_64& engine)
       ekat::genRandArray(p_sub,      engine, pdf_pres);
       ekat::genRandArray(qv_sub,     engine, pdf_qv);
     } 
+    // Dry mass with a condensate, as with water loading: dp*(1-qv-qc)
+    const auto& pseudo_dens_dry_v = input_fields["pseudo_density_dry"].get_view<Real**>();
+    const Real qc = pdf_qv(engine);
+    Kokkos::parallel_for("", policy, KOKKOS_LAMBDA(const MemberType& team) {
+      const int icol = team.league_rank();
+      Kokkos::parallel_for(Kokkos::TeamVectorRange(team,nlevs), [&] (const Int& ilev) {
+        pseudo_dens_dry_v(icol,ilev) = pseudo_dens_v(icol,ilev)*(1 - qv_mid_v(icol,ilev) - qc);
+      });
+    });
+    Kokkos::fence();
 
     // Run diagnostic and compare with manual calculation
     diag->compute(t0);
@@ -107,7 +117,9 @@ void run(std::mt19937_64& engine)
     Kokkos::parallel_for("", policy, KOKKOS_LAMBDA(const MemberType& team) {
       const int icol = team.league_rank();
       Kokkos::parallel_for(Kokkos::TeamVectorRange(team,nlevs), [&] (const Int& ilev) {
-        auto dz = PF::calculate_dz(pseudo_dens_v(icol,ilev),p_mid_v(icol,ilev),T_mid_v(icol,ilev),qv_mid_v(icol,ilev));
+        const Real q_dry = pseudo_dens_dry_v(icol,ilev)/pseudo_dens_v(icol,ilev);
+        auto dz = PF::calculate_dz(pseudo_dens_v(icol,ilev),p_mid_v(icol,ilev),T_mid_v(icol,ilev),
+                                   q_dry,qv_mid_v(icol,ilev),true);
         atm_density_v(icol,ilev) = PF::calculate_density(pseudo_dens_v(icol,ilev),dz);
       });
       team.team_barrier();

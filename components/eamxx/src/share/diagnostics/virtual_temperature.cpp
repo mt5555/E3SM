@@ -18,6 +18,8 @@ VirtualTemperature (const ekat::Comm& comm, const ekat::ParameterList& params,
 
   m_field_in_names.push_back("T_mid");
   m_field_in_names.push_back("qv");
+  m_field_in_names.push_back("pseudo_density");
+  m_field_in_names.push_back("pseudo_density_dry");
 
   FieldIdentifier fid (name(), scalar3d, K, grid_name);
   m_diagnostic_output = Field(fid);
@@ -33,12 +35,17 @@ void VirtualTemperature::compute_impl()
   const auto& virtualT = m_diagnostic_output.get_view<Real**>();
   const auto& T_mid    = m_fields_in.at("T_mid").get_view<const Real**>();
   const auto& qv_mid   = m_fields_in.at("qv").get_view<const Real**>();
+  const auto& dp       = m_fields_in.at("pseudo_density").get_view<const Real**>();
+  const auto& dp_dry   = m_fields_in.at("pseudo_density_dry").get_view<const Real**>();
 
   const int ncols = m_grid->get_num_local_dofs();
   const int nlevs = m_grid->get_num_vertical_levels();
 
   auto lambda = KOKKOS_LAMBDA(const int icol, const int ilev) {
-    virtualT(icol,ilev) = PF::calculate_virtual_temperature(T_mid(icol,ilev),qv_mid(icol,ilev));
+    // R* from the dry-air mass fraction, as in the dycore. With water loading
+    // the dry air also excludes the condensates.
+    const Real q_dry = dp_dry(icol,ilev)/dp(icol,ilev);
+    virtualT(icol,ilev) = PF::calculate_virtual_temperature(T_mid(icol,ilev),q_dry,qv_mid(icol,ilev));
   };
   MDRange policy ({0,0},{ncols,nlevs});
   Kokkos::parallel_for("VirtualTemperature",policy,lambda);

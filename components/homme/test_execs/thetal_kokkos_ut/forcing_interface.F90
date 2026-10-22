@@ -127,6 +127,21 @@ contains
     enddo
   end subroutine dynamics_forcing_f90
 
+  subroutine set_water_loading_f90(wl,ncond,cond_idx) bind(c)
+    use control_mod, only: water_loading, num_condensates, condensate_idx
+    !
+    ! Inputs
+    !
+    logical (kind=c_bool), intent(in) :: wl
+    integer (kind=c_int),  intent(in) :: ncond
+    integer (kind=c_int),  intent(in) :: cond_idx(ncond)  ! 0-based (C++) indices
+
+    water_loading = wl
+    num_condensates = ncond
+    condensate_idx = 0
+    condensate_idx(1:ncond) = cond_idx + 1
+  end subroutine set_water_loading_f90
+
   subroutine tracers_forcing_f90(dt,np1,np1_qdp,hydrostatic,moist,adjustment) bind(c)
     use control_mod,      only: use_moisture, theta_hydrostatic_mode
     use dimensions_mod,   only: nelemd

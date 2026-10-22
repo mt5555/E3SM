@@ -51,6 +51,9 @@ void TurbulentMountainStress::create_requests()
   add_field<Required>("T_mid",          scalar3d_mid, K,    grid_name,            ps);
   add_field<Required>("p_mid",          scalar3d_mid, Pa,   grid_name,            ps);
   add_field<Required>("pseudo_density", scalar3d_mid, Pa,   grid_name,            ps);
+  if (m_params.get<bool>("water_loading", false)) {
+    add_field<Required>("pseudo_density_dry", scalar3d_mid, Pa, grid_name, ps);
+  }
   add_field<Required>("sgh30",          scalar2d    , m,    grid_name);
   add_field<Required>("landfrac",       scalar2d    , none, grid_name);
   add_tracer<Required>("qv", m_grid, kg/kg, ps);
@@ -74,6 +77,12 @@ void TurbulentMountainStress::run_impl (const double /* dt */)
   // Helper views
   const auto pseudo_density = get_field_in("pseudo_density").get_view<const Pack**>();
   const auto qv             = get_field_in("qv").get_view<const Pack**>();
+
+  // Condensate water loading: R* uses the dry mass (pseudo_density_dry is not used if disabled)
+  const bool water_loading = m_params.get<bool>("water_loading", false);
+  const auto pseudo_density_dry = water_loading
+                                ? get_field_in("pseudo_density_dry").get_view<const Pack**>()
+                                : pseudo_density;
   const auto dz             = m_buffer.dz;
   const auto z_int          = m_buffer.z_int;
 
@@ -102,6 +111,7 @@ void TurbulentMountainStress::run_impl (const double /* dt */)
     const auto p_mid_i = ekat::subview(p_mid, i);
     const auto exner_i = ekat::subview(exner, i);
     const auto pseudo_density_i = ekat::subview(pseudo_density, i);
+    const auto pseudo_density_dry_i = ekat::subview(pseudo_density_dry, i);
     const auto T_mid_i = ekat::subview(T_mid, i);
     const auto qv_i = ekat::subview(qv, i);
     const auto dz_i = ekat::subview(dz, i);
@@ -112,7 +122,9 @@ void TurbulentMountainStress::run_impl (const double /* dt */)
     PF::exner_function<Pack>(team, p_mid_i, exner_i);
 
     // Calculate z_mid
-    PF::calculate_dz(team, pseudo_density_i, p_mid_i, T_mid_i, qv_i, dz_i);
+    // Dry-air mass fraction, per unit total mass
+    const auto q_dry = [&](const int k) { return pseudo_density_dry_i(k)/pseudo_density_i(k); };
+    PF::calculate_dz(team, pseudo_density_i, p_mid_i, T_mid_i, q_dry, qv_i, water_loading, dz_i);
     const Real z_surf = 0.0; // For now, set z_int(i,nlevs) = z_surf = 0
     team.team_barrier();
     PF::calculate_z_int(team, nlevs, dz_i, z_surf, z_int_i);

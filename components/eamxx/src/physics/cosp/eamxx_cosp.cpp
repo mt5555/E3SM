@@ -73,6 +73,9 @@ void Cosp::create_requests()
   add_field<Required>("T_mid",            scalar3d_mid, K,      grid_name);
   add_field<Required>("phis",             scalar2d    , m2/s2,  grid_name);
   add_field<Required>("pseudo_density",   scalar3d_mid, Pa,     grid_name);
+  if (m_params.get<bool>("water_loading", false)) {
+    add_field<Required>("pseudo_density_dry", scalar3d_mid, Pa, grid_name);
+  }
   add_field<Required>("cldfrac_rad",      scalar3d_mid, none,   grid_name);
   add_tracer<Required>("qv", m_grid, kg/kg);
   add_tracer<Required>("qc", m_grid, kg/kg);
@@ -244,6 +247,11 @@ void Cosp::run_impl (const double dt)
     const auto p_mid_d = get_field_in("p_mid").get_view<const Real**>();
     const auto phis_d  = get_field_in("phis").get_view<const Real*>();
     const auto pseudo_density_d = get_field_in("pseudo_density").get_view<const Real**>();
+    // Condensate water loading: R* uses the dry mass (pseudo_density_dry is not used if disabled)
+    const bool water_loading = m_params.get<bool>("water_loading", false);
+    const auto pseudo_density_dry_d = water_loading
+                                    ? get_field_in("pseudo_density_dry").get_view<const Real**>()
+                                    : pseudo_density_d;
     const auto z_mid_d = m_z_mid.get_view<Real**>();
     const auto z_int_d = m_z_int.get_view<Real**>();
     const auto ncol = m_num_cols;
@@ -265,10 +273,13 @@ void Cosp::run_impl (const double dt)
         const auto z_mid_s = ekat::subview(z_mid_d, i);
         const Real z_surf  = phis_d(i) / g;
         const auto pseudo_density_s = ekat::subview(pseudo_density_d, i);
+        const auto pseudo_density_dry_s = ekat::subview(pseudo_density_dry_d, i);
 
         // 1. Compute dz (recycle z_mid_s as a temporary)
         const auto dz_s = z_mid_s; // 
-        PF::calculate_dz(team, pseudo_density_s, p_mid_s, T_mid_s, qv_s, dz_s);
+        // Dry-air mass fraction, per unit total mass
+        const auto q_dry = [&](const int k) { return pseudo_density_dry_s(k)/pseudo_density_s(k); };
+        PF::calculate_dz(team, pseudo_density_s, p_mid_s, T_mid_s, q_dry, qv_s, water_loading, dz_s);
         team.team_barrier();
 
         // 2. Compute z_int (vertical scan)

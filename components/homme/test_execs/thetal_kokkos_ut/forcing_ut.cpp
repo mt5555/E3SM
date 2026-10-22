@@ -41,6 +41,7 @@ void set_forcing_pointers_f90 (Real*& q_ptr, Real*& fq_ptr, Real*& qdp_ptr,
                                Real*& fm_ptr, Real*& ft_ptr,
                                Real*& fvtheta_ptr, Real*& fphi_ptr);
 void tracers_forcing_f90 (const Real& dt, const int& np1, const int& np1_qdp, const bool& hydrostatic, const bool& moist, const bool& adjustment);
+void set_water_loading_f90 (const bool& water_loading, const int& num_condensates, const int* condensate_idx);
 void dynamics_forcing_f90 (const Real& dt, const int& np1);
 void cleanup_f90();
 } // extern "C"
@@ -162,6 +163,23 @@ TEST_CASE("forcing", "forcing") {
       std::cout << " -> hydrostatic mode: " << (hydrostatic ? "true" : "false") << "\n";
       for (const bool use_moisture: {false,true}) {
         std::cout << "   -> moisture: " << (use_moisture ? "moist" : "dry") << "\n";
+        for (const bool water_loading : {false,true}) {
+        // Water loading needs moisture and at least one tracer besides vapor
+        if (water_loading && (!use_moisture || p.qsize<2)) continue;
+        std::cout << "    -> water loading: " << (water_loading ? "true" : "false") << "\n";
+
+        // Condensates: tracers qsize-1,...,1 (at most 3), in decreasing order so the
+        // list is not sorted
+        auto& wl = p.water_loading;
+        wl = WaterLoading();
+        if (water_loading) {
+          wl.enabled = true;
+          for (int iq=p.qsize-1; iq>=1 && wl.num_condensates<3; --iq) {
+            wl.condensate_idx[wl.num_condensates++] = iq;
+          }
+        }
+        set_water_loading_f90(wl.enabled,wl.num_condensates,wl.condensate_idx);
+
         for (const bool adjustment : {true,false}) {
           std::cout << "     -> adjustment: " << (adjustment ? "true" : "false") << "\n";
 
@@ -275,8 +293,13 @@ TEST_CASE("forcing", "forcing") {
             }
           }
         }
+        } // water_loading
       }
     }
+
+    // Leave water loading off for any later use of the params
+    p.water_loading = WaterLoading();
+    set_water_loading_f90(false,0,p.water_loading.condensate_idx);
   }
 
   SECTION ("states") {

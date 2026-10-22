@@ -46,6 +46,7 @@ module homme_params_mod
   public :: set_homme_int_param_f90
   public :: set_homme_real_param_f90
   public :: set_homme_bool_param_f90
+  public :: set_homme_condensate_idx_f90
 
   logical :: nsplit_inited = .false.
 
@@ -152,7 +153,7 @@ contains
   end function get_homme_real_param_f90
 
   function get_homme_bool_param_f90 (param_name_c) result(param_value) bind(c)
-    use control_mod,    only: moisture, do_3d_turbulence
+    use control_mod,    only: moisture, do_3d_turbulence, water_loading
     !
     ! Input(s)
     !
@@ -175,6 +176,8 @@ contains
         endif
       case("do_3d_turbulence")
         param_value = do_3d_turbulence
+      case("water_loading")
+        param_value = water_loading
       case default
         call abortmp ("[get_homme_bool_param_f90] Error! Unrecognized parameter name.")
         param_value = .false.
@@ -275,7 +278,7 @@ contains
   end subroutine set_homme_real_param_f90
 
   subroutine set_homme_bool_param_f90 (param_name_c, param_value) bind(c)
-    use control_mod,    only: moisture, use_moisture
+    use control_mod,    only: moisture, use_moisture, water_loading
     !
     ! Input(s)
     !
@@ -298,10 +301,31 @@ contains
           moisture = 'dry'
           use_moisture = .false.
         endif
+      case("water_loading")
+        water_loading = param_value
       case default
         call abortmp ("[set_homme_bool_param_f90] Error! Unrecognized parameter name.")
     end select 
 
   end subroutine set_homme_bool_param_f90
+
+  ! Set the condensate tracers removed from dp3d when computing dry mass (water loading).
+  ! The input indices are 0-based (C++); control_mod stores them 1-based.
+  subroutine set_homme_condensate_idx_f90 (num_condensates_in, condensate_idx_in) bind(c)
+    use control_mod,    only: num_condensates, condensate_idx, max_condensates
+    !
+    ! Input(s)
+    !
+    integer (kind=c_int), intent(in) :: num_condensates_in
+    integer (kind=c_int), intent(in) :: condensate_idx_in(num_condensates_in)
+
+    if (num_condensates_in > max_condensates) then
+      call abortmp ("[set_homme_condensate_idx_f90] Error! Too many condensates for control_mod::max_condensates.")
+    endif
+    num_condensates = num_condensates_in
+    condensate_idx = 0
+    condensate_idx(1:num_condensates) = condensate_idx_in + 1
+
+  end subroutine set_homme_condensate_idx_f90
 
 end module homme_params_mod

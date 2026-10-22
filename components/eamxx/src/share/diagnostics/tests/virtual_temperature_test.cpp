@@ -23,6 +23,7 @@ template<typename DeviceT>
 void run(std::mt19937_64& engine)
 {
   using PF         = scream::PhysicsFunctions<DeviceT>;
+  using PC         = scream::physics::Constants<Real>;
   using KT         = ekat::KokkosTypes<DeviceT>;
   using ExecSpace  = typename KT::ExeSpace;
   using MemberType = typename KT::MemberType;
@@ -44,7 +45,8 @@ void run(std::mt19937_64& engine)
   // Construct random input data
   using RPDF = std::uniform_real_distribution<Real>;
   RPDF pdf_qv(1e-6,1e-3),
-       pdf_temp(200.0,400.0);
+       pdf_temp(200.0,400.0),
+       pdf_dp(1.0,100.0);
 
   // A time stamp
   util::TimeStamp t0 ({2022,1,1},{0,0,0});
@@ -73,19 +75,34 @@ void run(std::mt19937_64& engine)
   // Initialize the diagnostic
   diag->initialize();
 
-  // Run tests
-  {
+  // Run tests, without and with condensate in the dry mass
+  for (const bool condensate : {false, true}) {
     // Construct random data to use for test
     // Get views of input data and set to random values
     const auto& T_mid_f = input_fields["T_mid"];
     const auto& T_mid_v = T_mid_f.get_view<Real**>();
     const auto& qv_mid_f = input_fields["qv"];
     const auto& qv_mid_v = qv_mid_f.get_view<Real**>();
+    const auto& dp_v     = input_fields["pseudo_density"].get_view<Real**>();
+    const auto& dp_dry_v = input_fields["pseudo_density_dry"].get_view<Real**>();
     for (int icol=0;icol<ncols;icol++) {
       const auto& T_sub = ekat::subview(T_mid_v,icol);
       const auto& qv_sub = ekat::subview(qv_mid_v,icol);
+      const auto& dp_sub = ekat::subview(dp_v,icol);
       ekat::genRandArray(T_sub,  engine, pdf_temp);
       ekat::genRandArray(qv_sub, engine, pdf_qv);
+      ekat::genRandArray(dp_sub, engine, pdf_dp);
+    }
+    // dp_dry = dp*(1-qv-qc), with qc=0 if there is no condensate
+    {
+      const auto qc = condensate ? Real(pdf_qv(engine)) : Real(0);
+      Kokkos::parallel_for("", policy, KOKKOS_LAMBDA(const MemberType& team) {
+        const int icol = team.league_rank();
+        Kokkos::parallel_for(Kokkos::TeamVectorRange(team,nlevs), [&] (const Int& ilev) {
+          dp_dry_v(icol,ilev) = dp_v(icol,ilev)*(1 - qv_mid_v(icol,ilev) - qc);
+        });
+      });
+      Kokkos::fence();
     }
 
     // Run diagnostic and compare with manual calculation
@@ -94,15 +111,33 @@ void run(std::mt19937_64& engine)
     Field virtualT_f = diag_out.clone();
     virtualT_f.deep_copy(0);
     const auto& virtualT_v = virtualT_f.get_view<Real**>();
+    // Reference written out, Tv = T*R*/Rd = T*(q_dry + qv*Rv/Rd), rather than
+    // calling the PhysicsFunctions helper the diagnostic uses
+    const Real rv_rd = 1/PC::ep_2.value;
     Kokkos::parallel_for("", policy, KOKKOS_LAMBDA(const MemberType& team) {
       const int icol = team.league_rank();
       Kokkos::parallel_for(Kokkos::TeamVectorRange(team,nlevs), [&] (const Int& ilev) {
-        virtualT_v(icol,ilev) = PF::calculate_virtual_temperature(T_mid_v(icol,ilev),qv_mid_v(icol,ilev));
+        const Real q_dry = dp_dry_v(icol,ilev)/dp_v(icol,ilev);
+        virtualT_v(icol,ilev) = T_mid_v(icol,ilev)*(q_dry + rv_rd*qv_mid_v(icol,ilev));
       });
       team.team_barrier();
     });
     Kokkos::fence();
     REQUIRE(views_are_equal(diag_out,virtualT_f));
+
+    // With condensate, the result differs from the qv-only virtual temperature
+    if (condensate) {
+      Field virtualT_qv_f = diag_out.clone();
+      const auto& virtualT_qv_v = virtualT_qv_f.get_view<Real**>();
+      Kokkos::parallel_for("", policy, KOKKOS_LAMBDA(const MemberType& team) {
+        const int icol = team.league_rank();
+        Kokkos::parallel_for(Kokkos::TeamVectorRange(team,nlevs), [&] (const Int& ilev) {
+          virtualT_qv_v(icol,ilev) = PF::calculate_virtual_temperature(T_mid_v(icol,ilev),qv_mid_v(icol,ilev));
+        });
+      });
+      Kokkos::fence();
+      REQUIRE(not views_are_equal(diag_out,virtualT_qv_f));
+    }
   }
  
 } // run()

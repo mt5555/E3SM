@@ -420,6 +420,7 @@ void GllFvRemapImpl
   
   const bool use_moisture = m_data.use_moisture;
   const bool theta_hydrostatic_mode = m_data.theta_hydrostatic_mode;
+  const auto water_loading = Context::singleton().get<SimulationParams>().water_loading;
 
   const bool want_dp_fv_out = dp_fv_out_ptr != nullptr;
   VPhys2T dp_fv_out;
@@ -509,9 +510,10 @@ void GllFvRemapImpl
         else
           eos.compute_pnh_and_exner(kv, vthdp_ij, Homme::subview(phi_i,ie,timeidx,i,j),
                                     wrk_ij, exner_ij);
-        // theta_g
-        ops.get_temperature(kv, eos, use_moisture, dp3d_ij, exner_ij, vthdp_ij,
-                            Homme::subview(q_g,ie,0,i,j), wrk_ij, th_g_ij);
+        // theta_g. If not moist, qsize might be 0, so q_g is not accessed.
+        const auto q_ij = [&] (const int iq, const int k) -> Scalar { return q_g(ie,iq,i,j,k); };
+        ops.get_temperature(kv, eos, use_moisture, water_loading, dp3d_ij, exner_ij, vthdp_ij,
+                            q_ij, wrk_ij, th_g_ij);
         const auto& rexner_ij = exner_ij;
         parallel_for(tvr, [&] (int k) { // could avoid this in H case but then would lose BFB
           rexner_ij(k) = p_g_ij(k);

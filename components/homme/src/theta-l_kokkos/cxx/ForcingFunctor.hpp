@@ -246,6 +246,7 @@ public:
     m_adjustment = adjustment;
 
     m_moist = use_moisture;
+    m_wl = Context::singleton().get<SimulationParams>().water_loading;
 
     Kokkos::parallel_for("temperature, NH perturb press, FQps",m_policy_tracers_pre,*this);
     Kokkos::fence();
@@ -332,16 +333,15 @@ public:
         });
       }
 
-      // Compute Rstar
+      // Compute Rstar from the dry-air mass fraction. Rstar first holds q_dry, then
+      // R* (computed in place). If not moist, qsize might be 0, so Q is not accessed.
       auto Rstar = Homme::subview(m_Rstar,kv.team_idx,igp,jgp);
-      m_elem_ops.get_R_star (kv, m_moist,
-                             (m_moist ?
-                              Homme::subview(m_tracers.Q,kv.ie,0,igp,jgp) :
-                              // If not moist, qsize might be 0, so we can't use
-                              // Q. Use Rstar as an unused argument in its
-                              // place.
-                              Rstar),
-                             Rstar);
+      auto q_old = [&](const int iq, const int ilev)->Scalar {
+        return m_tracers.Q(kv.ie,iq,igp,jgp,ilev);
+      };
+      auto qv_old = [&](const int ilev)->Scalar { return q_old(0,ilev); };
+      m_elem_ops.get_q_dry (kv, m_moist, m_wl, q_old, Rstar);
+      m_elem_ops.get_R_star (kv, m_moist, m_wl, Rstar, qv_old, Rstar);
 
       // Compute temperature
       auto tn1 = Homme::subview(m_tn1,kv.ie,igp,jgp);
@@ -351,9 +351,22 @@ public:
       });
 
       if (m_moist) {
+        // The mass of dp changes with the water species: vapor (tracer 0) and, with
+        // water loading, the condensates. This keeps the dry mass fixed.
+        // Each sum starts from the vapor term, so without condensates it is unchanged.
         auto fq = Homme::subview(m_tracers.fq,kv.ie,0,igp,jgp);
         auto q = Homme::subview(m_tracers.Q,kv.ie,0,igp,jgp);
         auto qdp = Homme::subview(m_tracers.qdp,kv.ie,m_np1_qdp,0,igp,jgp);
+        const int ncond = m_wl.enabled ? m_wl.num_condensates : 0;
+        auto fq_c = [&](const int ic) {
+          return Homme::subview(m_tracers.fq,kv.ie,m_wl.condensate_idx[ic],igp,jgp);
+        };
+        auto q_c = [&](const int ic) {
+          return Homme::subview(m_tracers.Q,kv.ie,m_wl.condensate_idx[ic],igp,jgp);
+        };
+        auto qdp_c = [&](const int ic) {
+          return Homme::subview(m_tracers.qdp,kv.ie,m_np1_qdp,m_wl.condensate_idx[ic],igp,jgp);
+        };
         auto dp_adj = Homme::subview(m_dp_adj,kv.ie,igp,jgp);
         if (m_adjustment) {
           Real added_mass = 0;
@@ -362,7 +375,11 @@ public:
             [&](const int &k, Real &accumulator) {
               const int ilev = k / VECTOR_SIZE;
               const int ivec = k % VECTOR_SIZE;
-              accumulator += dp(ilev)[ivec]*(fq(ilev)[ivec]-q(ilev)[ivec]);
+              Real dq = fq(ilev)[ivec]-q(ilev)[ivec];
+              for (int ic=0; ic<ncond; ++ic) {
+                dq += fq_c(ic)(ilev)[ivec]-q_c(ic)(ilev)[ivec];
+              }
+              accumulator += dp(ilev)[ivec]*dq;
             },added_mass);
           Kokkos::single(Kokkos::PerThread(kv.team), [&]() {
             ps += added_mass;
@@ -370,7 +387,11 @@ public:
           if (!m_adjust_ps) {
             Kokkos::parallel_for(Kokkos::ThreadVectorRange(kv.team,NUM_LEV),
                                 [&](const int ilev) {
-              dp_adj(ilev) = dp(ilev) + dp(ilev)*(fq(ilev)-q(ilev));
+              Scalar dq = fq(ilev)-q(ilev);
+              for (int ic=0; ic<ncond; ++ic) {
+                dq += fq_c(ic)(ilev)-q_c(ic)(ilev);
+              }
+              dp_adj(ilev) = dp(ilev) + dp(ilev)*dq;
             });
           }
         } else {
@@ -378,7 +399,11 @@ public:
           Dispatch<ExecSpace>::parallel_reduce(
             kv.team, Kokkos::ThreadVectorRange(kv.team, NUM_PHYSICAL_LEV),
             [&](const int &k, Real &accumulator) {
-              accumulator += compute_fqdt(k,fq,qdp)/m_dt;
+              Real fqdt = compute_fqdt(k,fq,qdp);
+              for (int ic=0; ic<ncond; ++ic) {
+                fqdt += compute_fqdt(k,fq_c(ic),qdp_c(ic));
+              }
+              accumulator += fqdt/m_dt;
             },ps_forcing);
           Kokkos::single(Kokkos::PerThread(kv.team), [&]() {
             ps += ps_forcing*m_dt;
@@ -386,7 +411,11 @@ public:
           if (!m_adjust_ps) {
             Kokkos::parallel_for(Kokkos::ThreadVectorRange(kv.team,NUM_LEV),
                                 [&](const int& ilev) {
-              dp_adj(ilev) = dp(ilev) + compute_fqdt_pack(ilev,fq,qdp);
+              Scalar fqdt = compute_fqdt_pack(ilev,fq,qdp);
+              for (int ic=0; ic<ncond; ++ic) {
+                fqdt += compute_fqdt_pack(ilev,fq_c(ic),qdp_c(ic));
+              }
+              dp_adj(ilev) = dp(ilev) + fqdt;
             });
           }
         }
@@ -441,19 +470,22 @@ public:
       const int igp = idx / NP;
       const int jgp = idx % NP;
 
-      // Compute Rstar
-      auto Rstar = Homme::subview(m_Rstar,kv.team_idx,igp,jgp);
-      m_elem_ops.get_R_star (kv, m_moist,
-                             (m_moist ?
-                              Homme::subview(m_tracers.Q,kv.ie,0,igp,jgp) :
-                              Rstar),
-                             Rstar);
-
       auto tn1    = Homme::subview(m_tn1,kv.ie,igp,jgp);
       auto pnh    = Homme::subview(m_pnh,kv.ie,igp,jgp);
       auto exner  = Homme::subview(m_exner,kv.ie,igp,jgp);
       auto dp     = Homme::subview(m_state.m_dp3d,kv.ie,m_np1,igp,jgp);
       auto dp_adj = Homme::subview(m_dp_adj,kv.ie,igp,jgp);
+
+      // Compute Rstar from the dry-air mass fraction of the updated Q (relative to
+      // dp_adj when moist). Rstar first holds q_dry, then R* (computed in place).
+      // If not moist, qsize might be 0, so Q is not accessed.
+      auto Rstar = Homme::subview(m_Rstar,kv.team_idx,igp,jgp);
+      auto q_new = [&](const int iq, const int ilev)->Scalar {
+        return m_tracers.Q(kv.ie,iq,igp,jgp,ilev);
+      };
+      auto qv_new = [&](const int ilev)->Scalar { return q_new(0,ilev); };
+      m_elem_ops.get_q_dry (kv, m_moist, m_wl, q_new, Rstar);
+      m_elem_ops.get_R_star (kv, m_moist, m_wl, Rstar, qv_new, Rstar);
       auto ft     = Homme::subview(m_forcing.m_ft,kv.ie,igp,jgp);
       auto fphi   = Homme::subview(m_forcing.m_fphi,kv.ie,igp,jgp);
       const Real ps = m_state.m_ps_v(kv.ie,m_np1,igp,jgp);
@@ -555,6 +587,7 @@ private:
   int m_np1;
   int m_np1_qdp;
   bool m_moist;
+  WaterLoading m_wl;
   bool m_hydrostatic;
   bool m_adjustment;
   bool m_adjust_ps;

@@ -52,6 +52,9 @@ void SPA::create_requests()
   // Set of fields used strictly as input
   add_field<Required>("p_mid",          scalar3d_mid, Pa,    grid_name, ps);
   add_field<Required>("pseudo_density", scalar3d_mid, Pa,    grid_name, ps);
+  if (m_params.get<bool>("water_loading", false)) {
+    add_field<Required>("pseudo_density_dry", scalar3d_mid, Pa, grid_name, ps);
+  }
   add_field<Required>("T_mid",          scalar3d_mid, K,     grid_name, ps);
   add_field<Required>("qv",             scalar3d_mid, kg/kg, grid_name, ps);
 
@@ -129,6 +132,11 @@ void SPA::run_impl (const double /* dt */)
   const auto pseudo_density = get_field_in ("pseudo_density").get_view<const Real**>();
   const auto T_mid          = get_field_in ("T_mid").get_view<const Real**>();
   const auto qv             = get_field_in ("qv").get_view<const Real**>();
+  // Condensate water loading: R* uses the dry mass (pseudo_density_dry is not used if disabled)
+  const bool water_loading  = m_params.get<bool>("water_loading", false);
+  const auto pseudo_density_dry = water_loading
+                                ? get_field_in ("pseudo_density_dry").get_view<const Real**>()
+                                : pseudo_density;
   auto aero_tau_sw    = get_field_out("aero_tau_sw").get_view<Real***>();
   auto aero_tau_lw    = get_field_out("aero_tau_lw").get_view<Real***>();
   auto dz = m_dz;
@@ -138,13 +146,15 @@ void SPA::run_impl (const double /* dt */)
     const int icol = team.league_rank();
 
     const auto pseudo_density_icol = ekat::subview(pseudo_density, icol);
+    const auto pseudo_density_dry_icol = ekat::subview(pseudo_density_dry, icol);
     const auto p_mid_icol = ekat::subview(p_mid, icol);
     const auto T_mid_icol = ekat::subview(T_mid, icol);
     const auto qv_icol = ekat::subview(qv, icol);
     auto dz_icol = ekat::subview(dz, icol);
 
-    PF::calculate_dz(team, pseudo_density_icol, p_mid_icol,
-                      T_mid_icol, qv_icol, dz_icol);
+    // Dry-air mass fraction, per unit total mass
+    const auto q_dry = [&](const int k) { return pseudo_density_dry_icol(k)/pseudo_density_icol(k); };
+    PF::calculate_dz(team, pseudo_density_icol, p_mid_icol, T_mid_icol, q_dry, qv_icol, water_loading, dz_icol);
     team.team_barrier();
 
     Kokkos::parallel_for(Kokkos::TeamVectorRange(team, nswbands*nlev), [&] (const int&idx) {

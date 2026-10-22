@@ -36,6 +36,7 @@ TEST_CASE("aerocom_cld") {
   // Create fields
   FieldIdentifier tm_fid("T_mid", scalar2d_layout, K, grid->name());
   FieldIdentifier pd_fid("pseudo_density", scalar2d_layout, Pa, grid->name());
+  FieldIdentifier pdd_fid("pseudo_density_dry", scalar2d_layout, Pa, grid->name());
   FieldIdentifier pm_fid("p_mid", scalar2d_layout, Pa, grid->name());
   FieldIdentifier qv_fid("qv", scalar2d_layout, kg / kg, grid->name());
   FieldIdentifier qc_fid("qc", scalar2d_layout, kg / kg, grid->name());
@@ -54,6 +55,9 @@ TEST_CASE("aerocom_cld") {
   Field pd(pd_fid);
   pd.allocate_view();
   pd.get_header().get_tracking().update_time_stamp(t0);
+  Field pdd(pdd_fid);
+  pdd.allocate_view();
+  pdd.get_header().get_tracking().update_time_stamp(t0);
   Field pm(pm_fid);
   pm.allocate_view();
   pm.get_header().get_tracking().update_time_stamp(t0);
@@ -102,6 +106,7 @@ TEST_CASE("aerocom_cld") {
     // Randomize everything to add ensure resiliency
     randomize_uniform(tm, seed++, 0, 0.05);
     randomize_uniform(pd, seed++, 0, 0.05);
+    pdd.deep_copy(pd);  // dry mass: any positive value will do here
     randomize_uniform(pm, seed++, 0, 0.05);
     randomize_uniform(qv, seed++, 0, 0.05);
     randomize_uniform(qc, seed++, 0, 0.05);
@@ -118,6 +123,7 @@ TEST_CASE("aerocom_cld") {
 
     diag->set_input_field(tm);
     diag->set_input_field(pd);
+    diag->set_input_field(pdd);
     diag->set_input_field(pm);
     diag->set_input_field(qv);
     diag->set_input_field(qc);
@@ -145,6 +151,7 @@ TEST_CASE("aerocom_cld") {
     cd.deep_copy(1.0);
     tm.deep_copy(300.0);
     pd.deep_copy(10.0);
+    pdd.deep_copy(10.0);
     pm.deep_copy(100.0);
     qv.deep_copy(1.0);
     qc.deep_copy(1.0);

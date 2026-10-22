@@ -82,8 +82,10 @@ public:
         const Pack& pseudo_density_pack(pseudo_density(icol,ipack));
         const Pack& pseudo_density_dry_pack(pseudo_density_dry(icol,ipack));
 
-        //compute dz from full pressure
-        dz(icol,ipack) = PF::calculate_dz(pseudo_density_pack, pmid_pack, T_atm_pack, qv(icol,ipack));
+        //compute dz from full pressure (with water loading, R* uses the dry-air mass fraction)
+        const Pack q_dry_pack = pseudo_density_dry_pack/pseudo_density_pack;
+        dz(icol,ipack) = PF::calculate_dz(pseudo_density_pack, pmid_pack, T_atm_pack,
+                                          q_dry_pack, qv(icol,ipack), water_loading);
 
         /*----------------------------------------------------------------------------------------------------------------------
          *Wet to dry mixing ratios:
@@ -174,6 +176,8 @@ public:
     view_2d       dz;
     // Add runtime_options as a member variable
     P3F::P3Runtime runtime_opts;
+    // Condensate water loading: pseudo_density includes the condensates
+    bool water_loading = false;
     // Assigning local variables
     void set_variables(const int ncol, const int nlev,
            const view_2d_const& pmid_, const view_2d_const& pmid_dry_,
