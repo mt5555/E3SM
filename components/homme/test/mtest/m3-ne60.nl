@@ -6,16 +6,21 @@
   partmethod        = 4                         ! mesh parition method: 4 = space filling curve
   topology          = "cube"                    ! mesh type: cubed sphere
   test_case         = "mtest3"       ! test identifier: Circular Mountain, with shear
+  dcmip_rayleigh_depth = -1                  ! Rayleigh friction sponge depth (m) below model top, <0: test default, 0: off
   ne                = 60                        ! number of elements per cube face
   qsize             = 0                         ! num tracer fields
   ndays             = 0                         ! num simulation days: 0 => use nmax steps
-  nmax              = 72000                     ! 7200s / 0.1s per step = 72000 steps
-  statefreq         = 1000                      ! number of steps between screen dumps
+  nmax              = 8000                      ! 7200s / 0.9s per step = 8000 steps
+  statefreq         = 400                       ! number of steps between screen dumps
   restartfreq       = -1                        ! don't write restart files if < 0
   runtype           = 0                         ! 0 => new run
-  tstep             = 0.1                       ! largest timestep in seconds
+  tstep             = 0.9                       ! largest timestep in seconds
+  dt_remap_factor   = 1                         ! turn on vertical remap
+  dt_tracer_factor  = 1
+  vert_remap_q_alg  = 10
+  vert_remap_u_alg  = 11
   integration       = 'explicit'                ! explicit time integration
-  tstep_type        = 5                         ! 1 => default method
+  tstep_type        = 9                         ! 1 => default method
   nu                = 2.2e7                       ! reduced planet hyperviscosity hv/166.7^3
   nu_s              = 2.2e7
   nu_p              = 2.2e7
@@ -29,10 +34,10 @@
 /
 &analysis_nl
   output_dir        = "./movies/"               ! destination dir for netcdf file
-  output_timeunits  = 0,                        ! 1=days, 2=hours, 0=timesteps
-  output_frequency  = 72000,                     ! 100s /0.1s = 1000 steps between outputs
-  output_varnames1  ='T','ps','u','v','omega'   ! variables to write to file
-  interp_type       = 0                         ! 0=native grid, 1=bilinear
+  output_timeunits  = 3,                        ! 1=days, 2=hours, 3=seconds, 0=timesteps
+  output_frequency  = 360,                      ! seconds between outputs
+  output_varnames1  ='T','ps','u','v','w','geo_i','pnh'   ! variables to write to file
+  interp_type       = 1                         ! 0=native grid, 1=bilinear
   output_type       ='netcdf'                   ! netcdf or pnetcdf
   num_io_procs      = 16         
 /
