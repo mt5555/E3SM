@@ -265,6 +265,11 @@ module control_mod
   real (kind=real_kind), public :: dcmip16_mu_q    = -1       ! additional uniform viscosity (scalar tracers); -1 implies it defaults to dcmip16_mu_s value
   real (kind=real_kind), public :: interp_lon0     = 0.0d0
 
+  ! depth (m, measured down from the model top) of the Rayleigh friction sponge
+  ! layer in the dcmip2012 test 2-x and mtest test cases.
+  !   < 0: use the test case default,  0: sponge off,  > 0: sponge depth
+  real (kind=real_kind), public :: dcmip_rayleigh_depth = -1
+  
 !PLANAR
   real (kind=real_kind), private, parameter :: tol_zero=1e-10 !tolerance to determine if lx,ly,sx,sy are set
 

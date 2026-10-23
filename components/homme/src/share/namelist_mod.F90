@@ -34,6 +34,7 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
     planar_slice,     &
     numnodes,      &
     sub_case,      &
+    dcmip_rayleigh_depth, &
     statefreq,     &       ! number of steps per printstate call
     restartfreq,   &
     restartfile,   &       ! name of the restart file for INPUT
@@ -350,6 +351,7 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
     namelist /ctl_nl/test_case,       &             ! test case idenitfier
       planar_slice,     &             ! const y-dir
       sub_case,        &             ! generic test case parameter
+      dcmip_rayleigh_depth, &        ! DCMIP/mtest Rayleigh friction sponge depth (m), <0: test default, 0: off
       nmax,            &             ! number of steps
       ndays,           &             ! number of days to simulate
       restartfreq,     &
@@ -458,6 +460,7 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
     se_ly = 0
 #endif
     sub_case      = 1
+    dcmip_rayleigh_depth = -1
     numnodes      = -1
     restartfreq   = -100
     restartdir    = "./restart/"
@@ -766,6 +769,7 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
     call MPI_bcast(ne_y,              1,MPIinteger_t,par%root,par%comm,ierr)
     call MPI_bcast(qsize,           1,MPIinteger_t,par%root,par%comm,ierr)
     call MPI_bcast(sub_case,        1,MPIinteger_t,par%root,par%comm,ierr)
+    call MPI_bcast(dcmip_rayleigh_depth,1,MPIreal_t,par%root,par%comm,ierr)
     call MPI_bcast(statefreq,       1,MPIinteger_t,par%root,par%comm,ierr)
     call MPI_bcast(restartfreq,     1,MPIinteger_t,par%root,par%comm,ierr)
     call MPI_bcast(runtype,         1,MPIinteger_t,par%root,par%comm,ierr)
@@ -1162,6 +1166,7 @@ end if
        write(iulog,*)"readnl: test_case     = ",TRIM(test_case)
        write(iulog,*)"readnl: omega         = ",omega
        write(iulog,*)"readnl: sub_case      = ",sub_case
+       write(iulog,*)"readnl: dcmip_rayleigh_depth = ",dcmip_rayleigh_depth
        write(iulog,*)"readnl: ndays         = ",ndays
        write(iulog,*)"readnl: nmax          = ",nmax
        write(iulog,*)"readnl: pertlim       = ",pertlim

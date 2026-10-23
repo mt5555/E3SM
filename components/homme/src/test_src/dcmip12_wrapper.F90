@@ -9,7 +9,7 @@ module dcmip12_wrapper
 
 ! Implementation of the dcmip2012 dycore tests for the preqx dynamics target
 
-use control_mod,          only: test_case, dcmip4_moist, dcmip4_X, vanalytic, sub_case
+use control_mod,          only: test_case, dcmip4_moist, dcmip4_X, vanalytic, dcmip_rayleigh_depth
 use dcmip2012_test1_2_3,  only: test1_advection_deformation, test1_advection_hadley, test1_advection_orography, &
                                 test2_steady_state_mountain, test2_schaer_mountain,test3_gravity_wave
 use dcmip2012_test1_conv_mod, only: test1_conv_advection, test1_conv_print_results
@@ -44,6 +44,7 @@ real(rl), dimension(:,:,:,:), allocatable :: u0, v0                     ! storag
 real(rl):: zi(nlevp), zm(nlev)                                          ! z coordinates
 real(rl):: ddn_hyai(nlevp), ddn_hybi(nlevp)                             ! vertical derivativess of hybrid coefficients
 real(rl):: tau,ztop_sponge,zc_sponge                                    ! Rayleigh friction sponge layer coefficieints
+logical :: rayleigh_on = .true.                                         ! Rayleigh friction sponge layer enabled
 contains
 
 !_____________________________________________________________________
@@ -437,8 +438,6 @@ subroutine dcmip2012_test2_x(elem,hybrid,hvcoord,nets,nete,shear)
 
   !set \tau to 25.0, bound to X, [\tau]=[sec]
   tau = 25.0d0
-  ztop_sponge=ztop
-  zc_sponge=20000.d0
 
   if (vanalytic==1) then
      if (hybrid%masterthread) write(iulog,*) 'using analytic veritcal coordinates'
@@ -447,6 +446,9 @@ subroutine dcmip2012_test2_x(elem,hybrid,hvcoord,nets,nete,shear)
      call set_hybrid_coefficients(hvcoord,hybrid,  hvcoord%etai(1), 1.0_rl)! set hybrid A and B from eta levels
      call set_layer_locations(hvcoord, .true., hybrid%masterthread)
   endif
+
+  ! sponge layer: test default starts at 20 km
+  call set_rayleigh_sponge(ztop, 20000.d0, hybrid)
   
   ! set initial conditions
   do ie = nets,nete; 
@@ -528,31 +530,13 @@ subroutine mtest_init(elem,hybrid,hvcoord,nets,nete,testid)
      ztop=zi(1)
   endif
 
-  ! sponge layer
-  ! test defaults
-  if (testid .eq. 1) then
-    zc_sponge=10000.d0
-  else
-    zc_sponge=20000.d0
-  endif
-  ztop_sponge=ztop
+  ! sponge layer: test default starts at 10 km (m1) or 20 km (m2, m3)
   !set \tau to 25*3 for this test, [\tau]=[sec], X=500/3
   tau = 75.0d0
-
-  if (sub_case==2) then   ! disable sponge layer
-    zc_sponge=ztop + 1000.d0    
-    ztop_sponge=ztop + 1000.d0
-  endif
-  if (sub_case>2) then
-    ! sponge layer covers "sub_case" number of vertical levels
-    zc_sponge = zi(1+sub_case)
-    ztop_sponge = ztop
-  endif
-  if (hybrid%masterthread) then
-     write(iulog,*) 'Rayleigh friction sponge layer active levels (zc <= zm(k) <= ztop):'
-     do k=1,nlev
-        if (zm(k) >= zc_sponge .and. zm(k) <= ztop_sponge) write(iulog,*) '  k=',k,' zm(k)=',zm(k)
-     enddo
+  if (testid .eq. 1) then
+    call set_rayleigh_sponge(ztop, 10000.d0, hybrid)
+  else
+    call set_rayleigh_sponge(ztop, 20000.d0, hybrid)
   endif
 
 
@@ -604,10 +588,54 @@ subroutine dcmip2012_test2_x_forcing(elem,hybrid,hvcoord,nets,nete,n,dt)
   forall(k=1:nlev) z(:,:,k)=zm(k)
   forall(k=1:nlevp) z_i(:,:,k)=zi(k)
 
-    do ie=nets,nete
-     call set_forcing_rayleigh_friction(elem(ie),z,z_i,ztop_sponge,zc_sponge,tau,u0(:,:,:,ie),v0(:,:,:,ie),n)
+  do ie=nets,nete
+     if (rayleigh_on) then
+        call set_forcing_rayleigh_friction(elem(ie),z,z_i,ztop_sponge,zc_sponge,tau,u0(:,:,:,ie),v0(:,:,:,ie),n)
+     else
+        elem(ie)%derived%FM = 0
+     endif
   enddo
 
+
+end subroutine
+
+!_____________________________________________________________________
+subroutine set_rayleigh_sponge(ztop,zc_default,hybrid)
+
+  ! set the Rayleigh friction sponge layer extent from namelist dcmip_rayleigh_depth:
+  !   < 0: test case default (sponge from zc_default to ztop)
+  !     0: sponge off
+  !   > 0: sponge from ztop-dcmip_rayleigh_depth to ztop
+
+  real(rl),           intent(in)            :: ztop                     ! model top (m)
+  real(rl),           intent(in)            :: zc_default               ! test case default sponge start height (m)
+  type(hybrid_t),     intent(in)            :: hybrid                   ! hybrid parallel structure
+
+  integer :: k
+
+  ztop_sponge = ztop
+  rayleigh_on = .true.
+  if (dcmip_rayleigh_depth < 0) then
+     zc_sponge = zc_default
+  else if (dcmip_rayleigh_depth == 0) then
+     rayleigh_on = .false.
+     zc_sponge = ztop
+  else
+     if (dcmip_rayleigh_depth > ztop) call abortmp('dcmip_rayleigh_depth exceeds model top')
+     zc_sponge = ztop - dcmip_rayleigh_depth
+  endif
+
+  if (hybrid%masterthread) then
+     if (rayleigh_on) then
+        write(iulog,*) 'Rayleigh friction sponge layer: zc=',zc_sponge,' ztop=',ztop_sponge,' depth=',ztop_sponge-zc_sponge
+        write(iulog,*) 'Rayleigh friction sponge layer active levels (zc <= zm(k) <= ztop):'
+        do k=1,nlev
+           if (zm(k) >= zc_sponge .and. zm(k) <= ztop_sponge) write(iulog,*) '  k=',k,' zm(k)=',zm(k)
+        enddo
+     else
+        write(iulog,*) 'Rayleigh friction sponge layer: off'
+     endif
+  endif
 
 end subroutine
 

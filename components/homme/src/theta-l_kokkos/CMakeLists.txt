@@ -259,3 +259,9 @@ MACRO(THETAL_KOKKOS_SETUP)
   SET(USE_OPENACC FALSE)
 
 ENDMACRO(THETAL_KOKKOS_SETUP)
+
+THETAL_KOKKOS_SETUP()
+############################################################################
+# createTestExec(exec_name exec_type NP NC PLEV USE_PIO USE_ENERGY QSIZE_D)
+############################################################################
+createTestExec(theta-l_kokkos theta-l_kokkos ${PREQX_NP} ${PREQX_NC} ${PREQX_PLEV} ${PREQX_USE_PIO} ${PREQX_USE_ENERGY} ${QSIZE_D})
