@@ -17,6 +17,10 @@ omega = u0/rearth has eigenvalues -i m omega, m integer (e^{i m phi'}, phi' the
 longitude about the rotation axis), for any alpha.  Eigenvalues are reported in
 units of omega.  Dense eigenvalue problems are reduced with the rotational
 symmetry of the grid and the flow (opmat_sym.py).
+
+NE15 takes ~10 minutes on 4 cores (all cases, B, and L - nu B for 4 nu and
+2 cases).  If the cores are shared with other jobs, set OPENBLAS_NUM_THREADS=1:
+an oversubscribed multithreaded OpenBLAS made the dense eigensolver ~15x slower.
 """
 import argparse
 import os
@@ -220,21 +224,25 @@ def plot_spectra(res, ne, om, out):
 
 
 def plot_accuracy_nearest_integer(res, ne, om, out):
-    """distance of Im(lambda)/omega to the nearest integer, and |Re|/omega, vs |Im|/omega"""
-    fig, axs = plt.subplots(1, 2, figsize=(12, 4.2), sharey=True)
-    for ax, sc in zip(axs, (1, 4)):
-        for f, v in [(2, 'curlpsi'), (2, 'analytic'), (0, 'curlpsi'), (0, 'analytic')]:
-            lam = res[(ne, sc, f, v)]['lam'] / om
-            y = lam.imag
-            dist = np.abs(lam + 1j * np.round(-y))   # |lam/omega - (-i m)|, m = nearest integer
-            ax.scatter(np.abs(y), dist + 1e-16, s=2, color=COLORS[(f'f{f}', v)], linewidths=0,
-                       label=f'{FORM[f]}, {v}')
-        ax.set_yscale('log')
-        ax.set_ylim(1e-14, 1)
+    """distance of lambda/omega to the nearest exact eigenvalue -i m (a lower bound for
+    the error), vs |Im|/omega.  rows: split / conservation form, columns: alpha"""
+    fig, axs = plt.subplots(2, 2, figsize=(12, 7.5), sharex=True, sharey=True)
+    for row, f in enumerate((2, 0)):
+        for ax, sc in zip(axs[row], (1, 4)):
+            for v in ('analytic', 'curlpsi'):
+                lam = res[(ne, sc, f, v)]['lam'] / om
+                dist = np.abs(lam + 1j * np.round(-lam.imag))   # m = nearest integer to -Im
+                ax.scatter(np.abs(lam.imag), np.maximum(dist, 1e-15), s=2 if v == 'analytic' else 4,
+                           color=COLORS[(f'f{f}', v)], linewidths=0, label=v,
+                           alpha=1.0 if v == 'analytic' else 0.6)
+            ax.set_yscale('log')
+            ax.set_ylim(1e-15, 1)
+            style_ax(ax, f'NE{ne}, alpha={ALPHA[sc]}, {FORM[f]} form')
+            ax.legend(markerscale=4, loc='lower right')
+    for ax in axs[1]:
         ax.set_xlabel('|Im(lambda)|/omega')
-        style_ax(ax, f'NE{ne}, alpha={ALPHA[sc]}')
-    axs[0].set_ylabel('|lambda/omega + i m|, m = nearest integer to -Im/omega')
-    axs[1].legend(markerscale=4, loc='lower right')
+    for ax in axs[:, 0]:
+        ax.set_ylabel('|lambda/omega + i m|, m nearest integer')
     fig.tight_layout()
     fig.savefig(os.path.join(out, f'accuracy_nearest_integer_ne{ne}.png'))
     plt.close(fig)
@@ -369,7 +377,7 @@ def plot_hypervis(resA, ne, cases, nus, om, out):
         ax.set_xlabel('Re(lambda)/omega  (symlog; -1/(2 pi) = 1/e damping per revolution)')
         style_ax(ax, f'NE{ne} {label(*case)}: spectrum of A = L - nu B')
     axs[0][0].set_ylabel('Im(lambda)/omega')
-    axs[0][-1].legend(markerscale=4, loc='upper left')
+    axs[0][-1].legend(markerscale=4, loc='center right')
     fig.tight_layout()
     fig.savefig(os.path.join(out, f'hypervis_ne{ne}.png'))
     plt.close(fig)
@@ -463,7 +471,8 @@ def ne30_rk4_hv_growth(cache, mats30, dB, rep):
     for nu in (0, 1e14, 2e14):
         dts = np.arange(1500, 3400, 5.0)
         amp = np.array([(np.abs(rk4_amp(dt * lam)) * (1 - dt * nu * q)).max() for dt in dts])
-        bad = dts[amp ** (36 * 86400 / dts) > 100]
+        with np.errstate(over='ignore'):
+            bad = dts[amp ** (36 * 86400 / dts) > 100]
         rep.append(f'    nu={nu:g}: smallest dt with growth >100 over 36 days (these modes, first order): '
                    f'{bad.min() if len(bad) else np.nan:.0f} s')
 
@@ -564,10 +573,8 @@ def main():
             # hyperviscosity spectra
             if ne == max(args.ne):
                 nus = [0.0] + [nu * (30 / ne) ** 4 for nu in NU30]
-                # alpha=pi/4 blocks are 4x larger than alpha=0 blocks, and with nu>0 the dense
-                # nonsymmetric eigensolver is ~10x slower: only one nu>0 for alpha=pi/4
                 hv_cases = [(1, 2, 'analytic'), (4, 2, 'analytic')]
-                hv_nus = {hv_cases[0]: nus, hv_cases[1]: nus[:2]}
+                hv_nus = {c: nus for c in hv_cases}
                 rep.append(f'A = L - nu B, NE{ne}: max Re(lambda)/omega and damping per revolution')
                 for case in hv_cases:
                     dc = load(os.path.join(args.mats, name(ne, *case)), ops=('L',))
@@ -581,6 +588,12 @@ def main():
                         rep.append(f'  {label(*case)} nu={nu:.3g}: maxRe={lam.real.max() / om:.3e}, '
                                    f'per-rev factor: |Im|<10 omega median {np.median(fac[low]):.4f}, '
                                    f'|Im|>=10 median {np.median(fac[~low]):.3g}, min {fac.min():.2e}')
+                # does the smallest hyperviscosity remove the conservation-form growth?
+                for case in [(4, 0, 'analytic'), (1, 0, 'analytic')]:
+                    dc = load(os.path.join(args.mats, name(ne, *case)), ops=('L',))
+                    rA = solve_A(cache, dc, dref['B'], nus[1], f'{name(ne, *case)}-A-nu{nus[1]:.3g}')
+                    rep.append(f'  {label(*case)} nu={nus[1]:.3g}: maxRe={rA["lam"].real.max() / om:.3e} '
+                               f'(nu=0: {res[(ne,) + case]["lam"].real.max() / om:.3e})')
                 plot_hypervis(resA, ne, hv_cases, hv_nus, om, args.out)
 
         if all((ne,) + c in res for c in CASES):
