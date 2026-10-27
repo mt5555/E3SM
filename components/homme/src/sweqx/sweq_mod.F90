@@ -53,6 +53,7 @@ contains
     use restart_io_mod, only : readrestart, writerestart
     !-----------------
     use advance_mod, only : advance_nonstag
+    use opmat_mod, only : opmat_requested
     !-----------------
 #ifdef TRILINOS
     use implicit_mod, only : advance_imp_nonstag
@@ -453,6 +454,8 @@ contains
           call sweq_invariants(elem,190,tl,pmean,edge3,deriv,hybrid,nets,nete)
        endif  ! if initial run 
 
+    if (opmat_requested()) call abortmp('SWEQX_OPMAT requires integration="runge_kutta"')
+
     ! reset timestep counter.  New more accurate leapfrog bootstrap routine takes
     ! one extra timestep to get started.  dont count that timestep, otherwise
     ! times will all be off by tstep. Also, full_imp is just starting.
@@ -820,7 +823,7 @@ contains
     !-----------------
     use physical_constants, only : dd_pi
     !-----------------
-    use parallel_mod, only : parallel_t, syncmp
+    use parallel_mod, only : parallel_t, syncmp, haltmp
     !-----------------
     use thread_mod, only : hthreads
     !-----------------
@@ -872,6 +875,7 @@ contains
 
     use rk_mod, only     : RkInit
     use types_mod, only : rk_t
+    use opmat_mod, only : opmat_requested, opmat_extract
     
     implicit none
 
@@ -1118,6 +1122,13 @@ contains
 
           call sweq_invariants(elem,190,tl,pmean,edge3,deriv,hybrid,nets,nete)
        endif  ! if initial run 
+
+    ! optional (environment variable SWEQX_OPMAT): write the matrices of the
+    ! transport and hyperviscosity operators for eigenvalue analysis, then stop
+    if (opmat_requested()) then
+       call opmat_extract(elem,edge3,deriv,hybrid,tl,nets,nete)
+       call haltmp("sweqx: SWEQX_OPMAT operator matrices written, exiting")
+    endif
 
     ! reset timestep counter.  New more accurate leapfrog bootstrap routine takes
     ! one extra timestep to get started.  dont count that timestep, otherwise
