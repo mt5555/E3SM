@@ -58,6 +58,13 @@ module shallow_water_mod
   real (kind=real_kind), public,  parameter  :: lonc0  = 1.5D0*DD_PI  ! init longitude of cosine bell center
   real (kind=real_kind), private, parameter  :: u0     = 2.0D0*DD_PI*rearth/(12.0*86400.0) ! adv. wind velocity
   real (kind=real_kind), private             :: alpha  = 0.0D0        ! angle of wind advection rel. to equator
+  ! swtc1 prescribed velocity, selected by the environment variable SWEQX_TC1_VELOCITY
+  ! (see tc1_init_velocity):
+  !   "analytic" (default): solid-body rotation evaluated at each GLL node (tc1_velocity)
+  !   "curlpsi"           : u = DSS(curl(psi khat)) for the rigid-body stream function psi,
+  !                         whose discrete divergence (DSS'd) is zero to roundoff
+  logical, private :: tc1_curlpsi = .false.
+  real (kind=real_kind), private, allocatable :: tc1_vcurl(:,:,:,:) ! (np,np,2,nelemd), contravariant
   real (kind=real_kind), private, parameter  :: gh0_tc2 = 2.94D4      ! m^2/s^2 (p. 218 of Williamson)
 
   ! ================================================
@@ -191,6 +198,10 @@ module shallow_water_mod
   public  :: tc1_init_state  ! Initialize test case 1: Cosine Bell
   public  :: tc1_init_pmean  ! Initialize pmean for test case 1
   public  :: tc1_velocity
+  public  :: tc1_init_velocity       ! select the swtc1 prescribed velocity (SWEQX_TC1_VELOCITY)
+  public  :: tc1_prescribed_velocity ! the selected swtc1 velocity for one element
+  public  :: tc1_streamfunction
+  public  :: tc1_parameters
   public  :: tc1_geopotential
   public  :: tc1_phi         ! test case 1 on unstaggered grid (nair) 
   public  :: grad_cosine_bell
@@ -659,6 +670,117 @@ contains
   ! test case 1, during the timestep.
   !
   ! ===========================================
+
+  ! rigid-body stream function: u = curl(psi khat) (HOMME curl_sphere convention)
+  ! is the solid-body rotation tc1_velocity
+  function tc1_streamfunction(sphere) result(psi)
+    type (spherical_polar_t), intent(in) :: sphere(np,np)
+    real (kind=real_kind)                :: psi(np,np)
+    psi = rearth*u0*( SIN(sphere%lat)*COS(alpha) - COS(sphere%lon)*COS(sphere%lat)*SIN(alpha) )
+  end function tc1_streamfunction
+
+  ! swtc1 parameters, for diagnostics.  alpha is set by tc1_init_state
+  subroutine tc1_parameters(u0_out,alpha_out,rearth_out,curlpsi_out)
+    real (kind=real_kind), intent(out) :: u0_out,alpha_out,rearth_out
+    logical, intent(out) :: curlpsi_out
+    u0_out = u0
+    alpha_out = alpha
+    rearth_out = rearth
+    curlpsi_out = tc1_curlpsi
+  end subroutine tc1_parameters
+
+  ! ===========================================
+  !
+  ! tc1_init_velocity:
+  !
+  ! Select the swtc1 prescribed velocity from the environment variable
+  ! SWEQX_TC1_VELOCITY ("analytic" (default) or "curlpsi").  For "curlpsi",
+  ! compute and save u = DSS(curl(psi khat)).  Must be called after
+  ! tc1_init_state (which sets alpha).  The velocity is applied in
+  ! advance_mod:set_prescribed_velocity via tc1_prescribed_velocity.
+  !
+  ! ===========================================
+  subroutine tc1_init_velocity(elem,deriv,hybrid,nets,nete)
+    use derivative_mod, only : curl_sphere
+    use viscosity_base, only : make_C0, make_C0_vector
+    use dimensions_mod, only : nelemd
+    use parallel_mod, only : abortmp
+    type (element_t), intent(in) :: elem(:)
+    type (derivative_t), intent(in) :: deriv
+    type (hybrid_t), intent(in) :: hybrid
+    integer, intent(in) :: nets,nete
+
+    character(len=32) :: velname
+    integer :: ie,stat,i,j
+    real (kind=real_kind) :: u(np,np,2,nets:nete), divu(np,np,nets:nete), ua(np,np,2), va(np,np,2)
+    real (kind=real_kind) :: maxdiv,maxdu,maxu
+
+    call get_environment_variable("SWEQX_TC1_VELOCITY",velname,status=stat)
+    if (stat /= 0 .or. len_trim(velname)==0) velname = "analytic"
+    if (trim(velname) == "analytic") then
+       tc1_curlpsi = .false.
+    else if (trim(velname) == "curlpsi") then
+       tc1_curlpsi = .true.
+    else
+       call abortmp("SWEQX_TC1_VELOCITY must be 'analytic' or 'curlpsi'")
+    endif
+    if (hybrid%masterthread .and. hybrid%par%masterproc) &
+         print *,"swtc1 prescribed velocity: ",trim(velname)
+    if (.not. tc1_curlpsi) return
+
+    if (hybrid%hthreads /= 1) call abortmp("SWEQX_TC1_VELOCITY=curlpsi requires 1 thread")
+    do ie=1,nelemd
+       if (elem(ie)%LocalId /= ie) call abortmp("tc1_init_velocity: elem%LocalId /= ie")
+    enddo
+    if (.not. allocated(tc1_vcurl)) allocate(tc1_vcurl(np,np,2,nelemd))
+
+    do ie=nets,nete
+       u(:,:,:,ie) = curl_sphere(tc1_streamfunction(elem(ie)%spherep),deriv,elem(ie))
+    end do
+    call make_C0_vector(u,elem,hybrid,nets,nete)
+
+    ! diagnostics: DSS'd divergence of u, and difference from the analytic velocity
+    maxdiv=0; maxdu=0; maxu=0
+    do ie=nets,nete
+       divu(:,:,ie) = divergence_sphere(u(:,:,:,ie),deriv,elem(ie))
+       va = tc1_velocity(elem(ie)%spherep,elem(ie)%Dinv)   ! contravariant
+       do j=1,np
+          do i=1,np
+             ua(i,j,1) = elem(ie)%D(i,j,1,1)*va(i,j,1) + elem(ie)%D(i,j,1,2)*va(i,j,2)
+             ua(i,j,2) = elem(ie)%D(i,j,2,1)*va(i,j,1) + elem(ie)%D(i,j,2,2)*va(i,j,2)
+          end do
+       end do
+       maxdu = max(maxdu, maxval(abs(u(:,:,:,ie)-ua)))
+       maxu  = max(maxu,  maxval(abs(ua)))
+    end do
+    call make_C0(divu,elem,hybrid,nets,nete)
+    do ie=nets,nete
+       maxdiv = max(maxdiv,maxval(abs(divu(:,:,ie))))
+    end do
+    print '(a,i6,a,es12.4,a,es12.4,a,es12.4)','DSS(curl psi) velocity, rank',hybrid%par%rank, &
+         ': max|DSS div u|=',maxdiv,'  max|u-u_analytic|=',maxdu,'  max|u|=',maxu
+
+    ! save in contravariant components
+    do ie=nets,nete
+       do j=1,np
+          do i=1,np
+             tc1_vcurl(i,j,1,ie) = elem(ie)%Dinv(i,j,1,1)*u(i,j,1,ie) + elem(ie)%Dinv(i,j,1,2)*u(i,j,2,ie)
+             tc1_vcurl(i,j,2,ie) = elem(ie)%Dinv(i,j,2,1)*u(i,j,1,ie) + elem(ie)%Dinv(i,j,2,2)*u(i,j,2,ie)
+          end do
+       end do
+    end do
+  end subroutine tc1_init_velocity
+
+  ! the selected swtc1 prescribed velocity (contravariant) for one element
+  function tc1_prescribed_velocity(elem) result(v)
+    type (element_t), intent(in) :: elem
+    real (kind=real_kind)        :: v(np,np,2)
+    if (tc1_curlpsi) then
+       v = tc1_vcurl(:,:,:,elem%LocalId)
+    else
+       v = tc1_velocity(elem%spherep,elem%Dinv)
+    endif
+  end function tc1_prescribed_velocity
 
   function tc1_velocity(sphere,D) result(v)
 

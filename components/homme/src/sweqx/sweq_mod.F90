@@ -23,6 +23,7 @@ contains
     use shallow_water_mod, only : tc1_init_state, tc2_init_state, tc5_init_state, tc6_init_state, tc5_invariants, &
          tc8_init_state, vortex_init_state, vortex_errors, sj1_init_state, tc6_errors, &
          tc1_errors, tc2_errors, tc5_errors, sweq_invariants, swirl_init_state, swirl_errors, sj1_errors, tc1_velocity,&
+         tc1_init_velocity, &
          toy_chemistry_forcing , planar_dbl_vrtx_init_state, planar_dbl_vrtx_invariants
     !-----------------
 
@@ -305,6 +306,7 @@ contains
              ! Recover the initial state for diagnostic purposes
              !==================================================
              call tc1_init_state(elem,nets,nete,pmean)
+             call tc1_init_velocity(elem,deriv,hybrid,nets,nete)
           else if (test_case(1:5) == "swtc2") then
              if (hybrid%masterthread) print *,"Restarting swtc2..."
              !==================================================
@@ -362,6 +364,7 @@ contains
           if (test_case(1:5) == "swtc1") then
              if (hybrid%masterthread) print *,"initializing swtc1..."
              call tc1_init_state(elem,nets,nete,pmean)
+             call tc1_init_velocity(elem,deriv,hybrid,nets,nete)
              call tc1_errors(elem, 7, tl, pmean, hybrid, nets, nete)
           else if (test_case(1:5) == "swtc2") then
              if (hybrid%masterthread) print *,"initializing swtc2..."
@@ -832,7 +835,7 @@ contains
     use shallow_water_mod, only : tc1_init_state, tc2_init_state, tc5_init_state, &
          tc6_init_state, tc5_invariants, tc8_init_state, vortex_init_state, &
          vortex_errors, sj1_init_state, tc6_errors, tc1_errors, tc2_errors, &
-         tc5_errors, sweq_invariants, swirl_init_state, swirl_errors, sj1_errors,&
+         tc5_errors, sweq_invariants, swirl_init_state, swirl_errors, sj1_errors, tc1_init_velocity, &
          kmass_swirl, toy_chemistry_forcing, planar_dbl_vrtx_init_state, planar_dbl_vrtx_invariants
     !-----------------
 #ifdef PIO_INTERP
@@ -973,6 +976,7 @@ contains
              ! Recover the initial state for diagnostic purposes
              !==================================================
              call tc1_init_state(elem,nets,nete,pmean)
+             call tc1_init_velocity(elem,deriv,hybrid,nets,nete)
           else if (test_case(1:5) == "swtc2") then
              if (hybrid%masterthread) print *,"Restarting swtc2..."
              !==================================================
@@ -1040,6 +1044,7 @@ contains
           if (test_case(1:5) == "swtc1") then
              if (hybrid%masterthread) print *,"initializing swtc1..."
              call tc1_init_state(elem,nets,nete,pmean)
+             call tc1_init_velocity(elem,deriv,hybrid,nets,nete)
           else if (test_case(1:5) == "swtc2") then
              if (hybrid%masterthread) print *,"initializing swtc2..."
              call tc2_init_state(elem,nets,nete,pmean)
