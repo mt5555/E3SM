@@ -1064,11 +1064,11 @@ contains
 
 
   subroutine set_prescribed_velocity(elem,n0,time,deriv)
-  use control_mod, only :  test_case
+  use control_mod, only :  test_case, dg_flux
   use element_mod, only : element_t
   use dimensions_mod, only : nlev
   use derivative_mod, only : derivative_t, curl_sphere
-  use shallow_water_mod, only : tc1_velocity, vortex_velocity, swirl_velocity, tc1_streamfunction
+  use shallow_water_mod, only : tc1_prescribed_velocity, vortex_velocity, swirl_velocity, tc1_streamfunction
   implicit none
 
   type (element_t)     , intent(inout) :: elem
@@ -1081,9 +1081,9 @@ contains
 
   ! the prescribed velocity is the same on every level: compute it once, then copy
   if (test_case=="swtc1") then
-     if (tc1_velocity_mode==1 .and. present(deriv)) then
-        ! curl of the stream function: its strong divergence is zero to roundoff
-        ! within each element, and its normal component is continuous across edges
+     if (dg_flux>=0 .and. tc1_velocity_mode==1 .and. present(deriv)) then
+        ! DG: curl of the stream function in each element: its strong divergence is zero
+        ! to roundoff within each element, and its normal component is continuous across edges
         ulatlon = curl_sphere(tc1_streamfunction(elem%spherep),deriv,elem)
         do j=1,np
            do i=1,np
@@ -1092,7 +1092,8 @@ contains
            enddo
         enddo
      else
-        elem%state%v(:,:,:,1,n0)=tc1_velocity(elem%spherep,elem%Dinv)
+        ! CG: analytic solid-body rotation, or DSS(curl psi): see tc1_init_velocity
+        elem%state%v(:,:,:,1,n0)=tc1_prescribed_velocity(elem)
      endif
   else if (test_case=="vortex") then
      elem%state%v(:,:,:,1,n0)=vortex_velocity(time,elem%spherep,elem%Dinv)
