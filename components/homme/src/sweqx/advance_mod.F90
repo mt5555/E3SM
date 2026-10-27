@@ -1021,7 +1021,7 @@ contains
   use control_mod, only :  test_case
   use element_mod, only : element_t
   use dimensions_mod, only : nlev
-  use shallow_water_mod, only : tc1_velocity, vortex_velocity, swirl_velocity
+  use shallow_water_mod, only : tc1_prescribed_velocity, vortex_velocity, swirl_velocity
   implicit none
 
   type (element_t)     , intent(inout) :: elem
@@ -1032,7 +1032,8 @@ contains
 
   ! the prescribed velocity is the same on every level: compute it once, then copy
   if (test_case=="swtc1") then
-     elem%state%v(:,:,:,1,n0)=tc1_velocity(elem%spherep,elem%Dinv)
+     ! analytic solid-body rotation, or DSS(curl psi): see tc1_init_velocity
+     elem%state%v(:,:,:,1,n0)=tc1_prescribed_velocity(elem)
   else if (test_case=="vortex") then
      elem%state%v(:,:,:,1,n0)=vortex_velocity(time,elem%spherep,elem%Dinv)
   else if (test_case=="swirl") then
