@@ -14,8 +14,9 @@
 #
 # output: $outdir/ne${NE}-sc${subcase}-f${adv_form}-${velocity}.*
 #
-# the operators are applied once per nlev=4 matrix columns: NE30 (n=48602) takes
-# about 12150 applications of each operator.
+# with the default coloring the number of operator applications is independent
+# of NE (384 for L, 864 for B with np=4, nlev=4).  SWEQX_OPMAT_COLOR=0 probes one
+# column per level per application (n/4 applications), for checking.
 #
 bld=${bld:-~/scratch/opmat-build}           # built with -DSWEQX_PLEV=4 -DSWEQX_NP=4
 HOMME=${HOMME:-~/codes/acme/components/homme}
