@@ -21,13 +21,21 @@ module opmat_mod
   !
   ! Column j is computed by applying the operator to the continuous delta
   ! function at unique GLL node j (p=1 at every element copy of node j, 0
-  ! elsewhere).  The nlev levels are independent, so nlev columns are probed
-  ! with each operator application.
+  ! elsewhere).  The nlev levels are independent, so nlev probes are applied
+  ! with each operator application.  By default many columns are probed at once
+  ! (coloring): the columns of the same local GLL node of elements of one color,
+  ! with elements of the same color on the same cube face and >= 4 (L) or 6 (B)
+  ! elements apart, so that the supports of their columns (the nodes within 1 (L)
+  ! or 2 (B) elements of the node) are disjoint.  The support of each probed
+  ! column is labeled with DSS operations, which also check that supports do
+  ! not overlap.  This needs 6*16*np^2/nlev (L) and 6*36*np^2/nlev (B)
+  ! operator applications independent of ne, instead of n/nlev.
   !
   ! Enabled with environment variables (so that normal runs and the shared
   ! namelist code are unaffected):
   !   SWEQX_OPMAT=<prefix>        extract, write <prefix>.*, then stop.
   !   SWEQX_OPMAT_OPS=L|B|LB      operators to extract (default LB)
+  !   SWEQX_OPMAT_COLOR=0         probe one column per level at a time (no coloring)
   ! Requires integration="runge_kutta", 1 thread, kmass=-1, and (for L)
   ! test_case="swtc1".  Any number of MPI ranks.
   !
@@ -85,7 +93,8 @@ contains
   subroutine opmat_extract(elem,edge3,deriv,hybrid,tl,nets,nete)
     use dof_mod, only : CreateMetaData
     use control_mod, only : test_case, sub_case, theta_advect_form, kmass, hypervis_order, &
-         hypervis_scaling
+         hypervis_scaling, topology
+    use physical_constants, only : dd_pi
     use shallow_water_mod, only : tc1_parameters
     use advance_mod, only : compute_and_apply_rhs
     use viscosity_mod, only : biharmonic_wk
@@ -114,6 +123,10 @@ contains
     integer(kind=8) :: nnz
     type (triplet_t), allocatable :: buf(:)
     integer :: nbuf
+    logical :: color, owned(np,np,nelemd)
+    character(len=8) :: colorstr
+    integer :: eix(nelemd),eiy(nelemd),ecolor(nelemd),kc,nring,nset,iset,c,a,b
+    real (kind=real_kind) :: lab(np,np,nlev,nets:nete), dxe
 
     call get_environment_variable("SWEQX_OPMAT",prefix,status=stat)
     call get_environment_variable("SWEQX_OPMAT_OPS",ops,status=stat)
@@ -126,6 +139,9 @@ contains
     if (index(ops,"B")>0 .and. hypervis_order/=2) &
          call abortmp("SWEQX_OPMAT: B requires hypervis_order=2")
 
+    call get_environment_variable("SWEQX_OPMAT_COLOR",colorstr,status=stat)
+    color = .not. (stat==0 .and. trim(colorstr)=="0")
+
     write(rankstr,'(a,i4.4,a)') '.r',hybrid%par%rank,'.bin'
 
     ! contiguous global ids of the unique points, on every element copy
@@ -136,6 +152,25 @@ contains
     call MPI_Allreduce(nloc,n,1,MPIinteger_t,MPI_MAX,hybrid%par%comm,ierr)
 #endif
     call tc1_parameters(u0,alpha,rearth,curlpsi)
+
+    owned = .false.
+    do ie=nets,nete
+       do ii=1,elem(ie)%idxP%NumUniquePts
+          owned(elem(ie)%idxP%ia(ii),elem(ie)%idxP%ja(ii),ie) = .true.
+       enddo
+    enddo
+    if (color) then
+       ! element (ix,iy) index on its cube face, from the equiangular corner coordinates
+       if (topology/="cube") call abortmp("SWEQX_OPMAT: coloring requires topology=cube, set SWEQX_OPMAT_COLOR=0")
+       dxe = (dd_pi/2)/ne
+       do ie=nets,nete
+          eix(ie) = floor( (sum(elem(ie)%corners(:)%x)/4 + dd_pi/4)/dxe )
+          eiy(ie) = floor( (sum(elem(ie)%corners(:)%y)/4 + dd_pi/4)/dxe )
+          if (min(eix(ie),eiy(ie))<0 .or. max(eix(ie),eiy(ie))>=ne .or. &
+               elem(ie)%FaceNum<1 .or. elem(ie)%FaceNum>6) &
+               call abortmp("SWEQX_OPMAT: unexpected element coordinates, set SWEQX_OPMAT_COLOR=0")
+       enddo
+    endif
 
     if (hybrid%par%masterproc) then
        print *,'SWEQX_OPMAT: extracting operators ',trim(ops),' to ',trim(prefix),'.*'
@@ -159,6 +194,7 @@ contains
           write(unit,'(a)') 'velocity = analytic'
        endif
        write(unit,'(a,es25.17)') 'hypervis_scaling = ',hypervis_scaling
+       write(unit,'(a,l1)') 'color = ',color
        close(unit)
     endif
 
@@ -181,7 +217,6 @@ contains
 
     allocate(buf(bufsize))
     zero = 0
-    ncall = (n+nlev-1)/nlev
 
     do iop=1,2
        op = 'LB'(iop:iop)
@@ -209,29 +244,60 @@ contains
        enddo
        close(unit)
 
-       ! the matrix: columns ic*nlev+k, k=1..nlev, probed together
+       ! the matrix.  Probe sets: without coloring, set s = column s+1.  With coloring,
+       ! set s = (element color c, local GLL index (a,b)): the columns of the nodes (a,b)
+       ! owned by the elements of color c, whose supports are disjoint.  nlev sets per
+       ! operator application.  lab = column whose support contains each node (0: none)
+       if (color) then
+          kc = merge(4,6,op=='L')      ! same-color elements are >= kc elements apart
+          nring = merge(1,2,op=='L')   ! support of a column: nodes within nring elements
+          do ie=nets,nete
+             ecolor(ie) = (elem(ie)%FaceNum-1)*kc*kc + mod(eix(ie),kc)*kc + mod(eiy(ie),kc)
+          enddo
+          nset = 6*kc*kc*np*np
+       else
+          nset = n
+       endif
+       ncall = (nset+nlev-1)/nlev
        open(newunit=unit,file=trim(prefix)//'.'//op//trim(rankstr),access='stream', &
             form='unformatted',status='replace',action='write')
        nbuf=0; nnz=0
        do ic=0,ncall-1
-          do ie=nets,nete
+          if (color) then
+             lab = 0
              do k=1,nlev
-                col = ic*nlev+k
-                where (fdof(:,:,ie)==col)
-                   elem(ie)%state%p(:,:,k,tl%n0) = 1
-                elsewhere
-                   elem(ie)%state%p(:,:,k,tl%n0) = 0
-                end where
+                iset = ic*nlev+k-1
+                if (iset>=nset) cycle
+                c = iset/(np*np); a = mod(iset,np)+1; b = mod(iset/np,np)+1
+                do ie=nets,nete
+                   if (ecolor(ie)==c .and. owned(a,b,ie)) lab(a,b,k,ie) = fdof(a,b,ie)
+                enddo
              enddo
-          enddo
+             call dss_labels(.false.)       ! label every element copy of the probed nodes
+             do ie=nets,nete
+                elem(ie)%state%p(:,:,:,tl%n0) = merge(1d0,0d0,lab(:,:,:,ie)>0)
+             enddo
+             do i=1,nring
+                call dss_labels(.true.)     ! extend labels to the support
+             enddo
+          else
+             do ie=nets,nete
+                do k=1,nlev
+                   col = ic*nlev+k
+                   elem(ie)%state%p(:,:,k,tl%n0) = merge(1d0,0d0,fdof(:,:,ie)==col)
+                   lab(:,:,k,ie) = merge(col,0,col<=n)
+                enddo
+             enddo
+          endif
           call apply_op(op)
           do ie=nets,nete
              do ii=1,elem(ie)%idxP%NumUniquePts
                 i=elem(ie)%idxP%ia(ii); j=elem(ie)%idxP%ja(ii)
                 row = fdof(i,j,ie)
                 do k=1,nlev
-                   col = ic*nlev+k
-                   if (col<=n .and. y(i,j,k,ie)/=0) then
+                   if (y(i,j,k,ie)/=0) then
+                      col = nint(lab(i,j,k,ie))
+                      if (col<1) call abortmp("SWEQX_OPMAT: nonzero outside the predicted support")
                       nbuf=nbuf+1
                       buf(nbuf)%row = row-1
                       buf(nbuf)%col = col-1
@@ -254,8 +320,8 @@ contains
        nnz=nnz+nbuf
        close(unit)
        call cpu_time(t1)
-       print '(a,a,a,i6,a,i10,a,f9.1,a)','SWEQX_OPMAT: ',op,' rank ',hybrid%par%rank, &
-            ': nnz=',nnz,'  time=',t1-t0,' s'
+       print '(a,a,a,i6,a,i10,a,i7,a,f9.1,a)','SWEQX_OPMAT: ',op,' rank ',hybrid%par%rank, &
+            ': nnz=',nnz,'  operator applications=',ncall,'  time=',t1-t0,' s'
     enddo
 
   contains
@@ -289,6 +355,43 @@ contains
          enddo
       endif
     end subroutine apply_op
+
+    ! DSS of the labels lab: every element copy of a labeled node gets the label.
+    ! With extend, first label all nodes of each element containing a labeled node.
+    ! Aborts if two different labels meet (supports of probed columns overlap).
+    subroutine dss_labels(extend)
+      logical, intent(in) :: extend
+      real (kind=real_kind) :: w(np,np,3*nlev,nets:nete), lmax, lmin
+      integer :: ie,k
+      do ie=nets,nete
+         do k=1,nlev
+            if (extend .and. any(lab(:,:,k,ie)>0)) then
+               lmax = maxval(lab(:,:,k,ie))
+               lmin = minval(lab(:,:,k,ie),mask=lab(:,:,k,ie)>0)
+               if (lmax/=lmin) call abortmp("SWEQX_OPMAT: coloring conflict in an element")
+               lab(:,:,k,ie) = lmax
+            endif
+            w(:,:,k,ie) = lab(:,:,k,ie)
+            w(:,:,nlev+k,ie) = merge(1d0,0d0,lab(:,:,k,ie)>0)
+            w(:,:,2*nlev+k,ie) = lab(:,:,k,ie)**2
+         enddo
+         call edgeVpack(edge3,w(1,1,1,ie),3*nlev,0,ie)
+      enddo
+      call bndry_exchangeV(hybrid,edge3)
+      do ie=nets,nete
+         call edgeVunpack(edge3,w(1,1,1,ie),3*nlev,0,ie)
+         do k=1,nlev
+            where (w(:,:,nlev+k,ie)>0)
+               lab(:,:,k,ie) = w(:,:,k,ie)/w(:,:,nlev+k,ie)
+            elsewhere
+               lab(:,:,k,ie) = 0
+            end where
+            ! all copies carry the same label iff sum(l^2) = count*mean^2
+            if (any(w(:,:,2*nlev+k,ie) /= w(:,:,nlev+k,ie)*lab(:,:,k,ie)**2)) &
+                 call abortmp("SWEQX_OPMAT: coloring conflict at a shared node")
+         enddo
+      enddo
+    end subroutine dss_labels
 
     ! continuous test fields: smooth (low-degree polynomials in x,y,z on the
     ! sphere, cosine bell) and pseudo-random (hash of the dof id)
