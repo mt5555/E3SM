@@ -53,6 +53,28 @@ class Exact:
         return F, self.om * Fp * (self.X @ np.cross(self.k, c))
 
 
+def history(nm, L, ex, mass, dt, nstep, sub, out):
+    p = ex(0.0)[0]
+    p0max, nrm = np.abs(p).max(), np.sqrt((mass * p ** 2).sum())
+    t, l2, mx, cen = [], [], [], []
+    for i in range(nstep + 1):
+        if i % sub == 0:
+            e = p - ex(i * dt)[0]
+            t.append(i * dt); l2.append(np.sqrt((mass * e ** 2).sum()) / nrm); mx.append(np.abs(e).max() / p0max)
+            cen.append(ex.center(i * dt))
+        if i == nstep:
+            break
+        k1 = L @ p
+        k2 = L @ (p + 0.5 * dt * k1)
+        k3 = L @ (p + 0.5 * dt * k2)
+        k4 = L @ (p + dt * k3)
+        p = p + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+    cen = np.array(cen)
+    dc, de = cube_distances(np.arcsin(cen[:, 2]), np.arctan2(cen[:, 1], cen[:, 0]))
+    np.savez(os.path.join(out, nm + '-history.npz'), t=np.array(t), l2=np.array(l2), max=np.array(mx),
+             dc=dc, de=de)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--mats', required=True)
@@ -61,6 +83,9 @@ def main():
     p.add_argument('--sc', type=int, nargs='+', default=[1, 4])
     p.add_argument('--dt30', type=float, default=1800.0)
     p.add_argument('--sub', type=int, default=4)
+    p.add_argument('--history', action='store_true',
+                   help='only the error history ||p(t) - p_ex(t)|| (RK4 at dt/sub) and the '
+                        'distance of the Gaussian center to the cube edges and corners')
     args = p.parse_args()
     os.makedirs(args.out, exist_ok=True)
     rep = []
@@ -88,6 +113,10 @@ def main():
                 return L @ E + masks * tau[:, None]
 
             t0 = time.time()
+            if args.history:
+                history(nm, L, ex, mass, dt, nstep, args.sub, args.out)
+                print(f'{nm}: history ({time.time() - t0:.0f} s)', flush=True)
+                continue
             E = np.zeros((d['n'], len(REGIONS)))
             for i in range(nstep):
                 t = i * dt
