@@ -62,7 +62,12 @@ Requirements checked at run time: 1 thread, `kmass=-1`, `test_case='swtc1'` for 
 
 ### Running
 
-Build sweqx in its own directory with `-DSWEQX_PLEV=4 -DSWEQX_NP=4` (see `swtc1.sh`), then:
+Build sweqx in its own directory with `-DSWEQX_PLEV=4 -DSWEQX_NP=4` (see `swtc1.sh`). On a
+fresh clone this needs the submodules cime, externals/scorpio and externals/ekat and their
+nested submodules (cime/CIME/non_py/cprnc, externals/ekat/extern/kokkos):
+`git -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --depth=1 <path>`.
+A configure run before cprnc is fetched leaves a stub `Macros.cmake` in its directory; delete
+it before fetching. Then:
 
 ```bash
 # test/sw_conservative/swtc1-opmat.sh NE subcase adv_form velocity [ops] [nranks]
@@ -75,6 +80,7 @@ Output per MPI rank: `<prefix>.L.r####.bin` and `.B.r####.bin` (binary int32 row
 float64 value), `.dofs.r####.bin` (int32 dof, int64 gdofP, float64 lat, lon, assembled mass),
 `.Ltest.r####.bin` (y = L x for test fields, to validate), and a `.meta` file. NE30 L takes
 about 25 s and B about 2 min on 4 ranks. File sizes at NE30: L about 6.7 MB, B about 90 MB.
+L at NE60 takes about 70 s and NE120 about 5 min on 2 ranks (NE120 L: 3.5 M entries per rank).
 
 ### Python (test/sw_conservative/python/)
 
@@ -88,12 +94,32 @@ about 25 s and B about 2 min on 4 ranks. File sizes at NE30: L about 6.7 MB, B a
   Set `OPENBLAS_NUM_THREADS=1` if the cores are shared: oversubscribed OpenBLAS was about
   15× slower.
 
+- `opmat_proj.py --mats DIR --out OUT --ne 8 16 20 --eig 8 16 20`: the Gaussian's day-12
+  error from L: RK4 with the convergence-study time step (dt = 1800 s·30/NE, 7200 s at NE8),
+  which reproduces the HOMME runs; the semi-discrete error exp(LT)p0 − p0 (any NE, sparse); and
+  for the NE in `--eig` its decomposition over the eigenvectors of the skew part K of
+  M^½ L M^-½ (orthonormal, so the per-mode budget adds up exactly). Saves
+  `OUT/<case>-proj.npz` with the error fields, per-mode amplitudes, eigenvalues and diagnostics,
+  the error from resolved modes, and the 8 largest error-carrying eigenvectors. Dense cost with
+  `OPENBLAS_NUM_THREADS=1`: NE16 α=π/4 30 min, NE20 α=π/4 1.8 h (two Hermitian blocks of
+  10,802, about 6 GB); α=0 blocks are 4× smaller.
+- `opmat_source.py --mats DIR --out OUT --ne 30 60`: integrates de/dt = L e + τ(t) with the
+  truncation error τ = L p_ex − ∂ₜp_ex restricted to cube corners, cube-edge nodes, the
+  one-element layer beside the edges and the interior, to show where the error is generated
+  (the parts add up to the semi-discrete error). `--history` writes ‖p(t) − p_ex(t)‖ through
+  the revolution and the distance of the Gaussian's center to the cube edges and corners.
+  NE60 takes 10 min, NE120 75 min (history 13 min).
+- `opmat_proj_plot.py --proj DIR [DIR ...] --out OUT [--conv RUNS] [--source SRC]`: tables
+  (`results_proj.txt`) and figures: convergence, error maps with the cube edges, error vs
+  distance to the edges, error history scaled by NE⁴, Gaussian amplitude per mode, error per
+  frequency band, and maps of the top error-carrying modes.
+
 ### HOMME details found along the way
 
 - `elem%gdofP` is not contiguous (it ranges up to nelem·np²); use the unique-point ids.
 - `elem%spheremp` is not the assembled mass; the assembled mass is `1/elem%rspheremp`.
 
-## Results so far (NE8, NE15 dense; NE30 extremal eigenvalues with ARPACK)
+## Spectrum results (NE8, NE15 dense; NE30 extremal eigenvalues with ARPACK)
 
 ω = u0/rearth = 6.060e-6 s⁻¹ (one revolution per 12 days). Exact spectrum of the solid-body
 rotation operator: −i m ω, m integer, the same for every α.
@@ -142,21 +168,116 @@ of their power in one m; NE15 has eigenvalues only (eigenvectors at NE8); the NE
 hyperviscosity numbers are first-order Rayleigh-quotient estimates from the 150 largest-|λ|
 modes.
 
+## Gaussian error budget (open question 1, October 2026)
+
+Setup as in the convergence study: Gaussian (level 2 of swtc1), split form, analytic velocity,
+ν=0, RK4 with dt = 1800 s·30/NE; error at day 12 (one revolution), relative l2 with the
+assembled mass and relative max, as in `tc1_errors`.
+
+**The matrices reproduce the runs.** Stepping the extracted L with RK4 gives HOMME's day-12
+errors to 6 digits at NE 8, 15, 20, 30 and 60 (both α). Matrix RK4 NE60→120 orders: α=0
+4.02 / 3.93 (l2 / max), α=π/4 3.51 / 3.04, the measured values.
+
+**The order loss is spatial.** The semi-discrete error exp(LT)p0 − p0 (no time stepping) has
+the same orders: α=π/4 3.53 / 3.02 (NE30→60) and 3.51 / 3.05 (NE60→120); α=0 4.06 / 4.13 and
+4.03 / 3.84. RK4 changes the error field by about 25% but not its norm. Orders at NE ≤ 20 are
+pre-asymptotic (4–7), so dense eigenvectors (NE ≤ 20 here) cannot show the asymptotic order by
+themselves. Odd NE is special at α=0: the equator (the path) runs through element centers
+instead of along element edges, and NE15 is 2× more accurate than NE16; compare even NE only.
+
+**Modal form of the prediction.** With e^{−i m ω T} = 1 for every m at T = one revolution, the
+semi-discrete error is Σ_j c_j (e^{λ_j T} − 1) v_j: no wavenumber assignment is needed. The
+eigenvectors of L itself are far from orthogonal in near-degenerate clusters (Σ|c_j|² ≈ 3‖p0‖²),
+so the decomposition uses the skew part K of S = M^½ L M^-½ instead (Hermitian iK, `eigh`):
+orthonormal to 1e-14, and K alone reproduces L's error to 2e-4 (α=0) and 3e-3 (α=π/4).
+Then ‖e‖² = Σ_j a_j² |e^{λ_j T} − 1|² exactly, with a_j = |c_j|/‖p0‖. "Resolved" below means
+|e^{λ_j T} − 1| < 0.1 (phase error < 0.016 revolutions).
+
+| NE | α | share of ‖e‖² from unresolved modes | modes for 90% of ‖e‖² | E²-weighted edge enrichment |
+|---|---|---|---|---|
+| 8 | 0 / π/4 | 0.98 / 0.96 | 39 / 309 | 0.67 / 1.11 |
+| 12 | 0 / π/4 | 0.89 / 0.91 | 81 / 824 | 0.70 / 1.27 |
+| 16 | 0 / π/4 | 0.81 / 0.96 | 63 / 888 | 0.70 / 1.61 |
+| 20 | 0 / π/4 | 0.57 / 0.98 | 53 / 844 | 0.69 / 2.42 |
+
+- α=0: the error moves to resolved modes as NE grows. Its largest contributors at NE20 are
+  smooth equatorial waveguide modes with eigenvalues close to integers (−8.965i ω, +5.990i ω):
+  ordinary phase error, which converges at 4th order.
+- α=π/4: unresolved modes keep 96–98% of the error, and their error converges more slowly
+  with each step (orders 6.7, 6.1, 4.4, 3.9 for NE 8→10→12→16→20), while the resolved part
+  converges at about 5.6. The error-carrying modes become more concentrated on the cube edges.
+- **Edge-trapped modes.** At NE16 and NE20 the largest single contributors at α=π/4 are a
+  conjugate pair of modes trapped on exactly the two cube edges the path follows, corner to
+  corner (lon 315→45 at the top, 135→225 at the bottom), grid-scale across the edge. Their
+  eigenvalue does not scale with 1/h: ±3.654i, 3.719i, 3.738i ω at NE10, 16, 20 (3.615 at NE8;
+  odd NE15 has a similar pair at 5.58i). The 0.5% most edge-concentrated modes carry 0.1%,
+  3% and 16% of ‖e‖² at NE8, 16 and 20. A spurious mode with an O(ω) frequency is not averaged
+  out by the moving Gaussian, so the truncation error that drives it accumulates.
+- Removing the unresolved modes from the initial condition does not help: the removed part is
+  itself an error at day 12 of the same size (NE12 α=π/4: 2.3e-3, against a day-12 error of
+  1.2e-3).
+
+**Where and when the error appears (sparse, up to NE120).**
+
+- The truncation error τ is O(h³) pointwise everywhere for both α (max order 2.97–3.06 on the
+  edges, near them and in the face interiors, with the Gaussian centered on an edge), as for
+  p=3 CG SEM on any mesh (a 1-D periodic check gives τ order 3.0 and solution order 4.3–4.4).
+  4th order at α=0 comes from cancellation, not from a small τ. On and next to the edges, τ's
+  l2 converges at 3.5 (O(h³) amplitude on an O(h)-wide strip).
+- History (‖e(t)‖·NE⁴, NE16–120): at α=π/4 the curves collapse until the Gaussian reaches the
+  first cube corner (day 1.8), separate only during the two transits along cube edges and
+  corners (days 1.8–4.2 and 7.8–10.2), and stay parallel while the Gaussian crosses face
+  interiors. At α=0 (edges crossed at right angles) they collapse for the whole revolution.
+- Maps: at α=π/4 the max error sits on the two transit edges (on a corner at NE30, on an edge
+  at NE60 and NE120), and thin streaks run from them across the faces. More than 10° from any
+  edge (62% of the sphere) the error still converges at l2 3.52 / max 2.85 (NE60→120), but the
+  area holding half of that error's energy shrinks 2.4–3.3× per doubling: an O(h³) amplitude on
+  O(h)-wide rays, whose l2 the skew operator conserves after they are generated. This is
+  consistent with l2 order 3.5 and max order 3.
+- Source split (where τ is generated), α=π/4, l2 / max orders NE60→120: corners 4.55 / 4.29,
+  cube-edge nodes 3.53 / 2.94, near-edge layer 3.43 / 2.72, interior 3.41 / 2.62 (α=0, NE30→60:
+  all regions 4.1–5.4). The interior part is slow too, so the failure of cancellation is a
+  property of the operator's modes near the edges (the edge-trapped modes above), not of the
+  nodes on which τ sits.
+
+**Interpretation.** Cancellation of the O(h³) truncation error fails while the Gaussian moves
+along a cube edge, because the operator has edge-trapped grid-scale modes with O(ω)
+frequencies that the moving truncation error drives. That leaves an O(h³) error in an
+O(h)-wide band that is then carried along rays; energy conservation of the split-form operator
+keeps its l2 at O(h^3.5). Velocity changes at truncation-error level cannot remove it (τ
+involves higher derivatives of p; the curl ψ velocity already left the orders unchanged).
+
+A heuristic consequence, not checked: with hyperviscosity ν ∝ h^q, damping limits the
+resonant edge error to O(h^{3+4−q}) pointwise while the smooth hyperviscosity error is
+O(h^q); balancing the l2 terms (O(h^{7.5−q}) against O(h^q)) gives q = 3.75 and order 3.75,
+the values of the convergence study's fitted error model. It also predicts that the clean
+4.00 with ν₃₀=1e14 ∝ h⁴ holds only while the hyperviscosity's own h⁴ error dominates.
+
 ## Open questions and suggested next steps
 
-1. **Link the spectrum to the convergence orders.** The convergence loss at α=π/4 is a
-   property of how well the operator represents the Gaussian's modes. Project the initial
-   Gaussian onto the eigenvectors (NE8, NE15; NE20 is feasible with 15 GB) and compute the
-   predicted day-12 error Σ |c_j|²·|e^{λ_j T} − e^{−i m_j ω T}|² for α=0 and α=π/4. Does it
-   reproduce the measured errors and orders? Which modes carry the error, and are they
-   corner/edge-localized?
-2. **NE30 dense spectra on a bigger machine** (e.g. a Perlmutter CPU node, 512 GB). n=48,602:
+1. **Link the spectrum to the convergence orders: done** (section above). Remaining: a proof
+   of the 3.5 / 3 orders. Suggested route: a planar model of one cube edge (two uniform SEM
+   grids glued along a line with the local kink angle and stretching jump, HOMME's split-form
+   weak form), Fourier-transformed along the edge into small 1-D eigenproblems per along-edge
+   wavenumber. It is scale-free (eigenvalues (u/h)·f(kh, θ)), so it gives the edge-trapped
+   modes, the interface truncation error and the resonant response for every h, with controls
+   (θ = 0, flow across the edge). Corners (valence 3) need a separate 2-D local model.
+   `mt5555/sem-advection-tests` already has planar kinked-mesh SEM codes.
+2. **NE30 dense spectra and eigenvectors on a bigger machine** (e.g. a Perlmutter CPU node, 512 GB). n=48,602:
    dense L is 19 GB, `dgeev` eigenvalues-only needs about 40–60 GB and ~1e15 flops (hours).
    For the split form with the curl ψ velocity, S = M^½ L M^-½ is skew, so use a symmetric
    solver on −S² (or Hermitian iS): much faster and parallel (dsyevd, ELPA, cuSOLVER).
    Regenerate the NE30 matrices with `swtc1-opmat.sh` (minutes); they are not in git.
-3. **Why α=π/4's max norm drops to p=3** when planar non-smooth meshes stay ≥3.6: look at the
-   eigenvectors and the error budget near the cube edges the α=π/4 path follows.
+   NE30 eigenvectors (two Hermitian blocks of 24,301 for α=π/4, about 10 GB each) would give
+   the edge-trapped modes and the modal budget in the asymptotic regime (`opmat_proj.py --eig 30`).
+3. **Why α=π/4's max norm drops to p=3: largely answered** (edge-trapped modes, section
+   above). Worth checking whether the planar kinked-mesh tests had flow running parallel to a
+   kink for a long time, which is what the α=π/4 path does. Possible ways to recover 4th order, to test:
+   a grid that is smooth across cube edges (a conformal cubed sphere is singular only at the
+   corners, whose source converged at 4.3–4.6); or dissipation applied only in a one-element
+   strip along the cube edges (heuristic: rate ∝ h^{-1/2} gives l2 4, max 3.5). The second can be
+   tested with the extracted matrices: exp((L − ν χBχ)T)p0 with χ the strip mask, which stays
+   dissipative in the mass inner product (needs B at NE30 and NE60).
 4. **Optional extensions**: np=7 (p=6) operators; the element-local map
    (`cubed_sphere_map=2`, the theta-model default, settable in the namelist); B scaled as
    dx³ vs dx⁴ combined with L to study the error-minimizing ν analytically.
