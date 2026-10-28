@@ -194,11 +194,64 @@ def plot_top_modes(d, ne, sc, out):
     plt.close(fig)
 
 
+def source_analysis(src, out, rep):
+    """orders of the error driven by the truncation error of each region (opmat_source.py),
+    and the error history scaled by NE^4"""
+    rep.append('\n== semi-discrete error split by where the truncation error is generated (opmat_source.py) ==')
+    for sc in (1, 4):
+        nes = sorted(int(re.match(r'ne(\d+)', os.path.basename(f)).group(1))
+                     for f in glob.glob(os.path.join(src, f'ne*-sc{sc}-f2-analytic-source.npz')))
+        if not nes:
+            continue
+        rows = {}
+        for ne in nes:
+            d = np.load(os.path.join(src, f'ne{ne}-sc{sc}-f2-analytic-source.npz'))
+            regs = [str(r) for r in d['regions']]
+            rows[ne] = [norms(d['E'][:, j], d['p0'], d['mass']) for j in range(len(regs))] + \
+                [norms(d['E'].sum(axis=1), d['p0'], d['mass'])]
+        regs = regs + ['total']
+        rep.append(f'alpha={ALPHA[sc]}: relative l2 / max per region; orders between successive NE')
+        for ne in nes:
+            rep.append(f'  NE{ne:3d}: ' + '  '.join(f'{r} {x[0]:.3e}/{x[1]:.3e}' for r, x in zip(regs, rows[ne])))
+        ev = [ne for ne in nes if ne % 2 == 0]
+        for a, b in zip(ev[:-1], ev[1:]):
+            f = np.log(b / a)
+            rep.append(f'  orders {a}->{b}: ' + '  '.join(
+                f'{r} {np.log(x[0] / y[0]) / f:.2f}/{np.log(x[1] / y[1]) / f:.2f}' for r, x, y in zip(regs, rows[a], rows[b])))
+    hist = {}
+    for f in glob.glob(os.path.join(src, 'ne*-sc*-f2-analytic-history.npz')):
+        ne, sc = map(int, re.match(r'ne(\d+)-sc(\d+)', os.path.basename(f)).groups())
+        hist[(ne, sc)] = np.load(f)
+    if not hist:
+        return
+    fig, axs = plt.subplots(3, 2, figsize=(13, 8.5), sharex=True)
+    for j, sc in enumerate((1, 4)):
+        nes = sorted(ne for ne, s in hist if s == sc and ne % 2 == 0)
+        cols = plt.cm.viridis(np.linspace(0, 0.85, len(nes)))
+        for ne, c in zip(nes, cols):
+            d = hist[(ne, sc)]
+            t = d['t'] / 86400
+            axs[0][j].plot(t, d['l2'] * ne ** 4, color=c, lw=1.2, label=f'NE{ne}')
+            axs[1][j].plot(t, d['max'] * ne ** 4, color=c, lw=1.2, label=f'NE{ne}')
+        axs[2][j].plot(t, np.degrees(d['de']), color='#2a78d6', label='to the nearest cube edge')
+        axs[2][j].plot(t, np.degrees(d['dc']), color='#eb6834', label='to the nearest cube corner')
+        style_ax(axs[0][j], f'alpha={ALPHA[sc]}: relative l2 error x NE^4 (curves collapse if 4th order)')
+        style_ax(axs[1][j], f'alpha={ALPHA[sc]}: relative max error x NE^4')
+        style_ax(axs[2][j], 'distance of the Gaussian center (degrees); Gaussian e-folding radius 19 deg')
+        axs[2][j].set_xlabel('days')
+        for ax in axs[:, j]:
+            ax.legend(fontsize=7)
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, 'proj_error_history.png'))
+    plt.close(fig)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--proj', nargs='+', required=True)
     p.add_argument('--out', required=True)
     p.add_argument('--conv')
+    p.add_argument('--source', help='directory with opmat_source.py output (*-source.npz, *-history.npz)')
     args = p.parse_args()
     os.makedirs(args.out, exist_ok=True)
     files = collect(args.proj)
@@ -285,6 +338,8 @@ def main():
     plt.close(fig)
 
     plot_maps(files, [20, 30, 60, 120], args.out)
+    if args.source:
+        source_analysis(args.source, args.out, rep)
 
     # ------------------------------------------------ modal budget
     mod = sorted(k for k in res if res[k]['md'] is not None)
