@@ -81,6 +81,7 @@ float64 value), `.dofs.r####.bin` (int32 dof, int64 gdofP, float64 lat, lon, ass
 `.Ltest.r####.bin` (y = L x for test fields, to validate), and a `.meta` file. NE30 L takes
 about 25 s and B about 2 min on 4 ranks. File sizes at NE30: L about 6.7 MB, B about 90 MB.
 L at NE60 takes about 70 s and NE120 about 5 min on 2 ranks (NE120 L: 3.5 M entries per rank).
+B takes 2 min at NE60 and 9 min at NE120 on 4 ranks (NE120 B: 94.5 M entries, 1.5 GB).
 
 ### Python (test/sw_conservative/python/)
 
@@ -109,6 +110,11 @@ L at NE60 takes about 70 s and NE120 about 5 min on 2 ranks (NE120 L: 3.5 M entr
   (the parts add up to the semi-discrete error). `--history` writes ‖p(t) − p_ex(t)‖ through
   the revolution and the distance of the Gaussian's center to the cube edges and corners.
   NE60 takes 10 min, NE120 75 min (history 13 min).
+- `opmat_nuopt.py --mats DIR --out OUT --ne 30 60 [--sc 4] [--coarse 11 14.5 15]`: scans the
+  hyperviscosity coefficient with HOMME's step (I − dt ν B) R4(dt L), many ν per pass as the
+  columns of one block (a coarse pass in log ν₃₀, then a fine pass around the l2 and max
+  minima), and writes the day-12 Gaussian errors per ν to `OUT/<case>-nuopt.npz` and
+  `OUT/nuopt.txt`. B is read from the `sc1-f2-analytic` files.
 - `opmat_proj_plot.py --proj DIR [DIR ...] --out OUT [--conv RUNS] [--source SRC]`: tables
   (`results_proj.txt`) and figures: convergence, error maps with the cube edges, error vs
   distance to the edges, error history scaled by NE⁴, Gaussian amplitude per mode, error per
@@ -247,11 +253,56 @@ O(h)-wide band that is then carried along rays; energy conservation of the split
 keeps its l2 at O(h^3.5). Velocity changes at truncation-error level cannot remove it (τ
 involves higher derivatives of p; the curl ψ velocity already left the orders unchanged).
 
-A heuristic consequence, not checked: with hyperviscosity ν ∝ h^q, damping limits the
-resonant edge error to O(h^{3+4−q}) pointwise while the smooth hyperviscosity error is
-O(h^q); balancing the l2 terms (O(h^{7.5−q}) against O(h^q)) gives q = 3.75 and order 3.75,
-the values of the convergence study's fitted error model. It also predicts that the clean
-4.00 with ν₃₀=1e14 ∝ h⁴ holds only while the hyperviscosity's own h⁴ error dominates.
+## Error-minimizing hyperviscosity (October 2026)
+
+**Heuristic.** With hyperviscosity ν ∝ h^q, damping limits the resonant edge error to
+O(h^{3+4−q}) pointwise while the hyperviscosity's own error on the smooth field is O(h^q);
+balancing the l2 terms (O(h^{7.5−q}) against O(h^q)) gives q = 3.75 and order 3.75, the values
+of the convergence study's fitted error model. The same balance for the max norm
+(O(h^{7−q}) against O(h^q)) gives 3.5.
+
+**Measured** with `opmat_nuopt.py`: HOMME's classic-RK4 step with hyperviscosity,
+p ← (I − dt ν B) R4(dt L) p (`advance_nonstag_rk4`, then `advance_hypervis` with
+`hypervis_subcycle=1`, ν_s = ν), applied to many ν at once. It reproduces a sweqx run with ν to
+6 digits (NE20, α=π/4, ν=2.85e13: l2 7.18577e-5, max 1.99942e-4). Gaussian, α=π/4, split form,
+analytic velocity, dt = 1800 s·30/NE, error at day 12; the optimum is a parabola fit of
+log(error) against log ν around the minimum of the scan. ν₃₀ = ν·(NE/30)⁴.
+
+| NE | l2-optimal ν₃₀ | minimum l2 | l2 at ν=0 | gain | minimum max | max at ν=0 |
+|---|---|---|---|---|---|---|
+| 16 | 5.5e12 | 1.841e-4 | 3.315e-4 | 1.8 | 4.26e-4 | 6.47e-4 |
+| 20 | 5.7e12 | 7.189e-5 | 1.362e-4 | 1.9 | 1.67e-4 | 3.00e-4 |
+| 30 | 6.6e12 | 1.480e-5 | 3.086e-5 | 2.1 | 4.24e-5 | 1.04e-4 |
+| 60 | 8.8e12 | 1.096e-6 | 2.662e-6 | 2.4 | 3.94e-6 | 1.29e-5 |
+| 120 | 1.15e13 | 8.323e-8 | 2.336e-7 | 2.8 | 3.47e-7 | 1.57e-6 |
+
+| NE step | l2-optimal ν ∝ h^q | order of the minimum l2 | ν=0 l2 order | order of the minimum max |
+|---|---|---|---|---|
+| 16→20 | 3.88 | 4.21 | 3.99 | 4.20 |
+| 20→30 | 3.61 | 3.90 | 3.66 | 3.38 |
+| 30→60 | 3.59 | 3.76 | 3.53 | 3.43 |
+| 60→120 | 3.61 | 3.72 | 3.51 | 3.50 |
+
+- The heuristic gets the orders about right: 3.72–3.76 in l2 (predicted 3.75) and 3.43–3.50
+  in max (predicted 3.5), against 3.51 and 3.04 at ν=0. The gain over ν=0 therefore grows with
+  resolution, from 2.1× at NE30 to 2.8× at NE120.
+- It gets the optimal-ν exponent wrong: ν_opt ∝ h^3.6, steady over three steps, not h^3.75.
+  A sum of two power laws forces order = q; the data have the order 0.1–0.15 above q at every
+  step, so the model is too crude (part of the hyperviscosity's error probably cancels part of
+  the scheme's error instead of adding to it), and the agreement on the order is partly
+  coincidental.
+- For this test the l2-optimal ν is about 6.6e12·(30/NE)^3.6 m⁴/s. The convergence study's
+  ν₃₀ = 1e13 ∝ h⁴ is close to optimal at NE120 and about 1.5× too large at NE30, consistent
+  with its measured order 3.71. The E3SM default ν₃₀ = 1e15 is 100–150× the optimum for this
+  Gaussian.
+- The max-optimal ν is erratic (the max error is flat in ν, with several local minima); the
+  minimum max error itself is well defined.
+- At α=0 (NE16, 20 only) the best ν also halves the l2 error, with the same optimal ν₃₀
+  (6.2e12, 5.8e12): at these resolutions most of the error is in unresolved modes, which
+  hyperviscosity damps.
+
+Cost on 4 cores: B extraction 30 s (NE30), 2 min (NE60), 9 min (NE120, 94.5 M entries, 1.5 GB);
+scans with about 30 ν values 1.5 min (NE30), 10 min (NE60) and 2 h (NE120, 20 ν values).
 
 ## Open questions and suggested next steps
 
