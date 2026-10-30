@@ -129,6 +129,18 @@ def plot(curves, title, n, nmax, ppw_min, outfile):
     plt.close(fig)
 
 
+def nu_tag(args):
+    if args.nu30 == 0:
+        return 'nu0'
+    return f'nu30_{args.nu30:g}' + ('' if args.nu_exp == 4 else f'_dx{args.nu_exp:g}')
+
+
+def nu_label(args):
+    if args.nu30 == 0:
+        return 'nu=0'
+    return f'nu={args.nu30 * (30 / args.ne) ** args.nu_exp:.3g} (nu30={args.nu30:g}, ~dx^{args.nu_exp:g})'
+
+
 def sub_label(args):
     return 'semi-discrete exp(AT)' if not args.rk4 else f'RK4, dt/{args.sub}'
 
@@ -142,7 +154,10 @@ def main():
     p.add_argument('--forms', type=int, nargs='+', default=[2, 0])
     p.add_argument('--velocity', default='analytic')
     p.add_argument('--nmax', type=int, default=60)
-    p.add_argument('--nu30', type=float, default=0.0)
+    p.add_argument('--nu30', type=float, default=0.0,
+                   help='hyperviscosity at NE30; nu = nu30 (30/NE)^nu_exp')
+    p.add_argument('--nu-exp', type=float, default=4.0,
+                   help='resolution scaling exponent of nu (4: nu ~ dx^4, 3: nu ~ dx^3)')
     p.add_argument('--rk4', action='store_true')
     p.add_argument('--sub', type=int, default=1)
     p.add_argument('--dt30', type=float, default=1800.0)
@@ -156,13 +171,13 @@ def main():
     args = p.parse_args()
     os.makedirs(args.out, exist_ok=True)
     rep, res = [], {}
-    tag = f'ne{args.ne}-sc{args.sc}-nu{args.nu30:g}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd')
+    tag = f'ne{args.ne}-sc{args.sc}-{nu_tag(args)}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd')
     if args.replot:
         scs = (1, 4) if args.compare_alpha else (args.sc,)
         curves = []
         for f in args.forms:
             for sc in scs:
-                t = f'ne{args.ne}-sc{sc}-nu{args.nu30:g}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd')
+                t = f'ne{args.ne}-sc{sc}-{nu_tag(args)}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd')
                 r = np.load(os.path.join(args.out, f'{name(args.ne, sc, f, args.velocity)}-{t}-shnorm.npz'))
                 if args.compare_alpha:
                     lab = f'alpha={ALPHA[sc]}' + (f', {FORM[f]}' if len(args.forms) > 1 else '')
@@ -173,11 +188,11 @@ def main():
                 n = int(r['n'])
         if args.compare_alpha:
             forms = ', '.join(FORM[f] for f in args.forms)
-            title = f'NE{args.ne}, {forms}, nu30={args.nu30:g}, {sub_label(args)}: ||(exp(AT)-I) Q_N|| per degree'
+            title = f'NE{args.ne}, {forms}, {nu_label(args)}, {sub_label(args)}: ||(exp(AT)-I) Q_N|| per degree'
             out = os.path.join(args.out, f'shnorm_ne{args.ne}-alpha-f{"".join(map(str, args.forms))}'
-                                         f'-nu{args.nu30:g}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd') + '.png')
+                                         f'-{nu_tag(args)}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd') + '.png')
         else:
-            title = (f'NE{args.ne}, alpha={ALPHA[args.sc]}, nu30={args.nu30:g}, {sub_label(args)}: '
+            title = (f'NE{args.ne}, alpha={ALPHA[args.sc]}, {nu_label(args)}, {sub_label(args)}: '
                      f'||(exp(AT)-I) Q_N|| per degree')
             out = os.path.join(args.out, f'shnorm_{tag}.png')
         plot(curves, title, n, args.nmax, args.ppw_min, out)
@@ -188,7 +203,7 @@ def main():
         A = d['L']
         if args.nu30 > 0:
             B = load(os.path.join(args.mats, name(args.ne, 1, 2, 'analytic')), ops=('B',))['B']
-            A = (A - args.nu30 * (30 / args.ne) ** 4 * B).tocsr()
+            A = (A - args.nu30 * (30 / args.ne) ** args.nu_exp * B).tocsr()
         om = omega(d['meta'])
         T = 2 * np.pi / om
         mass, sq = d['mass'], np.sqrt(d['mass'])
@@ -209,7 +224,7 @@ def main():
         resid = np.linalg.norm(q0 - sum(Q @ (Q.T @ q0) for Q in Qs)) / np.linalg.norm(q0)
         bound = (r['E'] * cN).sum() / np.linalg.norm(q0)
         actual = np.linalg.norm(sq * (pT - p0)) / np.linalg.norm(q0)
-        line = (f'{nm} nu30={args.nu30:g} {"RK4 dt=%.0f" % dt if dt else "semi-discrete"}: n={d["n"]}, '
+        line = (f'{nm} {nu_label(args)} {"RK4 dt=%.0f" % dt if dt else "semi-discrete"}: n={d["n"]}, '
                 f'degrees 0..{args.nmax} ({len(deg)} columns, {tprop:.0f} s); Gaussian: actual l2 error '
                 f'{actual:.4e}, bound sum E(N)||p0_N|| = {bound:.4e} (Gaussian content beyond degree '
                 f'{args.nmax}: {resid:.1e})')
@@ -236,7 +251,7 @@ def main():
                        f'{cN[N] / np.linalg.norm(q0):.3e}')
 
     plot([(FORM[f], FCOL[f], res[f]) for f in args.forms],
-         f'NE{args.ne}, alpha={ALPHA[args.sc]}, nu30={args.nu30:g}, {sub_label(args)}: '
+         f'NE{args.ne}, alpha={ALPHA[args.sc]}, {nu_label(args)}, {sub_label(args)}: '
          f'||(exp(AT)-I) Q_N|| per degree', d['n'], args.nmax, args.ppw_min,
          os.path.join(args.out, f'shnorm_{tag}.png'))
     txt = '\n'.join(rep)
