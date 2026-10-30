@@ -60,7 +60,7 @@ def twopanel(curves, title, out, note=None):
     xmax = 2 / PPW_MIN
     axs[0].set_xlim(0, xmax)
     axs[0].axvspan(xsat, xmax, color=GRID, alpha=0.5, lw=0)
-    axs[0].text(xsat + 0.005, 0.6 * axs[0].get_ylim()[0] ** 0.15, 'saturated\n(phase random)',
+    axs[0].text(xsat + 0.005, 0.55, 'saturated\n(phase random)', transform=axs[0].get_xaxis_transform(),
                 color=MUTED, fontsize=8, va='bottom')
     xlo = 0.9 * min(c['x'][0] for c in curves)
     axs[1].set_xlim(xlo, 1.05 * xsat)
