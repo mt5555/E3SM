@@ -91,6 +91,39 @@ def degree_norms(P, Y, deg, sq):
     return {k: np.array(v) for k, v in out.items()}, Qs
 
 
+def plot(res, args, n, tag):
+    dx = np.sqrt(4 * np.pi / n)               # mean node spacing on the unit sphere
+    nplot = min(args.nmax, int(2 * np.pi / (args.ppw_min * dx)))
+    N = np.arange(nplot + 1)
+    fig, axs = plt.subplots(1, 2, figsize=(13, 4.6))
+    for f in args.forms:
+        r = {k: v[:nplot + 1] for k, v in res[f].items()}
+        axs[0].semilogy(N[1:], r['E'][1:], '-', color=FCOL[f], lw=1.6, label=f'{FORM[f]}: worst case E(N)')
+        axs[0].semilogy(N[1:], r['rms'][1:], ':', color=FCOL[f], lw=1.4, label=f'{FORM[f]}: RMS over degree N')
+        axs[1].semilogy(N[1:], r['in'][1:], '-', color=FCOL[f], lw=1.6, label=f'{FORM[f]}: in-degree')
+        axs[1].semilogy(N[1:], r['out'][1:], '--', color=FCOL[f], lw=1.4, label=f'{FORM[f]}: scattered')
+    axs[0].semilogy(N[1:], res[args.forms[0]]['cN'][1:nplot + 1], color=MUTED, lw=1,
+                    label='Gaussian ||p0_N||/||p0||')
+    sub = 'semi-discrete exp(AT)' if not args.rk4 else f'RK4, dt/{args.sub}'
+    style_ax(axs[0], f'NE{args.ne}, alpha={ALPHA[args.sc]}, nu30={args.nu30:g}, {sub}: '
+                     f'||(exp(AT)-I) Q_N|| per degree')
+    style_ax(axs[1], 'worst-case error split: within degree N vs scattered to other degrees')
+    for ax in axs:
+        ax.set_xlabel('spherical harmonic degree N')
+        ax.set_ylim(1e-10, 3)
+        ax.set_xlim(0, nplot)
+        ax.axhline(2, color=MUTED, lw=0.8, ls='--')
+        top = ax.secondary_xaxis('top', functions=(lambda x: 2 * np.pi / (np.maximum(x, 1e-9) * dx),
+                                                    lambda y: 2 * np.pi / (np.maximum(y, 1e-9) * dx)))
+        top.set_xlabel('mean GLL points per wavelength', color=MUTED)
+        top.set_xticks([5, 6, 8, 10, 15, 20, 40])
+        ax.legend(fontsize=7, loc='lower right')
+    axs[0].set_ylabel('relative l2 error at day 12')
+    fig.tight_layout()
+    fig.savefig(os.path.join(args.out, f'shnorm_{tag}.png'))
+    plt.close(fig)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--mats', required=True)
@@ -105,10 +138,21 @@ def main():
     p.add_argument('--sub', type=int, default=1)
     p.add_argument('--dt30', type=float, default=1800.0)
     p.add_argument('--dense', action='store_true')
+    p.add_argument('--ppw-min', type=float, default=4.5,
+                   help='plot degrees with at least this many mean GLL points per wavelength '
+                        '(beyond it interpolated harmonics alias onto lower degrees)')
+    p.add_argument('--replot', action='store_true', help='only redo the plot from the saved npz files')
     args = p.parse_args()
     os.makedirs(args.out, exist_ok=True)
     rep, res = [], {}
     tag = f'ne{args.ne}-sc{args.sc}-nu{args.nu30:g}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd')
+    if args.replot:
+        for f in args.forms:
+            r = np.load(os.path.join(args.out, f'{name(args.ne, args.sc, f, args.velocity)}-{tag}-shnorm.npz'))
+            res[f] = {k: r[k] for k in ('E', 'rms', 'in', 'out', 'cN')}
+            n = int(r['n'])
+        plot(res, args, n, tag)
+        return
     for f in args.forms:
         nm = name(args.ne, args.sc, f, args.velocity)
         d = load(os.path.join(args.mats, nm), ops=('L',))
@@ -162,35 +206,7 @@ def main():
             rep.append(f'   {N:2d}  {r["E"][N]:.3e}   {r["rms"][N]:.3e}   {r["in"][N]:.3e}   {r["out"][N]:.3e}   '
                        f'{cN[N] / np.linalg.norm(q0):.3e}')
 
-    # plot
-    n = d['n']
-    dx = np.sqrt(4 * np.pi / n)               # mean node spacing on the unit sphere
-    N = np.arange(args.nmax + 1)
-    fig, axs = plt.subplots(1, 2, figsize=(13, 4.6))
-    for f in args.forms:
-        r = res[f]
-        axs[0].semilogy(N[1:], r['E'][1:], '-', color=FCOL[f], lw=1.6, label=f'{FORM[f]}: worst case E(N)')
-        axs[0].semilogy(N[1:], r['rms'][1:], ':', color=FCOL[f], lw=1.4, label=f'{FORM[f]}: RMS over degree N')
-        axs[1].semilogy(N[1:], r['in'][1:], '-', color=FCOL[f], lw=1.6, label=f'{FORM[f]}: in-degree')
-        axs[1].semilogy(N[1:], r['out'][1:], '--', color=FCOL[f], lw=1.4, label=f'{FORM[f]}: scattered')
-    axs[0].semilogy(N[1:], res[args.forms[0]]['cN'][1:], color=MUTED, lw=1, label='Gaussian ||p0_N||/||p0||')
-    sub = 'semi-discrete exp(AT)' if not args.rk4 else f'RK4, dt/{args.sub}'
-    style_ax(axs[0], f'NE{args.ne}, alpha={ALPHA[args.sc]}, nu30={args.nu30:g}, {sub}: '
-                     f'||(exp(AT)-I) Q_N|| per degree')
-    style_ax(axs[1], 'worst-case error split: within degree N vs scattered to other degrees')
-    for ax in axs:
-        ax.set_xlabel('spherical harmonic degree N')
-        ax.set_ylim(1e-12, 3)
-        ax.axhline(2, color=MUTED, lw=0.8, ls='--')
-        top = ax.secondary_xaxis('top', functions=(lambda x: 2 * np.pi / (np.maximum(x, 1e-9) * dx),
-                                                    lambda y: 2 * np.pi / (np.maximum(y, 1e-9) * dx)))
-        top.set_xlabel('mean GLL points per wavelength', color=MUTED)
-        top.set_xticks([4, 5, 6, 8, 10, 15, 20, 40])
-        ax.legend(fontsize=7, loc='lower right')
-    axs[0].set_ylabel('relative l2 error at day 12')
-    fig.tight_layout()
-    fig.savefig(os.path.join(args.out, f'shnorm_{tag}.png'))
-    plt.close(fig)
+    plot(res, args, d['n'], tag)
     txt = '\n'.join(rep)
     print(txt)
     with open(os.path.join(args.out, f'shnorm_{tag}.txt'), 'w') as fo:
