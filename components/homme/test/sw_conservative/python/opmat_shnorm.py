@@ -108,16 +108,21 @@ def plot(res, args, n, tag):
     style_ax(axs[0], f'NE{args.ne}, alpha={ALPHA[args.sc]}, nu30={args.nu30:g}, {sub}: '
                      f'||(exp(AT)-I) Q_N|| per degree')
     style_ax(axs[1], 'worst-case error split: within degree N vs scattered to other degrees')
+    # left: fit the error curves; right: the in-degree part reaches much lower values
+    emin = min(min(res[f]['E'][1:nplot + 1].min(), res[f]['rms'][1:nplot + 1].min()) for f in args.forms)
+    axs[0].set_ylim(10 ** np.floor(np.log10(emin / 2)), 3)
+    imin = min(res[f]['in'][1:nplot + 1].min() for f in args.forms)
+    axs[1].set_ylim(10 ** np.floor(np.log10(imin / 2)), 3)
     for ax in axs:
         ax.set_xlabel('spherical harmonic degree N')
-        ax.set_ylim(1e-10, 3)
         ax.set_xlim(0, nplot)
         ax.axhline(2, color=MUTED, lw=0.8, ls='--')
         top = ax.secondary_xaxis('top', functions=(lambda x: 2 * np.pi / (np.maximum(x, 1e-9) * dx),
                                                     lambda y: 2 * np.pi / (np.maximum(y, 1e-9) * dx)))
         top.set_xlabel('mean GLL points per wavelength', color=MUTED)
         top.set_xticks([5, 6, 8, 10, 15, 20, 40])
-        ax.legend(fontsize=7, loc='lower right')
+    axs[0].legend(fontsize=7, loc='center right')
+    axs[1].legend(fontsize=7, loc='lower right')
     axs[0].set_ylabel('relative l2 error at day 12')
     fig.tight_layout()
     fig.savefig(os.path.join(args.out, f'shnorm_{tag}.png'))
