@@ -44,6 +44,7 @@ from opmat_proj import gaussian, timestep, rk4_run
 FORM = {0: 'conservation form', 2: 'split form'}
 FCOL = {2: '#eb6834', 0: '#6250d6'}
 ALPHA = {1: '0', 4: 'pi/4'}
+SCCOL = {1: '#2a78d6', 4: '#eb6834'}
 
 plt.rcParams.update({'font.size': 9, 'axes.edgecolor': MUTED, 'axes.labelcolor': INK,
                      'xtick.color': MUTED, 'ytick.color': MUTED, 'axes.grid': True,
@@ -91,27 +92,26 @@ def degree_norms(P, Y, deg, sq):
     return {k: np.array(v) for k, v in out.items()}, Qs
 
 
-def plot(res, args, n, tag):
+def plot(curves, title, n, nmax, ppw_min, outfile):
+    """curves: list of (label, color, result dict with E, rms, in, out, cN)"""
     dx = np.sqrt(4 * np.pi / n)               # mean node spacing on the unit sphere
-    nplot = min(args.nmax, int(2 * np.pi / (args.ppw_min * dx)))
+    nplot = min(nmax, int(2 * np.pi / (ppw_min * dx)))
     N = np.arange(nplot + 1)
     fig, axs = plt.subplots(1, 2, figsize=(13, 4.6))
-    for f in args.forms:
-        r = {k: v[:nplot + 1] for k, v in res[f].items()}
-        axs[0].semilogy(N[1:], r['E'][1:], '-', color=FCOL[f], lw=1.6, label=f'{FORM[f]}: worst case E(N)')
-        axs[0].semilogy(N[1:], r['rms'][1:], ':', color=FCOL[f], lw=1.4, label=f'{FORM[f]}: RMS over degree N')
-        axs[1].semilogy(N[1:], r['in'][1:], '-', color=FCOL[f], lw=1.6, label=f'{FORM[f]}: in-degree')
-        axs[1].semilogy(N[1:], r['out'][1:], '--', color=FCOL[f], lw=1.4, label=f'{FORM[f]}: scattered')
-    axs[0].semilogy(N[1:], res[args.forms[0]]['cN'][1:nplot + 1], color=MUTED, lw=1,
+    for lab, col, r in curves:
+        r = {k: v[:nplot + 1] for k, v in r.items()}
+        axs[0].semilogy(N[1:], r['E'][1:], '-', color=col, lw=1.6, label=f'{lab}: worst case E(N)')
+        axs[0].semilogy(N[1:], r['rms'][1:], ':', color=col, lw=1.4, label=f'{lab}: RMS over degree N')
+        axs[1].semilogy(N[1:], r['in'][1:], '-', color=col, lw=1.6, label=f'{lab}: in-degree')
+        axs[1].semilogy(N[1:], r['out'][1:], '--', color=col, lw=1.4, label=f'{lab}: scattered')
+    axs[0].semilogy(N[1:], curves[0][2]['cN'][1:nplot + 1], color=MUTED, lw=1,
                     label='Gaussian ||p0_N||/||p0||')
-    sub = 'semi-discrete exp(AT)' if not args.rk4 else f'RK4, dt/{args.sub}'
-    style_ax(axs[0], f'NE{args.ne}, alpha={ALPHA[args.sc]}, nu30={args.nu30:g}, {sub}: '
-                     f'||(exp(AT)-I) Q_N|| per degree')
+    style_ax(axs[0], title)
     style_ax(axs[1], 'worst-case error split: within degree N vs scattered to other degrees')
     # left: fit the error curves; right: the in-degree part reaches much lower values
-    emin = min(min(res[f]['E'][1:nplot + 1].min(), res[f]['rms'][1:nplot + 1].min()) for f in args.forms)
+    emin = min(min(r['E'][1:nplot + 1].min(), r['rms'][1:nplot + 1].min()) for _, _, r in curves)
     axs[0].set_ylim(10 ** np.floor(np.log10(emin / 2)), 3)
-    imin = min(res[f]['in'][1:nplot + 1].min() for f in args.forms)
+    imin = min(r['in'][1:nplot + 1].min() for _, _, r in curves)
     axs[1].set_ylim(10 ** np.floor(np.log10(imin / 2)), 3)
     for ax in axs:
         ax.set_xlabel('spherical harmonic degree N')
@@ -125,8 +125,12 @@ def plot(res, args, n, tag):
     axs[1].legend(fontsize=7, loc='lower right')
     axs[0].set_ylabel('relative l2 error at day 12')
     fig.tight_layout()
-    fig.savefig(os.path.join(args.out, f'shnorm_{tag}.png'))
+    fig.savefig(outfile)
     plt.close(fig)
+
+
+def sub_label(args):
+    return 'semi-discrete exp(AT)' if not args.rk4 else f'RK4, dt/{args.sub}'
 
 
 def main():
@@ -147,16 +151,36 @@ def main():
                    help='plot degrees with at least this many mean GLL points per wavelength '
                         '(beyond it interpolated harmonics alias onto lower degrees)')
     p.add_argument('--replot', action='store_true', help='only redo the plot from the saved npz files')
+    p.add_argument('--compare-alpha', action='store_true',
+                   help='with --replot: overlay alpha=0 (sc1) and alpha=pi/4 (sc4) for each of --forms')
     args = p.parse_args()
     os.makedirs(args.out, exist_ok=True)
     rep, res = [], {}
     tag = f'ne{args.ne}-sc{args.sc}-nu{args.nu30:g}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd')
     if args.replot:
+        scs = (1, 4) if args.compare_alpha else (args.sc,)
+        curves = []
         for f in args.forms:
-            r = np.load(os.path.join(args.out, f'{name(args.ne, args.sc, f, args.velocity)}-{tag}-shnorm.npz'))
-            res[f] = {k: r[k] for k in ('E', 'rms', 'in', 'out', 'cN')}
-            n = int(r['n'])
-        plot(res, args, n, tag)
+            for sc in scs:
+                t = f'ne{args.ne}-sc{sc}-nu{args.nu30:g}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd')
+                r = np.load(os.path.join(args.out, f'{name(args.ne, sc, f, args.velocity)}-{t}-shnorm.npz'))
+                if args.compare_alpha:
+                    lab = f'alpha={ALPHA[sc]}' + (f', {FORM[f]}' if len(args.forms) > 1 else '')
+                    col = SCCOL[sc] if len(args.forms) == 1 else (SCCOL[sc] if f == 2 else FCOL[0])
+                else:
+                    lab, col = FORM[f], FCOL[f]
+                curves.append((lab, col, {k: r[k] for k in ('E', 'rms', 'in', 'out', 'cN')}))
+                n = int(r['n'])
+        if args.compare_alpha:
+            forms = ', '.join(FORM[f] for f in args.forms)
+            title = f'NE{args.ne}, {forms}, nu30={args.nu30:g}, {sub_label(args)}: ||(exp(AT)-I) Q_N|| per degree'
+            out = os.path.join(args.out, f'shnorm_ne{args.ne}-alpha-f{"".join(map(str, args.forms))}'
+                                         f'-nu{args.nu30:g}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd') + '.png')
+        else:
+            title = (f'NE{args.ne}, alpha={ALPHA[args.sc]}, nu30={args.nu30:g}, {sub_label(args)}: '
+                     f'||(exp(AT)-I) Q_N|| per degree')
+            out = os.path.join(args.out, f'shnorm_{tag}.png')
+        plot(curves, title, n, args.nmax, args.ppw_min, out)
         return
     for f in args.forms:
         nm = name(args.ne, args.sc, f, args.velocity)
@@ -211,7 +235,10 @@ def main():
             rep.append(f'   {N:2d}  {r["E"][N]:.3e}   {r["rms"][N]:.3e}   {r["in"][N]:.3e}   {r["out"][N]:.3e}   '
                        f'{cN[N] / np.linalg.norm(q0):.3e}')
 
-    plot(res, args, d['n'], tag)
+    plot([(FORM[f], FCOL[f], res[f]) for f in args.forms],
+         f'NE{args.ne}, alpha={ALPHA[args.sc]}, nu30={args.nu30:g}, {sub_label(args)}: '
+         f'||(exp(AT)-I) Q_N|| per degree', d['n'], args.nmax, args.ppw_min,
+         os.path.join(args.out, f'shnorm_{tag}.png'))
     txt = '\n'.join(rep)
     print(txt)
     with open(os.path.join(args.out, f'shnorm_{tag}.txt'), 'w') as fo:
