@@ -24,8 +24,9 @@ Errors are those of HOMME's tc1_errors: relative l2 with the assembled GLL mass
 Gaussian's amplitude and E_j = |g_j| a_j its error contribution; sum E_j^2 equals
 ||e||_M^2 when the eigenvectors are M-orthogonal (split form: to ~1e-6).
 
-Dense eigenvectors are computed one symmetry block at a time (opmat_sym.py);
-NE20 alpha=pi/4 (two blocks of 10801) needs about 6 GB.  Use
+Dense eigenvectors are computed one symmetry block at a time (opmat_sym.py:
+rotation and antipodal map, 4 blocks for alpha=pi/4, 8 for alpha=0); NE30
+alpha=pi/4 (four blocks of about 12150) needs about 7 GB.  Use
 OPENBLAS_NUM_THREADS=1 when the cores are shared.
 """
 import argparse
@@ -36,7 +37,7 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
 from opmat_io import load
-from opmat_sym import symmetry_blocks, xyz
+from opmat_sym import block_eigs, xyz
 from opmat_eigs import name, omega, rk4_amp, rotation_axis, cube_distances
 
 RR, LATC, LONC = 1.0 / 3.0, 0.0, 1.5 * np.pi     # tc1_geopotential, level 2 (Gaussian)
@@ -111,28 +112,16 @@ def modal(d, p0, T, dt, nstep, B, skew, chunk=1000, ntop=8):
     sq = np.sqrt(mass)
     S = (sp.diags(sq) @ d['L'] @ sp.diags(1 / sq)).tocsr()
     q0 = sq * p0
-    _, blocks = symmetry_blocks(d['lat'], d['lon'], alpha)
-    m = len(blocks)
+    # skew-Hermitian part: i K_k is Hermitian, orthonormal eigenvectors
+    herm = (lambda Ak: 0.5j * (Ak - Ak.conj().T)) if skew else None
     out = {k: [] for k in ('lam', 'c', 'k', 'snorm', 'mstar', 'purity', 'corner', 'edge', 'q')}
     e_sd = np.zeros(d['n'], complex)
     e_fd = np.zeros(d['n'], complex)
     e_res = np.zeros(d['n'], complex)        # semi-discrete error from resolved modes
     top = []                                 # (E_j, lambda_j, v_j) of the largest error contributions
     gram = 0.0
-    prev = None
-    for k, Q in blocks:
-        t0 = time.time()
-        if m == 4 and k == 3:                       # block 3 = conj(block 1) for real L, p0
-            lam, U = np.conj(prev[0]), np.conj(prev[1])
-        else:
-            Ak = (Q.conj().T @ (S @ Q)).toarray()
-            if skew:
-                # skew-Hermitian part: i K_k is Hermitian, orthonormal eigenvectors
-                w, U = np.linalg.eigh(0.5j * (Ak - Ak.conj().T))
-                lam = -1j * w
-            else:
-                lam, U = np.linalg.eig(Ak)
-            del Ak
+    t0 = time.time()
+    for k, lam, Q, U, info in block_eigs(S, d['lat'], d['lon'], alpha, vectors=True, hermitian=herm):
         # departure from orthonormality of the eigenvectors (unit 2-norm columns)
         G = U.conj().T @ U
         gram = max(gram, np.abs(G - np.eye(len(lam))).max())
@@ -155,10 +144,9 @@ def modal(d, p0, T, dt, nstep, B, skew, chunk=1000, ntop=8):
             for key in r:
                 out[key].append(r[key])
         out['lam'].append(lam); out['c'].append(c); out['k'].append(np.full(len(lam), k))
-        if m == 4 and k == 1:
-            prev = (lam, U)
         del U
         print(f'    block {k}: size {Q.shape[1]}, {time.time() - t0:.0f} s', flush=True)
+        t0 = time.time()
     r = {key: np.concatenate(v) for key, v in out.items() if v}
     r['e_sd'], r['e_fd'], r['e_res'] = e_sd / sq, e_fd / sq, e_res / sq
     r['top_E'] = np.array([x[0] for x in top]) / np.sqrt((q0 ** 2).sum())
