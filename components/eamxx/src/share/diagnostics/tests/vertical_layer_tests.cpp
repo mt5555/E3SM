@@ -57,7 +57,9 @@ void run (const std::string& diag_name, const std::string& location)
 
   // Note: we are not testing the calculate_dz utility. We are testing
   //       the diag class, so use some inputs that make checking results easier
-  //       With these inputs, T_virt=T, and dz=8*rd/g
+  //       With these inputs, T_virt=T, and dz=8*rd/g. With qv=0, the dry mass is
+  //       pseudo_density (q_dry=1), and the dry-air dz is the same (exactly, since T
+  //       and rho are powers of 2)
   const Real g = PC::gravit.value;
   const Real rho_val = 4;
   const Real qv_val = 0;
@@ -71,6 +73,7 @@ void run (const std::string& diag_name, const std::string& location)
   input_fields["T_mid"].deep_copy(T_val);
   input_fields["p_mid"].deep_copy(p_val);
   input_fields["pseudo_density"].deep_copy(rho_val);
+  input_fields["pseudo_density_dry"].deep_copy(rho_val*(1-qv_val));
   input_fields["qv"].deep_copy(qv_val);
   if (needs_phis) {
     input_fields["phis"].deep_copy(phis_val);

@@ -354,7 +354,9 @@ void MassAndEnergyConservationCheck::global_fixer(const bool air_sea_surface_wat
   Kokkos::parallel_for(policy, KOKKOS_LAMBDA (const KT::MemberType& team) {
     const int i = team.league_rank();
     const auto pseudo_density_i = ekat::subview(pseudo_density, i);
-    // Calculate total gas mass (sum dp, no water loading)
+    // Calculate total mass (sum dp). This is the mass that weights Cpair*T in the
+    // total energy, so the fixer below closes the energy budget exactly. With
+    // condensate water loading, dp also includes the condensates.
     field_view_s1(i) = compute_gas_mass_on_column(team, nlevs, pseudo_density_i) * area_view(i);
   });
   Kokkos::fence();

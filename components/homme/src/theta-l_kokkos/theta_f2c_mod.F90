@@ -35,6 +35,16 @@ interface
     real(kind=c_double), intent(in) :: tom_sponge_start
   end subroutine init_simulation_params_c
 
+  ! Copies the condensate water loading parameters to C++ (condensate_idx is 1-based)
+  subroutine init_water_loading_c (water_loading, num_condensates, condensate_idx) bind(c)
+    use iso_c_binding, only: c_int
+    !
+    ! Inputs
+    !
+    integer(kind=c_int), intent(in) :: water_loading, num_condensates
+    integer(kind=c_int), intent(in) :: condensate_idx(*)
+  end subroutine init_water_loading_c
+
   ! Creates element structures in C++
   subroutine init_elements_c (nelemd) bind(c)
     use iso_c_binding, only: c_int

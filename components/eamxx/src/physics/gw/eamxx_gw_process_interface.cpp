@@ -49,6 +49,9 @@ void GWDrag::create_requests() {
   add_field<Required>("p_mid",                scalar3d_mid, Pa,     grid_name, pack_size);
   add_field<Required>("p_int",                scalar3d_int, Pa,     grid_name, pack_size);
   add_field<Required>("pseudo_density",       scalar3d_mid, Pa,     grid_name, pack_size);
+  if (m_params.get<bool>("water_loading", false)) {
+    add_field<Required>("pseudo_density_dry", scalar3d_mid, Pa, grid_name, pack_size);
+  }
   add_field<Required>("phis",                 scalar2d,     m2/s2,  grid_name);
   add_field<Required>("landfrac",             scalar2d,     nondim, grid_name);
   add_field<Required>("sgh",                  scalar2d,     nondim, grid_name);
@@ -190,6 +193,12 @@ void GWDrag::run_impl (const double dt) {
   const auto loc_p_mid     = p_mid;
   const auto loc_p_int     = p_int;
   const auto loc_p_del     = p_del;
+  // Condensate water loading: R* uses the dry mass (p_del_dry is not used if disabled)
+  const bool water_loading = m_params.get<bool>("water_loading", false);
+  auto loc_p_del_dry = loc_p_del;
+  if (water_loading) {
+    loc_p_del_dry = get_field_in("pseudo_density_dry").get_view<const Real**>();
+  }
   GWF::view_2d<const Real> loc_deep_conv_t_tend;
   if (common_init.use_gw_convect) {
     loc_deep_conv_t_tend = deep_conv_t_tend;
@@ -268,7 +277,10 @@ void GWDrag::run_impl (const double dt) {
     auto z_del_i = ekat::subview(loc_z_del, i);
     auto z_int_i = ekat::subview(loc_z_int, i);
     auto z_surf = 0.0; // z_mid & z_int are altitude above the surface
-    PF::calculate_dz(team, p_del_i, p_mid_i, T_mid_i, qv_i, z_del_i);
+    const auto p_del_dry_i = ekat::subview(loc_p_del_dry, i);
+    // Dry-air mass fraction, per unit total mass
+    const auto q_dry = [&](const int k) { return p_del_dry_i(k)/p_del_i(k); };
+    PF::calculate_dz(team, p_del_i, p_mid_i, T_mid_i, q_dry, qv_i, water_loading, z_del_i);
     team.team_barrier();
     PF::calculate_z_int(team, nlev_mid, z_del_i, z_surf, z_int_i);
     team.team_barrier();

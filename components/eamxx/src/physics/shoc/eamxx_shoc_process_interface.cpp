@@ -76,6 +76,9 @@ void SHOCMacrophysics::create_requests()
   add_field<Required>("p_int",          scalar3d_int, Pa,    grid_name, ps);
   add_field<Required>("pseudo_density", scalar3d_mid, Pa,    grid_name, ps);
   add_field<Required>("phis",           scalar2d    , m2/s2, grid_name);
+  if (m_params.get<bool>("water_loading", false)) {
+    add_field<Required>("pseudo_density_dry", scalar3d_mid, Pa, grid_name, ps);
+  }
   if (do_3d_turb) {
     const auto vector3d_mid_6 = m_grid->get_3d_vector_layout(LEV,6);
     add_field<Required>("tke_shear_strain3d_components", vector3d_mid_6,nondim/s, grid_name, ps);
@@ -374,6 +377,10 @@ void SHOCMacrophysics::initialize_impl (const RunType run_type)
                                 wtracer_sfc,wm_zt,inv_exner,thlm,qw, cldfrac_liq, cldfrac_liq_prev,
                                 upwp_sfc_pert, vpwp_sfc_pert, um_pert, vm_pert,
                                 um_pert_diff, vm_pert_diff);
+  shoc_preprocess.water_loading = m_params.get<bool>("water_loading", false);
+  shoc_preprocess.pseudo_density_dry = shoc_preprocess.water_loading
+                                     ? get_field_in("pseudo_density_dry").get_view<const Pack**>()
+                                     : pseudo_density;
 
   // Input Variables:
   input.zt_grid     = shoc_preprocess.zt_grid;

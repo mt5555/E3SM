@@ -151,6 +151,13 @@ module control_mod
   integer, public  :: use_cpstar=0          ! use cp or cp* in thermodynamics
   logical, public  :: use_moisture=.false.  ! use Q(:,:,:,1) to compute T_v
 
+  ! condensate water loading: dp3d is total mass (dry air + vapor + condensates),
+  ! so dry mass removes the condensate tracers listed in condensate_idx as well as vapor
+  integer, public, parameter :: max_condensates=10
+  logical, public  :: water_loading=.false.
+  integer, public  :: num_condensates=0                 ! number of entries in condensate_idx
+  integer, public  :: condensate_idx(max_condensates)=0 ! tracer indices of the condensates (1-based)
+
   
   integer              , public :: maxits         ! max iterations of solver
   real (kind=real_kind), public :: tol            ! solver tolerance (convergence criteria)

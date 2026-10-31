@@ -970,6 +970,14 @@ be lost if SCREAM_HACK_XML is not enabled.
     <property_check_data_fields type="array(string)" doc="list of additional data fields to output in property checks (only for physics grid)">phis,landfrac</property_check_data_fields>
     <enable_iop type="logical" doc="Enable intensive observation period. Currently the only use case is DP-EAMxx">false</enable_iop>
     <enable_iop COMPSET=".*DP-EAMxx">true</enable_iop>
+    <water_loading type="logical"
+                   doc="Condensate water loading: pseudo_density/dp3d is total mass (dry air, vapor and condensates), so dry mass also removes the condensates">
+      false
+    </water_loading>
+    <water_loading_condensates type="array(string)"
+                               doc="Tracers counted as condensate mass when water_loading is true">
+      qc,qr,qi
+    </water_loading_condensates>
   </driver_options>
 
   <!-- E3SM Simulation Settings -->

@@ -188,6 +188,20 @@ void init_simulation_params_c (const int& remap_alg, const int& limiter_option, 
 
 }
 
+void init_water_loading_c (const int& water_loading, const int& num_condensates, const int* condensate_idx)
+{
+  auto& params = Context::singleton().get<SimulationParams>();
+  auto& wl = params.water_loading;
+  Errors::check_option("init_water_loading_c","num_condensates",num_condensates,0,Errors::ComparisonOp::GE);
+  Errors::check_option("init_water_loading_c","num_condensates",num_condensates,
+                       WaterLoading::max_condensates,Errors::ComparisonOp::LE);
+  wl.enabled = (bool)water_loading;
+  wl.num_condensates = num_condensates;
+  for (int i=0; i<num_condensates; ++i) {
+    wl.condensate_idx[i] = condensate_idx[i]-1; // Fortran to C index
+  }
+}
+
 void init_hvcoord_c (const Real& ps0, CRCPtr& hybrid_am_ptr, CRCPtr& hybrid_ai_ptr,
                                       CRCPtr& hybrid_bm_ptr, CRCPtr& hybrid_bi_ptr)
 {

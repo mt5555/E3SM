@@ -50,6 +50,7 @@ nav:
       - 'Fields': 'developer/field.md'
       - 'Grids and Remappers': 'developer/grid.md'
       - 'Atmosphere Processes': 'developer/processes.md'
+      - 'Mixing Ratios and Dry Mass': 'developer/mixing_ratios.md'
       - 'Input/Output': 'developer/io.md'
       - 'Third-party Libraries': 'developer/TPLs.md'
     - 'How to':

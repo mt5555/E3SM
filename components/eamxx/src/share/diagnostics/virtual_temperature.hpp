@@ -7,7 +7,11 @@ namespace scream
 {
 
 /*
- * This diagnostic will produce the virtual temperature.
+ * This diagnostic will produce the virtual temperature,
+ *   Tv = T*(q_dry + qv*Rv/Rd),
+ * that is, T times R* divided by Rd, with R* = Rd*q_dry + Rv*qv computed from the
+ * dry-air mass fraction q_dry = pseudo_density_dry/pseudo_density, as in the dycore.
+ * With condensate water loading, pseudo_density_dry also excludes the condensates.
  */
 
 class VirtualTemperature : public AbstractDiagnostic

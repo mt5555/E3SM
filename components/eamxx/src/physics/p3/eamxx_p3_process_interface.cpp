@@ -354,6 +354,7 @@ void P3Microphysics::initialize_impl (const RunType /* run_type */)
                         T_atm,cld_frac_t_in,cld_frac_l_in,cld_frac_i_in,
                         qv, qc, nc, qr, nr, qi, qm, ni, bm, qv_prev,
                         inv_exner, th_atm, cld_frac_l, cld_frac_i, cld_frac_r, dz, runtime_options);
+  p3_preproc.water_loading = m_params.get<bool>("water_loading",false);
   // --Prognostic State Variables:
   prog_state.qc     = p3_preproc.qc;
   prog_state.nc     = p3_preproc.nc;

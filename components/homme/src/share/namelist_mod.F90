@@ -91,6 +91,10 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
     u_perturb,     &        ! J&W baroclinic test perturbation size
     moisture,      &
     use_moisture,      &
+    water_loading,     &
+    num_condensates,   &
+    condensate_idx,    &
+    max_condensates,   &
     vfile_mid,     &
     vfile_int,     &
     vanalytic,     &
@@ -356,7 +360,9 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
       restartdir,      &             ! name of the restart directory for OUTPUT
       runtype,         &
       tstep,           &             ! dynamics time step
-      moisture
+      moisture,        &
+      water_loading,   &             ! dp3d includes condensates (requires moisture)
+      condensate_idx                 ! tracer indices (1-based) of the condensates
     ! control parameters for dcmip stand-alone tests
     namelist /ctl_nl/     &
       dcmip2_0_h0,        & !dcmip2-0 mountain height           (meters)
@@ -884,6 +890,8 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
     call MPI_bcast(LFTfreq,1,MPIinteger_t ,par%root,par%comm,ierr)
     call MPI_bcast(prescribed_wind,1,MPIinteger_t ,par%root,par%comm,ierr)
     call MPI_bcast(moisture,MAX_STRING_LEN,MPIChar_t ,par%root,par%comm,ierr)
+    call MPI_bcast(water_loading,1,MPIlogical_t ,par%root,par%comm,ierr)
+    call MPI_bcast(condensate_idx,max_condensates,MPIinteger_t ,par%root,par%comm,ierr)
     call MPI_bcast(se_fv_phys_remap_alg,1,MPIinteger_t ,par%root,par%comm,ierr)
     call MPI_bcast(internal_diagnostics_level,1,MPIinteger_t ,par%root,par%comm,ierr)
 
@@ -934,6 +942,21 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
     if (qsize<1) use_moisture = .false.  
 
     if(par%masterproc) print *, "use moisture:", use_moisture
+
+    ! condensate water loading: the condensates are the nonzero entries of condensate_idx
+    num_condensates = count(condensate_idx > 0)
+    if (water_loading) then
+       if (.not. use_moisture) call abortmp('water_loading requires moisture')
+       if (any(condensate_idx(num_condensates+1:) /= 0)) &
+            call abortmp('water_loading: condensate_idx entries must be listed first, with no gaps')
+       if (any(condensate_idx(1:num_condensates) < 2) .or. any(condensate_idx(1:num_condensates) > qsize)) &
+            call abortmp('water_loading: condensate_idx entries must be in [2,qsize]')
+       do i=2,num_condensates
+          if (any(condensate_idx(1:i-1) == condensate_idx(i))) &
+               call abortmp('water_loading: condensate_idx entries must not repeat')
+       enddo
+       if(par%masterproc) print *, "water loading condensates:", condensate_idx(1:num_condensates)
+    endif
 
 
     ! use maximum available:
