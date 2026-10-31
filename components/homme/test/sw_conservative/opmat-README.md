@@ -117,7 +117,13 @@ B takes 2 min at NE60 and 9 min at NE120 on 4 ranks (NE120 B: 94.5 M entries, 1.
   `OPENBLAS_NUM_THREADS=1`: NE16 2.3 min (α=0) and 7.5 min (α=π/4), NE20 8 min and 30 min
   (four blocks of about 5,460, peak 3.3 GB). With 4 threads, one NE20 α=π/4 block takes 2 min.
   Peak memory is about 4 × 16 n_k² bytes per block (n_k the block size), so NE30 α=π/4
-  (blocks of about 12,150) needs about 10 GB; expected time about 1.5 h on 4 threads.
+  (blocks of about 12,150) needs about 10 GB. Measured at NE30 on 4 threads: α=0 36 min (peak
+  6.2 GB), α=π/4 about 27 min per block. Each finished block is checkpointed in
+  `OUT/<case>-ckpt` (its per-mode results and its parts of the error fields, not the
+  eigenvectors), so a run interrupted by, e.g., a container restart resumes when started again
+  with the same arguments; a checkpoint made for different settings is not reused, and it is
+  removed once the case is saved (`--no-checkpoint` turns this off). Resumed NE8 runs are
+  identical to uninterrupted ones.
 - **Caveat on m\***: `mstar` and `purity` (in `opmat_eigs.py` and `opmat_proj.py`) project a
   mode onto e^{imφ} summed over the whole sphere. For about half the modes (those odd about the
   plane perpendicular to the rotation axis) that sum vanishes and m\* is roundoff noise, but

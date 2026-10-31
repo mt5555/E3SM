@@ -138,16 +138,22 @@ def eig_unbalanced(A, maxscale=1e3, seed=0):
     return lam, Z @ U
 
 
-def block_eigs(A, lat, lon, alpha, vectors=False, inversion=True, hermitian=None, driver='evd'):
+def block_eigs(A, lat, lon, alpha, vectors=False, inversion=True, hermitian=None, driver='evd', skip=()):
     """generator over the symmetry blocks of A, one at a time:
     yields (label, lam, Q, U, info), with A (Q U) = (Q U) diag(lam) (U None without
     vectors).  hermitian: optional function Ak -> Hermitian matrix H, then lam = -i
     eig(H) (for i K with K skew: the eigenpairs of the skew part).  info holds the
-    commutation errors of the generators, the off-block residual and the block size."""
+    commutation errors of the generators, the off-block residual and the block size.
+    skip: labels not to solve (e.g. already checkpointed); they are yielded with
+    lam = U = None, unless a block that is solved is their complex conjugate."""
     gens, blocks = symmetry_blocks(lat, lon, alpha, inversion)
     comm = max(check_commutes(A, perm) for perm, _, _ in gens)
+    needed = {src for lab, _, src in blocks if src is not None and lab not in skip}
     done = {}
     for lab, Q, src in blocks:
+        if lab in skip and lab not in needed:
+            yield lab, None, Q, None, dict(commute=comm, offblock=np.nan, size=Q.shape[1], m=len(blocks))
+            continue
         if src is not None:
             lam, U, off = done.pop(src)
             lam, U = np.conj(lam), (None if U is None else np.conj(U))
@@ -169,7 +175,7 @@ def block_eigs(A, lat, lon, alpha, vectors=False, inversion=True, hermitian=None
                 else:
                     lam, U = np.linalg.eigvals(Ak), None
                 del Ak
-            if any(s == lab for _, _, s in blocks):
+            if lab in needed:
                 done[lab] = (lam, U, off)
         yield lab, lam, Q, U, dict(commute=comm, offblock=off, size=Q.shape[1], m=len(blocks))
 
