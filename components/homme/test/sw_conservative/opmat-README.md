@@ -231,19 +231,21 @@ Then ‖e‖² = Σ_j a_j² |e^{λ_j T} − 1|² exactly, with a_j = |c_j|/‖p0
 | 12 | 0 / π/4 | 0.89 / 0.91 | 81 / 824 | 0.70 / 1.27 |
 | 16 | 0 / π/4 | 0.81 / 0.96 | 63 / 888 | 0.70 / 1.61 |
 | 20 | 0 / π/4 | 0.57 / 0.98 | 53 / 844 | 0.69 / 2.42 |
+| 30 | 0 / π/4 | 0.22 / 0.99 | 51 / 1036 | 0.70 / 3.43 |
 
 - α=0: the error moves to resolved modes as NE grows. Its largest contributors at NE20 are
   smooth equatorial waveguide modes with eigenvalues close to integers (−8.965i ω, +5.990i ω):
-  ordinary phase error, which converges at 4th order.
-- α=π/4: unresolved modes keep 96–98% of the error, and their error converges more slowly
-  with each step (orders 6.7, 6.1, 4.4, 3.9 for NE 8→10→12→16→20), while the resolved part
-  converges at about 5.6. The error-carrying modes become more concentrated on the cube edges.
-- **Edge-trapped modes.** At NE16 and NE20 the largest single contributors at α=π/4 are a
+  ordinary phase error, which converges at 4th order. At NE30 the same modes lead (±5.995i, ±8.985i ω)
+  and resolved modes carry 78% of ‖e‖².
+- α=π/4: unresolved modes keep 96–99% of the error, and their error converges more slowly
+  with each step (orders 6.7, 6.1, 4.4, 3.9, 3.6 for NE 8→10→12→16→20→30), while the resolved part
+  converges at about 5.6 (3.9 for NE20→30). The error-carrying modes become more concentrated on the cube edges.
+- **Edge-trapped modes.** At NE16, 20 and 30 the largest single contributors at α=π/4 are a
   conjugate pair of modes trapped on exactly the two cube edges the path follows, corner to
   corner (lon 315→45 at the top, 135→225 at the bottom), grid-scale across the edge. Their
-  eigenvalue does not scale with 1/h: ±3.654i, 3.719i, 3.738i ω at NE10, 16, 20 (3.615 at NE8;
+  eigenvalue does not scale with 1/h: ±3.654i, 3.719i, 3.738i, 3.773i ω at NE10, 16, 20, 30 (3.615 at NE8;
   odd NE15 has a similar pair at 5.58i). The 0.5% most edge-concentrated modes carry 0.1%,
-  3% and 16% of ‖e‖² at NE8, 16 and 20. A spurious mode with an O(ω) frequency is not averaged
+  3%, 16% and 18% of ‖e‖² at NE8, 16, 20 and 30; at NE30 the top pair alone carries 10%. A spurious mode with an O(ω) frequency is not averaged
   out by the moving Gaussian, so the truncation error that drives it accumulates.
 - Removing the unresolved modes from the initial condition does not help: the removed part is
   itself an error at day 12 of the same size (NE12 α=π/4: 2.3e-3, against a day-12 error of
@@ -345,9 +347,9 @@ scans with about 30 ν values 1.5 min (NE30), 10 min (NE60) and 2 h (NE120, 20 �
    For the split form with the curl ψ velocity, S = M^½ L M^-½ is skew, so use a symmetric
    solver on −S² (or Hermitian iS): much faster and parallel (dsyevd, ELPA, cuSOLVER).
    Regenerate the NE30 matrices with `swtc1-opmat.sh` (minutes); they are not in git.
-   NE30 eigenvectors would give the edge-trapped modes and the modal budget in the asymptotic
-   regime (`opmat_proj.py --eig 30`). With the antipodal symmetry (October 2026) the skew-part
-   eigenvectors fit on a 15 GB machine: four Hermitian blocks of about 12,150 for α=π/4.
+   NE30 skew-part eigenvectors are done (`opmat_proj.py --eig 30`, October 2026, with the antipodal
+   symmetry on a 15 GB machine; results in the modal table above). Full dense L at NE30 still needs
+   the bigger machine.
 3. **Why α=π/4's max norm drops to p=3: largely answered** (edge-trapped modes, section
    above). Worth checking whether the planar kinked-mesh tests had flow running parallel to a
    kink for a long time, which is what the α=π/4 path does. Possible ways to recover 4th order, to test:
