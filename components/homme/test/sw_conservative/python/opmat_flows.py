@@ -150,6 +150,8 @@ def parse(nm):
 
 
 def r_of(meta):
+    if meta.get('psi', 'solidbody') == 'file':
+        return meta['psi_r'] if meta['psi_r'] >= 0 else np.inf
     if meta.get('psi', 'solidbody') != 'ylm':
         return 0.0
     l = meta['psi_l']
@@ -167,12 +169,17 @@ def analyze(cache, path, nmodes):
         tres = max(np.linalg.norm(L @ x[:, k] - y[:, k]) / np.linalg.norm(y[:, k]) for k in range(x.shape[1]))
         sk, _ = skew_sym_err(L, mass)
         lam = np.linalg.eigvals(L.toarray())
-        X = xyz(d['lat'], d['lon'])
-        U = velocity_3d(meta, X)
-        speed = np.linalg.norm(U, axis=1)
-        G, Gs = gradient_scale(meta, X)
+        if meta.get('psi', 'solidbody') == 'file':
+            # no analytic field: the discrete velocity and vorticity written by sweqx
+            speed = np.linalg.norm(d['vel'], axis=1)
+            G, Gs = np.abs(d['zeta']).max(), np.nan
+        else:
+            X = xyz(d['lat'], d['lon'])
+            speed = np.linalg.norm(velocity_3d(meta, X), axis=1)
+            G, Gs = gradient_scale(meta, X)
+        zmax = np.abs(d['zeta']).max() if 'zeta' in d else np.nan
         r = dict(meta=np.array(meta, dtype=object), lam=lam, tres=tres, skew=sk, om=om, G=G, Gs=Gs, umax=speed.max(), rearth=meta['rearth'],
-                 lat=d['lat'], lon=d['lon'], mass=mass, speed=speed)
+                 lat=d['lat'], lon=d['lon'], mass=mass, speed=speed, zmax=zmax)
         # top growing modes (one of each conjugate pair), eigenvectors by shift-invert
         o = np.argsort(-lam.real)
         sel = [j for j in o if lam[j].imag >= 0][:nmodes]
