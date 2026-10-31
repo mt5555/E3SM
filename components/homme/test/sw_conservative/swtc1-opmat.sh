@@ -18,7 +18,12 @@
 #   SWEQX_TC1_PSI=solidbody (default) or ylm
 #   SWEQX_TC1_PSI_PARAMS=l,m,eps  for ylm: psi = psi_solidbody + eps*a*u0*Y_l^m,
 #                                 the velocity rescaled to max|u| = u0
-#   psitag = "" for solidbody, else -ylm<l>_<m>_<eps>, e.g. ne8-sc1-f0-curlpsi-ylm4_2_0.5
+#   SWEQX_TC1_PSI=file with SWEQX_TC1_PSI_FILE=path: nodal psi/(a*u0), stream records
+#                                 (int64 gdofP, real64 value) (python/opmat_noise.py writes them);
+#                                 optional SWEQX_TC1_PSI_PARAMS=r adds it to the solid body with
+#                                 rms|u_file| = r*rms|u_solidbody|; rescaled to max|u| = u0
+#   psitag = "" for solidbody, -ylm<l>_<m>_<eps> for ylm (e.g. ne8-sc1-f0-curlpsi-ylm4_2_0.5),
+#            -<file basename without .bin>[_r<r>] for file
 #
 # with the default coloring the number of operator applications is independent
 # of NE (384 for L, 864 for B with np=4, nlev=4).  SWEQX_OPMAT_COLOR=0 probes one
@@ -41,7 +46,12 @@ nranks=${6:-1}
 mkdir -p $outdir
 outdir=$(cd $outdir && pwd)
 psitag=""
-if [ "$velocity" == curlpsi ] && [ -n "$SWEQX_TC1_PSI" ] && [ "$SWEQX_TC1_PSI" != solidbody ]; then
+if [ "$velocity" == curlpsi ] && [ "$SWEQX_TC1_PSI" == file ]; then
+    [ -r "$SWEQX_TC1_PSI_FILE" ] || { echo "missing SWEQX_TC1_PSI_FILE=$SWEQX_TC1_PSI_FILE"; exit 1; }
+    export SWEQX_TC1_PSI_FILE=$(cd $(dirname $SWEQX_TC1_PSI_FILE) && pwd)/$(basename $SWEQX_TC1_PSI_FILE)
+    psitag=-$(basename $SWEQX_TC1_PSI_FILE .bin)
+    [ -n "$SWEQX_TC1_PSI_PARAMS" ] && psitag=${psitag}_r$(echo "$SWEQX_TC1_PSI_PARAMS" | tr -d ' ')
+elif [ "$velocity" == curlpsi ] && [ -n "$SWEQX_TC1_PSI" ] && [ "$SWEQX_TC1_PSI" != solidbody ]; then
     psitag=-${SWEQX_TC1_PSI}$(echo "$SWEQX_TC1_PSI_PARAMS" | tr -d ' ' | tr ',' '_')
 fi
 name=ne${NE}-sc${subcase}-f${adv_form}-${velocity}${psitag}
