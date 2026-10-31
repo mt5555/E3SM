@@ -52,6 +52,8 @@ module opmat_mod
   !   <prefix>.B.r<r>.bin        same
   !   <prefix>.Ltest.r<r>.bin    (int32 dof, real64 x(nlev), real64 y(nlev)), y = L x computed
   !   <prefix>.Btest.r<r>.bin    directly, for test fields x, to validate the extracted matrix
+  !   <prefix>.vel.r<r>.bin      (int32 dof, real64 u_east, u_north, zeta), the curlpsi velocity
+  !                              (m/s) and its DSS'd vorticity (1/s); only with curlpsi
   !
   ! ===========================================================================
   use kinds, only : real_kind, int_kind, long_kind
@@ -95,7 +97,7 @@ contains
     use control_mod, only : test_case, sub_case, theta_advect_form, kmass, hypervis_order, &
          hypervis_scaling, topology
     use physical_constants, only : dd_pi
-    use shallow_water_mod, only : tc1_parameters
+    use shallow_water_mod, only : tc1_parameters, tc1_velocity_diag
     use advance_mod, only : compute_and_apply_rhs
     use viscosity_mod, only : biharmonic_wk
     use edge_mod, only : edgeVpack, edgeVunpack
@@ -119,7 +121,8 @@ contains
     logical :: curlpsi
     character(len=16) :: psiname
     integer :: ylm_l,ylm_m
-    real (kind=real_kind) :: ylm_eps,uscale
+    real (kind=real_kind) :: ylm_eps,uscale,psi_r,psi_c,uv(np,np,2),zeta(np,np)
+    character(len=512) :: psifile
     integer :: n,nloc,stat,ie,i,j,ii,k,iop,ierr,unit
     character(len=1) :: op
     integer :: ncall,ic,col,row
@@ -154,7 +157,7 @@ contains
 #ifdef _MPI
     call MPI_Allreduce(nloc,n,1,MPIinteger_t,MPI_MAX,hybrid%par%comm,ierr)
 #endif
-    call tc1_parameters(u0,alpha,rearth,curlpsi,psiname,ylm_l,ylm_m,ylm_eps,uscale)
+    call tc1_parameters(u0,alpha,rearth,curlpsi,psiname,ylm_l,ylm_m,ylm_eps,uscale,psifile,psi_r,psi_c)
 
     owned = .false.
     do ie=nets,nete
@@ -199,6 +202,11 @@ contains
              write(unit,'(a,i0)') 'psi_m = ',ylm_m
              write(unit,'(a,es25.17)') 'psi_eps = ',ylm_eps
              write(unit,'(a,es25.17)') 'psi_uscale = ',uscale
+          else if (trim(psiname) == "file") then
+             write(unit,'(a,a)') 'psi_file = ',trim(psifile)
+             write(unit,'(a,es25.17)') 'psi_r = ',psi_r
+             write(unit,'(a,es25.17)') 'psi_c = ',psi_c
+             write(unit,'(a,es25.17)') 'psi_uscale = ',uscale
           endif
        else
           write(unit,'(a)') 'velocity = analytic'
@@ -220,6 +228,20 @@ contains
        enddo
     enddo
     close(unit)
+
+    ! curlpsi velocity (lat-lon, m/s) and DSS'd vorticity (1/s) at the unique points owned by this rank
+    if (curlpsi) then
+       open(newunit=unit,file=trim(prefix)//'.vel'//trim(rankstr),access='stream', &
+            form='unformatted',status='replace',action='write')
+       do ie=nets,nete
+          call tc1_velocity_diag(elem(ie),uv,zeta)
+          do ii=1,elem(ie)%idxP%NumUniquePts
+             i=elem(ie)%idxP%ia(ii); j=elem(ie)%idxP%ja(ii)
+             write(unit) int(fdof(i,j,ie)-1,4), real(uv(i,j,1),8), real(uv(i,j,2),8), real(zeta(i,j),8)
+          enddo
+       enddo
+       close(unit)
+    endif
 
     ! test fields (continuous: one value per global dof), for validation
     allocate(xg(n,nlev))
