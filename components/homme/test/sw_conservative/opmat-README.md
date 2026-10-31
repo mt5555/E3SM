@@ -86,9 +86,21 @@ B takes 2 min at NE60 and 9 min at NE120 on 4 ranks (NE120 B: 94.5 M entries, 1.
 ### Python (test/sw_conservative/python/)
 
 - `opmat_io.py`: `load(prefix)` returns `L`, `B` (scipy CSR), `lat`, `lon`, `mass`, `meta`, `Ltest`.
-- `opmat_sym.py`: block-diagonalizes L with the rotational symmetry of grid and flow
-  (90° about z for α=0, group Z4; 180° about the α=π/4 rotation axis, which passes through
-  two cube-edge midpoints, group Z2). Block eigenvalues match full dense ones to 1e-12 ω.
+- `opmat_sym.py`: block-diagonalizes L with the symmetries of grid and flow: a rotation
+  (90° about z for α=0, order 4; 180° about the α=π/4 rotation axis, which passes through
+  two cube-edge midpoints, order 2) and the antipodal map x → −x, which maps the grid onto
+  itself and commutes with any solid-body rotation. That gives 8 blocks for α=0 and 4 for
+  α=π/4, each about n/8 or n/4. `block_eigs()` builds and solves one block at a time (conjugate
+  blocks come from their partner without a solve), optionally for the Hermitian form of the
+  skew part. Both generators commute with L, B and every case to roundoff (1e-16 at NE8–20,
+  1e-15 at NE30). Block eigenvalues match full dense ones to 3e-12 ω (NE8, NE10). LAPACK's
+  balancing rescales some conservation-form blocks by up to 7e7, which left eigenvector
+  residuals near 1e-9 ‖L‖; `eig_unbalanced()` sidesteps it with a random orthogonal similarity.
+- `opmat_sym_test.py --mats DIR --test blocks|full|old|vectors|proj`: checks of the blocks
+  (orthonormality, symmetry eigenspaces, off-block residual), eigenvalues against full dense
+  solves and another symmetry module, eigenpair residuals, and `opmat_proj.py` results against
+  earlier runs. With the antipodal map added, NE16 and NE20 reproduce the earlier modal budgets
+  (error fields to 3e-9, per-mode error and diagnostics of isolated modes to 1e-8).
 - `opmat_eigs.py --mats DIR [--mats30 DIR30] --out OUT [--ne 8 15]`: the full analysis
   (checks, spectra, accuracy against −i m ω, localization, hyperviscosity), cached in
   `OUT/cache`, plots and `results.txt` in `OUT`. NE15 takes about 10 minutes on 4 cores.
@@ -102,8 +114,14 @@ B takes 2 min at NE60 and 9 min at NE120 on 4 ranks (NE120 B: 94.5 M entries, 1.
   M^½ L M^-½ (orthonormal, so the per-mode budget adds up exactly). Saves
   `OUT/<case>-proj.npz` with the error fields, per-mode amplitudes, eigenvalues and diagnostics,
   the error from resolved modes, and the 8 largest error-carrying eigenvectors. Dense cost with
-  `OPENBLAS_NUM_THREADS=1`: NE16 α=π/4 30 min, NE20 α=π/4 1.8 h (two Hermitian blocks of
-  10,802, about 6 GB); α=0 blocks are 4× smaller.
+  `OPENBLAS_NUM_THREADS=1`: NE16 2.3 min (α=0) and 7.5 min (α=π/4), NE20 8 min and 30 min
+  (four blocks of about 5,460, peak 3.3 GB). With 4 threads, one NE20 α=π/4 block takes 2 min.
+  Peak memory is about 4 × 16 n_k² bytes per block (n_k the block size), so NE30 α=π/4
+  (blocks of about 12,150) needs about 10 GB; expected time about 1.5 h on 4 threads.
+- **Caveat on m\***: `mstar` and `purity` (in `opmat_eigs.py` and `opmat_proj.py`) project a
+  mode onto e^{imφ} summed over the whole sphere. For about half the modes (those odd about the
+  plane perpendicular to the rotation axis) that sum vanishes, and m\* is roundoff noise; the
+  purity can still come out above 0.5. Results that select modes by m\* include such modes.
 - `opmat_source.py --mats DIR --out OUT --ne 30 60`: integrates de/dt = L e + τ(t) with the
   truncation error τ = L p_ex − ∂ₜp_ex restricted to cube corners, cube-edge nodes, the
   one-element layer beside the edges and the interior, to show where the error is generated
@@ -319,8 +337,9 @@ scans with about 30 ν values 1.5 min (NE30), 10 min (NE60) and 2 h (NE120, 20 �
    For the split form with the curl ψ velocity, S = M^½ L M^-½ is skew, so use a symmetric
    solver on −S² (or Hermitian iS): much faster and parallel (dsyevd, ELPA, cuSOLVER).
    Regenerate the NE30 matrices with `swtc1-opmat.sh` (minutes); they are not in git.
-   NE30 eigenvectors (two Hermitian blocks of 24,301 for α=π/4, about 10 GB each) would give
-   the edge-trapped modes and the modal budget in the asymptotic regime (`opmat_proj.py --eig 30`).
+   NE30 eigenvectors would give the edge-trapped modes and the modal budget in the asymptotic
+   regime (`opmat_proj.py --eig 30`). With the antipodal symmetry (October 2026) the skew-part
+   eigenvectors fit on a 15 GB machine: four Hermitian blocks of about 12,150 for α=π/4.
 3. **Why α=π/4's max norm drops to p=3: largely answered** (edge-trapped modes, section
    above). Worth checking whether the planar kinked-mesh tests had flow running parallel to a
    kink for a long time, which is what the α=π/4 path does. Possible ways to recover 4th order, to test:

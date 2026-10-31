@@ -138,7 +138,7 @@ def eig_unbalanced(A, maxscale=1e3, seed=0):
     return lam, Z @ U
 
 
-def block_eigs(A, lat, lon, alpha, vectors=False, inversion=True, hermitian=None):
+def block_eigs(A, lat, lon, alpha, vectors=False, inversion=True, hermitian=None, driver='evd'):
     """generator over the symmetry blocks of A, one at a time:
     yields (label, lam, Q, U, info), with A (Q U) = (Q U) diag(lam) (U None without
     vectors).  hermitian: optional function Ak -> Hermitian matrix H, then lam = -i
@@ -155,17 +155,20 @@ def block_eigs(A, lat, lon, alpha, vectors=False, inversion=True, hermitian=None
             Ak, off = block_matrix(A, Q)
             if hermitian is not None:
                 H = hermitian(Ak)
-                if vectors:
-                    w, U = np.linalg.eigh(H)
-                else:
-                    w, U = np.linalg.eigvalsh(H), None
-                lam = -1j * w
+                del Ak
+                # in place; driver 'evd' (divide and conquer, orthogonal to 1e-15) needs ~2 n^2
+                # complex of workspace, 'evr' (MRRR) O(n) but orthogonal only to ~1e-11
+                r = scipy.linalg.eigh(H, eigvals_only=not vectors, overwrite_a=True, check_finite=False,
+                                      driver=driver)
                 del H
-            elif vectors:
-                lam, U = eig_unbalanced(Ak)
+                w, U = r if vectors else (r, None)
+                lam = -1j * w
             else:
-                lam, U = np.linalg.eigvals(Ak), None
-            del Ak
+                if vectors:
+                    lam, U = eig_unbalanced(Ak)
+                else:
+                    lam, U = np.linalg.eigvals(Ak), None
+                del Ak
             if any(s == lab for _, _, s in blocks):
                 done[lab] = (lam, U, off)
         yield lab, lam, Q, U, dict(commute=comm, offblock=off, size=Q.shape[1], m=len(blocks))
