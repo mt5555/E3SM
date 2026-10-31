@@ -122,11 +122,14 @@ def modal(d, p0, T, dt, nstep, B, skew, chunk=1000, ntop=8):
     gram = 0.0
     t0 = time.time()
     for k, lam, Q, U, info in block_eigs(S, d['lat'], d['lon'], alpha, vectors=True, hermitian=herm):
-        # departure from orthonormality of the eigenvectors (unit 2-norm columns)
-        G = U.conj().T @ U
-        gram = max(gram, np.abs(G - np.eye(len(lam))).max())
+        # departure from orthonormality of the eigenvectors (unit 2-norm columns), in chunks
+        for j0 in range(0, len(lam), chunk):
+            G = U[:, j0:j0 + chunk].conj().T @ U
+            G[:, j0:j0 + chunk] -= np.eye(G.shape[0])
+            gram = max(gram, np.abs(G).max())
         del G
-        c = np.linalg.solve(U, Q.conj().T @ q0)
+        x = Q.conj().T @ q0
+        c = U.conj().T @ x if skew else np.linalg.solve(U, x)     # U unitary for the skew part
         g_sd = np.expm1(lam * T)
         g_fd = rk4_amp(dt * lam) ** nstep - 1
         for j0 in range(0, len(lam), chunk):
