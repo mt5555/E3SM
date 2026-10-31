@@ -16,7 +16,7 @@ Three thresholds, all reported as nu30 = nu*(NE/30)^4 (m^4/s):
                 (v, y right/left eigenvectors, shift-invert).  A screen only: L is far from normal.
   * spectral:   nu_spec, the smallest nu above which max Re lambda(L - nu B) <= tol*omega,
                 from a scan over nu and bisection (dense eigenvalues), for the --spectral
-                fields with the largest screening value.
+                fields with the largest max Re lambda(L) (--rank), plus any already cached.
   * discrete:   HOMME's step p <- (I - dt nu B) R4(dt L) p (advance_nonstag_rk4, then
                 advance_hypervis with hypervis_subcycle=1): the window [nu_lo, nu_hi] of nu
                 with growth rate log(rho)/dt <= tol*omega, for the --discrete worst fields.
@@ -169,6 +169,9 @@ def main():
     p.add_argument('--baseline', action='store_true')
     p.add_argument('--nfo', type=int, default=20, help='growing modes in the first-order screen')
     p.add_argument('--spectral', type=int, default=12, help='fields for the spectral bisection')
+    p.add_argument('--rank', choices=['maxre', 'firstorder'], default='maxre',
+                   help='ranking for the spectral selection (first-order nu is inf when B does not damp '
+                        'the mode at first order, so it is a poor ranking)')
     p.add_argument('--discrete', type=int, default=4, help='fields for the RK4+hyperviscosity window')
     p.add_argument('--dt', type=float, default=None,
                    help='time step (default: as opmat_proj.timestep, 1800 s*30/NE per 12-day revolution, 7200 s at NE8)')
@@ -217,8 +220,12 @@ def main():
               f'energy(tol)={row["nuE"]:.2e} energy(0)={row["nuE0"]:.2e}', flush=True)
 
     # spectral and discrete thresholds for the fields with the largest screening value
-    order = sorted(rows, key=lambda row: -max(row['nufo'], 0))
-    for row in order[:args.spectral]:
+    key = (lambda row: -row['maxre']) if args.rank == 'maxre' else (lambda row: -max(row['nufo'], 0))
+    order = sorted(rows, key=key)
+    done = lambda pre, row: os.path.exists(os.path.join(cache.dir, pre + row['name'] + '.npz'))
+    spec_rows = order[:args.spectral] + [row for row in order[args.spectral:]
+                                         if done(f'hv-spec-tol{tol:g}-', row)]
+    for row in spec_rows:
         nm = row['name']
 
         def spec():
@@ -230,7 +237,8 @@ def main():
         row['nus'], row['gs'] = float(s['nus']), s['g'] / row['om']
         print(f'{nm}: nu30 spectral={row["nus"]:.2e}', flush=True)
     order = sorted([row for row in rows if 'nus' in row], key=lambda row: -row['nus'])
-    for row in order[:args.discrete]:
+    for row in order[:args.discrete] + [row for row in order[args.discrete:]
+                                        if done(f'hv-disc-dt{dt:g}-tol{tol:g}-', row)]:
         nm = row['name']
 
         def disc():
