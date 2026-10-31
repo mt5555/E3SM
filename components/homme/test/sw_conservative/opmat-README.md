@@ -120,8 +120,10 @@ B takes 2 min at NE60 and 9 min at NE120 on 4 ranks (NE120 B: 94.5 M entries, 1.
   (blocks of about 12,150) needs about 10 GB; expected time about 1.5 h on 4 threads.
 - **Caveat on m\***: `mstar` and `purity` (in `opmat_eigs.py` and `opmat_proj.py`) project a
   mode onto e^{imφ} summed over the whole sphere. For about half the modes (those odd about the
-  plane perpendicular to the rotation axis) that sum vanishes, and m\* is roundoff noise; the
-  purity can still come out above 0.5. Results that select modes by m\* include such modes.
+  plane perpendicular to the rotation axis) that sum vanishes and m\* is roundoff noise, but
+  their purity stays low (at most 0.42 seen, typically 0.1), so the usual purity > 0.5
+  selection excludes them: none of the selected modes at NE8 (L, all four cases) or NE16 (skew
+  part) is affected. Unfiltered m\* values (e.g. "top growing" in `results.txt`) can be noise.
 - `opmat_source.py --mats DIR --out OUT --ne 30 60`: integrates de/dt = L e + τ(t) with the
   truncation error τ = L p_ex − ∂ₜp_ex restricted to cube corners, cube-edge nodes, the
   one-element layer beside the edges and the interior, to show where the error is generated
