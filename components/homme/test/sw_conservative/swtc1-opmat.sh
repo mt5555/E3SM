@@ -12,7 +12,13 @@
 #   ops       L, B or LB (default LB).  B depends only on NE.
 #   nranks    MPI ranks (default 1).  Any number works; files are written per rank.
 #
-# output: $outdir/ne${NE}-sc${subcase}-f${adv_form}-${velocity}.*
+# output: $outdir/ne${NE}-sc${subcase}-f${adv_form}-${velocity}${psitag}.*
+#
+# stream function for velocity=curlpsi (environment, see tc1_init_velocity):
+#   SWEQX_TC1_PSI=solidbody (default) or ylm
+#   SWEQX_TC1_PSI_PARAMS=l,m,eps  for ylm: psi = psi_solidbody + eps*a*u0*Y_l^m,
+#                                 the velocity rescaled to max|u| = u0
+#   psitag = "" for solidbody, else -ylm<l>_<m>_<eps>, e.g. ne8-sc1-f0-curlpsi-ylm4_2_0.5
 #
 # with the default coloring the number of operator applications is independent
 # of NE (384 for L, 864 for B with np=4, nlev=4).  SWEQX_OPMAT_COLOR=0 probes one
@@ -34,7 +40,11 @@ nranks=${6:-1}
 [ ! -x $EXEC ] && { echo "missing $EXEC"; exit 1; }
 mkdir -p $outdir
 outdir=$(cd $outdir && pwd)
-name=ne${NE}-sc${subcase}-f${adv_form}-${velocity}
+psitag=""
+if [ "$velocity" == curlpsi ] && [ -n "$SWEQX_TC1_PSI" ] && [ "$SWEQX_TC1_PSI" != solidbody ]; then
+    psitag=-${SWEQX_TC1_PSI}$(echo "$SWEQX_TC1_PSI_PARAMS" | tr -d ' ' | tr ',' '_')
+fi
+name=ne${NE}-sc${subcase}-f${adv_form}-${velocity}${psitag}
 
 rundir=$outdir/run-$name
 mkdir -p $rundir/movies
@@ -65,5 +75,5 @@ else
     mpirun -np $nranks $EXEC < swtc1.nl > sweqx.log 2>&1
 fi
 status=$?
-grep -E "SWEQX_OPMAT|DSS\(curl psi\)|prescribed velocity" sweqx.log
+grep -E "SWEQX_OPMAT|DSS\(curl psi\)|prescribed velocity|stream function" sweqx.log
 exit $status

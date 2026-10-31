@@ -65,6 +65,13 @@ module shallow_water_mod
   !                         whose discrete divergence (DSS'd) is zero to roundoff
   logical, private :: tc1_curlpsi = .false.
   real (kind=real_kind), private, allocatable :: tc1_vcurl(:,:,:,:) ! (np,np,2,nelemd), contravariant
+  ! stream function for "curlpsi", selected by SWEQX_TC1_PSI (see tc1_init_velocity):
+  !   "solidbody" (default): the rigid-body psi of tc1_streamfunction (bit-for-bit as before)
+  !   "ylm"                : psi_sb + eps*rearth*u0*Y_l^m, with SWEQX_TC1_PSI_PARAMS="l,m,eps",
+  !                          the velocity then rescaled to max|u| = u0 over the GLL nodes
+  character(len=16), private :: tc1_psiname = "solidbody"
+  integer, private               :: tc1_ylm_l = 0, tc1_ylm_m = 0
+  real (kind=real_kind), private :: tc1_ylm_eps = 0, tc1_uscale = 1
   real (kind=real_kind), private, parameter  :: gh0_tc2 = 2.94D4      ! m^2/s^2 (p. 218 of Williamson)
 
   ! ================================================
@@ -679,14 +686,76 @@ contains
     psi = rearth*u0*( SIN(sphere%lat)*COS(alpha) - COS(sphere%lon)*COS(sphere%lat)*SIN(alpha) )
   end function tc1_streamfunction
 
+  ! real spherical harmonic, normalized to unit mean square over the sphere:
+  !   Y = Pbar_l^|m|(sin(lat)) * cos(m lon) for m >= 0, * sin(|m| lon) for m < 0,
+  ! with Pbar the fully normalized ("4 pi", geodesy) associated Legendre functions
+  ! (no Condon-Shortley phase), computed with the standard stable recurrences
+  function tc1_ylm(l,m,sphere) result(y)
+    integer, intent(in) :: l,m
+    type (spherical_polar_t), intent(in) :: sphere(np,np)
+    real (kind=real_kind)                :: y(np,np)
+    real (kind=real_kind) :: x(np,np),c(np,np),pmm(np,np),p1(np,np),p2(np,np),pl(np,np),a,b
+    integer :: ma,k
+
+    ma = abs(m)
+    x = SIN(sphere%lat)
+    c = COS(sphere%lat)
+    ! Pbar_mm
+    pmm = 1
+    if (ma >= 1) pmm = sqrt(3.0D0)*c
+    do k=2,ma
+       pmm = sqrt((2*k+1)/(2.0D0*k))*c*pmm
+    end do
+    if (l == ma) then
+       pl = pmm
+    else
+       ! Pbar_{m+1,m}, then upward in l
+       p2 = pmm
+       p1 = sqrt(2.0D0*ma+3)*x*pmm
+       do k=ma+2,l
+          a = sqrt( (2.0D0*k-1)*(2*k+1) / ((k-ma)*(k+ma)*1.0D0) )
+          b = sqrt( (2.0D0*k+1)*(k+ma-1)*(k-ma-1) / ((k-ma)*(k+ma)*(2*k-3.0D0)) )
+          pl = a*x*p1 - b*p2
+          p2 = p1
+          p1 = pl
+       end do
+       pl = p1
+    endif
+    ! (Pbar already includes the factor sqrt(2) for m /= 0)
+    if (m > 0) then
+       y = pl*COS(m*sphere%lon)
+    else if (m < 0) then
+       y = pl*SIN(ma*sphere%lon)
+    else
+       y = pl
+    endif
+  end function tc1_ylm
+
+  ! the stream function selected by SWEQX_TC1_PSI (before the rescaling to max|u| = u0)
+  function tc1_selected_streamfunction(sphere) result(psi)
+    type (spherical_polar_t), intent(in) :: sphere(np,np)
+    real (kind=real_kind)                :: psi(np,np)
+    psi = tc1_streamfunction(sphere)
+    if (trim(tc1_psiname) == "ylm") psi = psi + tc1_ylm_eps*rearth*u0*tc1_ylm(tc1_ylm_l,tc1_ylm_m,sphere)
+  end function tc1_selected_streamfunction
+
   ! swtc1 parameters, for diagnostics.  alpha is set by tc1_init_state
-  subroutine tc1_parameters(u0_out,alpha_out,rearth_out,curlpsi_out)
+  subroutine tc1_parameters(u0_out,alpha_out,rearth_out,curlpsi_out,psiname_out,ylm_l_out,ylm_m_out, &
+       ylm_eps_out,uscale_out)
     real (kind=real_kind), intent(out) :: u0_out,alpha_out,rearth_out
     logical, intent(out) :: curlpsi_out
+    character(len=*), intent(out), optional :: psiname_out
+    integer, intent(out), optional :: ylm_l_out,ylm_m_out
+    real (kind=real_kind), intent(out), optional :: ylm_eps_out,uscale_out
     u0_out = u0
     alpha_out = alpha
     rearth_out = rearth
     curlpsi_out = tc1_curlpsi
+    if (present(psiname_out)) psiname_out = tc1_psiname
+    if (present(ylm_l_out))   ylm_l_out = tc1_ylm_l
+    if (present(ylm_m_out))   ylm_m_out = tc1_ylm_m
+    if (present(ylm_eps_out)) ylm_eps_out = tc1_ylm_eps
+    if (present(uscale_out))  uscale_out = tc1_uscale
   end subroutine tc1_parameters
 
   ! ===========================================
@@ -699,21 +768,31 @@ contains
   ! tc1_init_state (which sets alpha).  The velocity is applied in
   ! advance_mod:set_prescribed_velocity via tc1_prescribed_velocity.
   !
+  ! The stream function is selected with SWEQX_TC1_PSI (only for "curlpsi"):
+  !   "solidbody" (default): rigid-body psi (tc1_streamfunction), unchanged
+  !   "ylm"                : psi_sb + eps*rearth*u0*Y_l^m (tc1_ylm), with
+  !                          SWEQX_TC1_PSI_PARAMS="l,m,eps"; DSS(curl psi) is then
+  !                          rescaled to max|u| = u0 over the GLL nodes
+  !
   ! ===========================================
   subroutine tc1_init_velocity(elem,deriv,hybrid,nets,nete)
     use derivative_mod, only : curl_sphere
     use viscosity_base, only : make_C0, make_C0_vector
     use dimensions_mod, only : nelemd
     use parallel_mod, only : abortmp
+#ifdef _MPI
+    use parallel_mod, only : MPI_MAX, MPI_IN_PLACE, MPIreal_t
+#endif
     type (element_t), intent(in) :: elem(:)
     type (derivative_t), intent(in) :: deriv
     type (hybrid_t), intent(in) :: hybrid
     integer, intent(in) :: nets,nete
 
     character(len=32) :: velname
-    integer :: ie,stat,i,j
+    character(len=256) :: psiparams
+    integer :: ie,stat,i,j,ierr
     real (kind=real_kind) :: u(np,np,2,nets:nete), divu(np,np,nets:nete), ua(np,np,2), va(np,np,2)
-    real (kind=real_kind) :: maxdiv,maxdu,maxu
+    real (kind=real_kind) :: maxdiv,maxdu,maxu,umax0,par(3)
 
     call get_environment_variable("SWEQX_TC1_VELOCITY",velname,status=stat)
     if (stat /= 0 .or. len_trim(velname)==0) velname = "analytic"
@@ -734,10 +813,44 @@ contains
     enddo
     if (.not. allocated(tc1_vcurl)) allocate(tc1_vcurl(np,np,2,nelemd))
 
+    call get_environment_variable("SWEQX_TC1_PSI",tc1_psiname,status=stat)
+    if (stat /= 0 .or. len_trim(tc1_psiname)==0) tc1_psiname = "solidbody"
+    if (trim(tc1_psiname) == "ylm") then
+       call get_environment_variable("SWEQX_TC1_PSI_PARAMS",psiparams,status=stat)
+       if (stat /= 0 .or. len_trim(psiparams)==0) call abortmp("SWEQX_TC1_PSI=ylm needs SWEQX_TC1_PSI_PARAMS=l,m,eps")
+       read(psiparams,*,iostat=stat) par
+       if (stat /= 0) call abortmp("SWEQX_TC1_PSI_PARAMS: expected three numbers l,m,eps")
+       tc1_ylm_l = nint(par(1)); tc1_ylm_m = nint(par(2)); tc1_ylm_eps = par(3)
+       if (tc1_ylm_l < 0 .or. abs(tc1_ylm_m) > tc1_ylm_l) call abortmp("SWEQX_TC1_PSI_PARAMS: need 0 <= |m| <= l")
+    else if (trim(tc1_psiname) /= "solidbody") then
+       call abortmp("SWEQX_TC1_PSI must be 'solidbody' or 'ylm'")
+    endif
+    if (hybrid%masterthread .and. hybrid%par%masterproc) then
+       if (trim(tc1_psiname) == "ylm") then
+          print '(a,i0,a,i0,a,es12.4)','swtc1 stream function: solid body + eps*a*u0*Y_l^m, l=',tc1_ylm_l, &
+               ' m=',tc1_ylm_m,' eps=',tc1_ylm_eps
+       else
+          print *,"swtc1 stream function: solidbody"
+       endif
+    endif
+
     do ie=nets,nete
-       u(:,:,:,ie) = curl_sphere(tc1_streamfunction(elem(ie)%spherep),deriv,elem(ie))
+       u(:,:,:,ie) = curl_sphere(tc1_selected_streamfunction(elem(ie)%spherep),deriv,elem(ie))
     end do
     call make_C0_vector(u,elem,hybrid,nets,nete)
+
+    if (trim(tc1_psiname) /= "solidbody") then
+       ! rescale to max|u| = u0 over the GLL nodes, for a fair comparison between fields
+       umax0 = 0
+       do ie=nets,nete
+          umax0 = max(umax0, maxval(sqrt(u(:,:,1,ie)**2 + u(:,:,2,ie)**2)))
+       end do
+#ifdef _MPI
+       call MPI_Allreduce(MPI_IN_PLACE,umax0,1,MPIreal_t,MPI_MAX,hybrid%par%comm,ierr)
+#endif
+       tc1_uscale = u0/umax0
+       u = tc1_uscale*u
+    endif
 
     ! diagnostics: DSS'd divergence of u, and difference from the analytic velocity
     maxdiv=0; maxdu=0; maxu=0
@@ -757,8 +870,18 @@ contains
     do ie=nets,nete
        maxdiv = max(maxdiv,maxval(abs(divu(:,:,ie))))
     end do
-    print '(a,i6,a,es12.4,a,es12.4,a,es12.4)','DSS(curl psi) velocity, rank',hybrid%par%rank, &
-         ': max|DSS div u|=',maxdiv,'  max|u-u_analytic|=',maxdu,'  max|u|=',maxu
+    if (trim(tc1_psiname) == "solidbody") then
+       print '(a,i6,a,es12.4,a,es12.4,a,es12.4)','DSS(curl psi) velocity, rank',hybrid%par%rank, &
+            ': max|DSS div u|=',maxdiv,'  max|u-u_analytic|=',maxdu,'  max|u|=',maxu
+    else
+       ! u_analytic (solid body) is not the target here: report max|u| of DSS(curl psi) instead
+       maxu = 0
+       do ie=nets,nete
+          maxu = max(maxu, maxval(sqrt(u(:,:,1,ie)**2 + u(:,:,2,ie)**2)))
+       end do
+       print '(a,i6,a,es12.4,a,es12.4,a,es12.4,a,es12.4)','DSS(curl psi) velocity, rank',hybrid%par%rank, &
+            ': max|DSS div u|=',maxdiv,'  max|u| (this rank)=',maxu,'  u0=',u0,'  scale=',tc1_uscale
+    endif
 
     ! save in contravariant components
     do ie=nets,nete
