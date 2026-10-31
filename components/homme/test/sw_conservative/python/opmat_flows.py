@@ -195,7 +195,8 @@ def summarize(r, ne):
     out = dict(maxre=lam.real.max() / om, minre=lam.real.min() / om,
                ngrow=int((lam.real > GROW * om).sum()), maxabs=np.abs(lam).max() / om,
                dt=SQRT8 / np.abs(lam).max(), skew=float(r['skew']), tres=float(r['tres']),
-               G=float(r['G']) / om, Gs=float(r['Gs']) / om, umax=float(r['umax']) / (om * r['rearth']))
+               G=float(r['G']) / om, Gs=float(r['Gs']) / om, umax=float(r['umax']) / (om * r['rearth']),
+               slow5=float((r['mass'] * (r['speed'] < 0.05 * r['speed'].max())).sum() / r['mass'].sum()))
     reg = regions(r, ne, r['speed'])
     out['enr'] = [enrichment(r['V'][:, k], r['mass'], reg) for k in range(r['V'].shape[1])]
     out['vlam'] = r['vlam'] / om
@@ -209,37 +210,46 @@ def style(ax):
         ax.spines[s].set_visible(False)
 
 
-def plot_scan(rows, key, out, fname):
-    """max Re lambda/omega (f0, f2), and normalized by the velocity gradient, vs `key`"""
-    xs = np.array([row[key] for row in rows])
-    o = np.argsort(xs)
-    fig, axs = plt.subplots(1, 3, figsize=(12, 3.4))
-    f0 = np.array([row['f0']['maxre'] for row in rows])[o]
-    f0m = np.array([-row['f0']['minre'] for row in rows])[o]
-    f2 = np.array([row['f2']['maxre'] if row.get('f2') else np.nan for row in rows])[o]
-    G = np.array([row['f0']['G'] for row in rows])[o]
-    Gs = np.array([row['f0']['Gs'] for row in rows])[o]
-    ax = axs[0]
-    ax.plot(xs[o], f0, 'o-', color='#1baf7a', label='conservation, u')
-    ax.plot(xs[o], f0m, 's--', color='#6250d6', mfc='none', label='conservation, -u')
-    ax.plot(xs[o], np.abs(f2), '^-', color='#2a78d6', label='split |max Re|')
-    ax.set_yscale('log')
-    ax.set_xlabel(key)
-    ax.set_ylabel('max Re λ / (u_max/a)')
-    ax.legend(fontsize=8)
-    style(ax)
-    ax = axs[1]
-    ax.plot(xs[o], G, 'o-', color=INK, label='max ||∇u|| / (u_max/a)')
-    ax.plot(xs[o], Gs, 's-', color=MUTED, label='max ||sym ∇u|| / (u_max/a)')
-    ax.set_xlabel(key)
-    ax.legend(fontsize=8)
-    style(ax)
-    ax = axs[2]
-    ax.plot(xs[o], f0 / G, 'o-', color='#1baf7a', label='max Re λ / max||∇u||')
-    ax.plot(xs[o], f0 / np.where(Gs > 1e-3, Gs, np.nan), 's-', color='#eb6834', label='max Re λ / max||sym ∇u||')
-    ax.set_xlabel(key)
-    ax.legend(fontsize=8)
-    style(ax)
+def plot_scan(rows, key, out, fname, group=None):
+    """max Re lambda/omega (f0, f2), the velocity-gradient scale, and max Re normalized
+    by it, vs `key` (|r| on a log axis for key='r'); one line per `group` value
+    (for group='l' with key='r', one line per l and sign of r)"""
+    def gkey(row):
+        if group is None:
+            return ''
+        g = f'{group}={row[group]}'
+        if key == 'r' and any(rr['r'] < 0 for rr in rows if rr[group] == row[group]):
+            g += ', r>0' if row['r'] > 0 else ', r<0'
+        return g
+    groups = sorted(set(gkey(row) for row in rows), key=lambda g: (len(g), g))
+    pal = ['#1baf7a', '#2a78d6', '#eb6834', '#6250d6', '#c2409a', '#898781', '#0b0b0b', '#d6a320']
+    fig, axs = plt.subplots(1, 3, figsize=(13, 3.6))
+    for ig, g in enumerate(groups):
+        rs = [row for row in rows if gkey(row) == g]
+        xs = np.array([abs(row[key]) if key == 'r' else row[key] for row in rs])
+        o = np.argsort(xs)
+        f0 = np.array([row['f0']['maxre'] for row in rs])[o]
+        f2 = np.array([abs(row['f2']['maxre']) if row.get('f2') else np.nan for row in rs])[o]
+        G = np.array([row['f0']['G'] for row in rs])[o]
+        Gs = np.array([row['f0']['Gs'] for row in rs])[o]
+        c = pal[ig % len(pal)]
+        ls = '--' if g.endswith('r<0') else '-'
+        lab = g or 'conservation'
+        axs[0].plot(xs[o], np.maximum(f0, 1e-16), 'o' + ls, color=c, ms=4, label=lab)
+        axs[0].plot(xs[o], f2, 'x:', color=c, ms=4, alpha=0.6)
+        axs[1].plot(xs[o], G, 'o' + ls, color=c, ms=4, label=f'{lab}: ||∇u||')
+        axs[1].plot(xs[o], Gs, 's:', color=c, ms=3, mfc='none')
+        axs[2].plot(xs[o], f0 / G, 'o' + ls, color=c, ms=4, label=lab)
+    axs[0].set_yscale('log')
+    axs[0].set_ylabel('max Re λ / (u_max/a)   (x: split form)')
+    axs[1].set_ylabel('max ||∇u|| (o), ||sym ∇u|| (□)  / (u_max/a)')
+    axs[2].set_ylabel('max Re λ / max ||∇u||')
+    for ax in axs:
+        ax.set_xlabel('|r|' if key == 'r' else key)
+        if key == 'r':
+            ax.set_xscale('log')
+        style(ax)
+    axs[0].legend(fontsize=7)
     fig.tight_layout()
     fig.savefig(os.path.join(out, fname))
     plt.close(fig)
@@ -301,18 +311,20 @@ def main():
     p.add_argument('--out', required=True)
     p.add_argument('--ne', type=int, nargs='+', default=[8])
     p.add_argument('--sc', type=int, default=1)
-    p.add_argument('--select', default='*', help="glob on the psi tag, e.g. 'ylm*_0_*'")
+    p.add_argument('--select', default=['*'], nargs='+', help="globs on the psi tag, e.g. 'ylm*_0_*'")
     p.add_argument('--baseline', action='store_true', help='include the solid-body curlpsi case')
     p.add_argument('--modes', type=int, default=3)
     p.add_argument('--maps', type=int, default=4, help='mode maps for this many cases (largest max Re)')
     p.add_argument('--scan-plot', default='l', choices=['l', 'm', 'r'])
+    p.add_argument('--group', default=None, choices=['l', 'm', 'r'], help='one line per value in the scan plot')
     p.add_argument('--tag', default='scan')
     args = p.parse_args()
     os.makedirs(args.out, exist_ok=True)
     cache = Cache(args.out)
     rep = []
     for ne in args.ne:
-        pats = sorted(glob.glob(os.path.join(args.mats, f'ne{ne}-sc{args.sc}-f0-curlpsi-{args.select}.meta')))
+        pats = sorted(set(f for sel in args.select
+                          for f in glob.glob(os.path.join(args.mats, f'ne{ne}-sc{args.sc}-f0-curlpsi-{sel}.meta'))))
         if args.baseline and os.path.exists(os.path.join(args.mats, f'ne{ne}-sc{args.sc}-f0-curlpsi.meta')):
             pats = [os.path.join(args.mats, f'ne{ne}-sc{args.sc}-f0-curlpsi.meta')] + pats
         rows, res = [], {}
@@ -334,15 +346,16 @@ def main():
             continue
         rep.append(f'NE{ne} sc{args.sc}: max Re, min Re, max|lambda| in units of omega = u_max/a; '
                    f'G, Gs = max||grad u||, max||sym grad u|| / omega; ngrow = #(Re > {GROW:g} omega); '
-                   f'skew = ||S+S^T||/||S||; test = ||L x - y||/||y||; umax = max|u| of the analytic psi at the nodes / u0')
-        rep.append(f'{"case":38s} {"l":>3s} {"m":>3s} {"r":>5s} {"G":>6s} {"Gs":>6s} | {"f0 maxRe":>9s} '
-                   f'{"minRe":>9s} {"ngrow":>5s} {"max|l|":>7s} {"skew":>8s} {"test":>7s} {"umax":>6s} | {"f2 maxRe":>9s} '
+                   f'skew = ||S+S^T||/||S||; test = ||L x - y||/||y||; umax = max|u| of the analytic psi at the nodes / u0; '
+                   f'slow5 = area fraction with |u| < 0.05 u_max')
+        rep.append(f'{"case":38s} {"l":>3s} {"m":>3s} {"r":>6s} {"G":>6s} {"Gs":>6s} | {"f0 maxRe":>9s} '
+                   f'{"minRe":>9s} {"ngrow":>5s} {"max|l|":>7s} {"skew":>8s} {"test":>7s} {"umax":>6s} {"slow5":>6s} | {"f2 maxRe":>9s} '
                    f'{"skew":>8s} | top f0 modes: lam/omega [enrichment corner cubeedge elemedge slow]')
         for row in rows:
             a, b = row['f0'], row.get('f2')
-            s = (f'{row["name"]:38s} {row["l"]:3d} {row["m"]:3d} {row["r"]:5.2f} {a["G"]:6.2f} {a["Gs"]:6.2f} | '
+            s = (f'{row["name"]:38s} {row["l"]:3d} {row["m"]:3d} {row["r"]:6.2f} {a["G"]:6.2f} {a["Gs"]:6.2f} | '
                  f'{a["maxre"]:9.2e} {a["minre"]:9.2e} {a["ngrow"]:5d} {a["maxabs"]:7.2f} {a["skew"]:8.2e} '
-                 f'{a["tres"]:7.1e} {a["umax"]:6.4f} | ')
+                 f'{a["tres"]:7.1e} {a["umax"]:6.4f} {a["slow5"]:6.4f} | ')
             s += f'{b["maxre"]:9.2e} {b["skew"]:8.2e} |' if b else f'{"-":>9s} {"-":>8s} |'
             for lam, e in zip(a['vlam'], a['enr']):
                 s += (f' {lam.real:.3f}{lam.imag:+.2f}i [{e["corner"]:.1f} {e["cubeedge"]:.1f} '
@@ -350,7 +363,7 @@ def main():
             rep.append(s)
         rep.append('')
         tag = f'ne{ne}-sc{args.sc}-{args.tag}'
-        plot_scan(rows, args.scan_plot, args.out, f'{tag}-maxre.png')
+        plot_scan(rows, args.scan_plot, args.out, f'{tag}-maxre.png', args.group)
         worst = sorted(rows, key=lambda row: -row['f0']['maxre'])[:args.maps]
         sel = sorted(worst, key=lambda row: row[args.scan_plot])
         plot_modes([(f'{row["name"].split("curlpsi-")[-1]}', res[row['name']]) for row in sel],
