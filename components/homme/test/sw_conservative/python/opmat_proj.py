@@ -5,7 +5,7 @@ operator L (dp/dt = L p, see opmat_eigs.py) and predict its day-12 error.
 
 usage:
   opmat_proj.py --mats DIR --out OUT --ne 8 15 --sc 1 4 [--form 2] [--velocity analytic]
-                [--dt30 1800] [--eig 8 15]
+                [--dt30 1800] [--eig 8 15] [--full] [--no-checkpoint]
 
 For each case the one-revolution (T = 2 pi/omega) error of the Gaussian is
 computed three ways:
@@ -26,11 +26,15 @@ Gaussian's amplitude and E_j = |g_j| a_j its error contribution; sum E_j^2 equal
 
 Dense eigenvectors are computed one symmetry block at a time (opmat_sym.py:
 rotation and antipodal map, 4 blocks for alpha=pi/4, 8 for alpha=0); NE30
-alpha=pi/4 (four blocks of about 12150) needs about 7 GB.  Use
+alpha=pi/4 (four blocks of about 12150, about 27 min each on 4 threads) needs about
+10 GB.  Each finished block is checkpointed in OUT/<case>-ckpt, so a run that is
+interrupted resumes when started again with the same arguments (--no-checkpoint
+turns this off); the checkpoint is removed once the case is saved.  Use
 OPENBLAS_NUM_THREADS=1 when the cores are shared.
 """
 import argparse
 import os
+import shutil
 import time
 import numpy as np
 import scipy.sparse as sp
@@ -104,51 +108,109 @@ def skew_part(d):
 GOOD = 0.1      # |exp(lambda T) - 1| < GOOD: "resolved" mode (phase error < 0.016 revolutions)
 
 
-def modal(d, p0, T, dt, nstep, B, skew, chunk=1000, ntop=8):
+DIAG = ('snorm', 'mstar', 'purity', 'corner', 'edge', 'q')
+
+
+def block_contributions(k, lam, Q, U, d, q0, T, dt, nstep, B, skew, chunk, ntop):
+    """everything modal() needs from one symmetry block, without its eigenvectors:
+    per-mode lam, c and diagnostics, the block's parts of the error fields, its
+    ntop largest error contributions and its departure from orthonormality"""
+    mass, alpha, ne = d['mass'], d['meta']['alpha'], d['meta']['ne']
+    sq = np.sqrt(mass)
+    # departure from orthonormality of the eigenvectors (unit 2-norm columns), in chunks
+    gram = 0.0
+    for j0 in range(0, len(lam), chunk):
+        G = U[:, j0:j0 + chunk].conj().T @ U
+        G[:, j0:j0 + chunk] -= np.eye(G.shape[0])
+        gram = max(gram, np.abs(G).max())
+        del G
+    x = Q.conj().T @ q0
+    c = U.conj().T @ x if skew else np.linalg.solve(U, x)     # U unitary for the skew part
+    g_sd = np.expm1(lam * T)
+    g_fd = rk4_amp(dt * lam) ** nstep - 1
+    b = dict(lam=lam, c=c, k=np.full(len(lam), k), gram=gram,
+             e_sd=np.zeros(d['n'], complex), e_fd=np.zeros(d['n'], complex), e_res=np.zeros(d['n'], complex))
+    diag = {key: [] for key in DIAG}
+    top = []
+    for j0 in range(0, len(lam), chunk):
+        sl = slice(j0, j0 + chunk)
+        Vc = Q @ U[:, sl]
+        b['e_sd'] += Vc @ (c[sl] * g_sd[sl])
+        b['e_fd'] += Vc @ (c[sl] * g_fd[sl])
+        good = np.abs(g_sd[sl]) < GOOD
+        b['e_res'] += Vc[:, good] @ (c[sl][good] * g_sd[sl][good])
+        Ej = np.abs(c[sl] * g_sd[sl])
+        for j in np.argsort(-Ej)[:ntop]:
+            top.append((Ej[j], lam[sl][j], Vc[:, j] / sq))
+        top = sorted(top, key=lambda x: -x[0])[:ntop]
+        r = mode_diagnostics(Vc / sq[:, None], d, alpha, ne, mass, B)
+        for key in r:
+            diag[key].append(r[key])
+    b.update({key: np.concatenate(v) for key, v in diag.items() if v})
+    b['top_E'] = np.array([x[0] for x in top])
+    b['top_lam'] = np.array([x[1] for x in top])
+    b['top_v'] = np.stack([x[2] for x in top], axis=1)
+    return b
+
+
+def modal(d, p0, T, dt, nstep, B, skew, chunk=1000, ntop=8, ckdir=None):
     """eigen-decomposition of p0 and of the day-T error, block by block, for
     S = M^1/2 L M^-1/2 (nearly normal for the split form, so its eigenvectors are
-    nearly orthonormal and the Euclidean norm is the M-norm)"""
-    mass, alpha, ne = d['mass'], d['meta']['alpha'], d['meta']['ne']
+    nearly orthonormal and the Euclidean norm is the M-norm).
+    ckdir: checkpoint directory.  Each finished block's contributions are saved
+    there and blocks found there are not solved again, so an interrupted run
+    resumes where it stopped."""
+    mass, alpha = d['mass'], d['meta']['alpha']
     sq = np.sqrt(mass)
     S = (sp.diags(sq) @ d['L'] @ sp.diags(1 / sq)).tocsr()
     q0 = sq * p0
     # skew-Hermitian part: i K_k is Hermitian, orthonormal eigenvectors
     herm = (lambda Ak: 0.5j * (Ak - Ak.conj().T)) if skew else None
-    out = {k: [] for k in ('lam', 'c', 'k', 'snorm', 'mstar', 'purity', 'corner', 'edge', 'q')}
+    # a checkpoint is used only if it was made for the same problem
+    key = np.array([d['n'], T, dt, nstep, skew, B is not None, chunk, ntop, np.abs(q0).sum()], dtype=float)
+    ckpath = lambda k: os.path.join(ckdir, f'block{k}.npz')
+
+    def load_block(k):
+        if ckdir is None or not os.path.exists(ckpath(k)):
+            return None
+        with np.load(ckpath(k)) as f:
+            if f['key'].shape != key.shape or not np.array_equal(f['key'], key):
+                return None
+            return {n: f[n] for n in f.files if n != 'key'}
+
+    skip = []
+    if ckdir is not None:
+        os.makedirs(ckdir, exist_ok=True)
+        skip = [k for k in range(8) if load_block(k) is not None]
+        if skip:
+            print(f'    resuming: blocks {skip} from {ckdir}', flush=True)
+    out = {k: [] for k in ('lam', 'c', 'k') + DIAG}
     e_sd = np.zeros(d['n'], complex)
     e_fd = np.zeros(d['n'], complex)
     e_res = np.zeros(d['n'], complex)        # semi-discrete error from resolved modes
     top = []                                 # (E_j, lambda_j, v_j) of the largest error contributions
     gram = 0.0
     t0 = time.time()
-    for k, lam, Q, U, info in block_eigs(S, d['lat'], d['lon'], alpha, vectors=True, hermitian=herm):
-        # departure from orthonormality of the eigenvectors (unit 2-norm columns), in chunks
-        for j0 in range(0, len(lam), chunk):
-            G = U[:, j0:j0 + chunk].conj().T @ U
-            G[:, j0:j0 + chunk] -= np.eye(G.shape[0])
-            gram = max(gram, np.abs(G).max())
-        del G
-        x = Q.conj().T @ q0
-        c = U.conj().T @ x if skew else np.linalg.solve(U, x)     # U unitary for the skew part
-        g_sd = np.expm1(lam * T)
-        g_fd = rk4_amp(dt * lam) ** nstep - 1
-        for j0 in range(0, len(lam), chunk):
-            sl = slice(j0, j0 + chunk)
-            Vc = Q @ U[:, sl]
-            e_sd += Vc @ (c[sl] * g_sd[sl])
-            e_fd += Vc @ (c[sl] * g_fd[sl])
-            good = np.abs(g_sd[sl]) < GOOD
-            e_res += Vc[:, good] @ (c[sl][good] * g_sd[sl][good])
-            Ej = np.abs(c[sl] * g_sd[sl])
-            for j in np.argsort(-Ej)[:ntop]:
-                top.append((Ej[j], lam[sl][j], Vc[:, j] / sq))
-            top = sorted(top, key=lambda x: -x[0])[:ntop]
-            r = mode_diagnostics(Vc / sq[:, None], d, alpha, ne, mass, B)
-            for key in r:
-                out[key].append(r[key])
-        out['lam'].append(lam); out['c'].append(c); out['k'].append(np.full(len(lam), k))
-        del U
-        print(f'    block {k}: size {Q.shape[1]}, {time.time() - t0:.0f} s', flush=True)
+    for k, lam, Q, U, info in block_eigs(S, d['lat'], d['lon'], alpha, vectors=True, hermitian=herm, skip=skip):
+        b = load_block(k) if k in skip else None
+        if b is None:
+            b = block_contributions(k, lam, Q, U, d, q0, T, dt, nstep, B, skew, chunk, ntop)
+            if ckdir is not None:
+                tmp = ckpath(k) + '.tmp'
+                with open(tmp, 'wb') as f:
+                    np.savez(f, key=key, **b)
+                os.replace(tmp, ckpath(k))
+            status = f'{time.time() - t0:.0f} s'
+        else:
+            status = 'from checkpoint'
+        del U, lam
+        for n in out:
+            if n in b:
+                out[n].append(b[n])
+        e_sd += b['e_sd']; e_fd += b['e_fd']; e_res += b['e_res']
+        gram = max(gram, float(b['gram']))
+        top = sorted(top + list(zip(b['top_E'], b['top_lam'], b['top_v'].T)), key=lambda x: -x[0])[:ntop]
+        print(f'    block {k}: size {Q.shape[1]}, {status}', flush=True)
         t0 = time.time()
     r = {key: np.concatenate(v) for key, v in out.items() if v}
     r['e_sd'], r['e_fd'], r['e_res'] = e_sd / sq, e_fd / sq, e_res / sq
@@ -173,6 +235,9 @@ def main():
     p.add_argument('--eig', type=int, nargs='*', default=[8, 15])
     p.add_argument('--full', action='store_true',
                    help='eigenvectors of S itself (default: of its skew part K, orthonormal)')
+    p.add_argument('--no-checkpoint', action='store_true',
+                   help='do not save each finished block in OUT/<case>-ckpt (by default an interrupted '
+                        'run started again with the same arguments resumes from there)')
     args = p.parse_args()
     os.makedirs(args.out, exist_ok=True)
     rep = []
@@ -209,7 +274,8 @@ def main():
                        T=T, dt=dt, nstep=nstep, omega=om)
             if ne in args.eig:
                 t0 = time.time()
-                r = modal(d, p0, T, dt, nstep, dB, skew=not args.full)
+                ckdir = None if args.no_checkpoint else os.path.join(args.out, nm + '-ckpt')
+                r = modal(d, p0, T, dt, nstep, dB, skew=not args.full, ckdir=ckdir)
                 res.update(r)
                 es, ef = (e_sd, e_fd) if args.full else (e_sdK, e_fdK)
                 res['skew'] = not args.full
@@ -222,6 +288,8 @@ def main():
                            f'sum E_fd^2: {np.sqrt((Efd**2).sum()) / nrm:.6e}')
                 print(rep[-1], flush=True)
             np.savez(os.path.join(args.out, nm + '-proj.npz'), **res)
+            if ne in args.eig and ckdir is not None:
+                shutil.rmtree(ckdir)          # the result is saved; the checkpoint is no longer needed
     with open(os.path.join(args.out, 'proj.txt'), 'a') as f:
         f.write('\n'.join(rep) + '\n')
 
