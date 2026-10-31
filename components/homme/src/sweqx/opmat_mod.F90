@@ -117,6 +117,9 @@ contains
     real (kind=real_kind), allocatable :: xg(:,:)
     real (kind=real_kind) :: u0,alpha,rearth,zero,t0,t1
     logical :: curlpsi
+    character(len=16) :: psiname
+    integer :: ylm_l,ylm_m
+    real (kind=real_kind) :: ylm_eps,uscale
     integer :: n,nloc,stat,ie,i,j,ii,k,iop,ierr,unit
     character(len=1) :: op
     integer :: ncall,ic,col,row
@@ -151,7 +154,7 @@ contains
 #ifdef _MPI
     call MPI_Allreduce(nloc,n,1,MPIinteger_t,MPI_MAX,hybrid%par%comm,ierr)
 #endif
-    call tc1_parameters(u0,alpha,rearth,curlpsi)
+    call tc1_parameters(u0,alpha,rearth,curlpsi,psiname,ylm_l,ylm_m,ylm_eps,uscale)
 
     owned = .false.
     do ie=nets,nete
@@ -190,6 +193,13 @@ contains
        write(unit,'(a,i0)') 'theta_advect_form = ',theta_advect_form
        if (curlpsi) then
           write(unit,'(a)') 'velocity = curlpsi'
+          write(unit,'(a,a)') 'psi = ',trim(psiname)
+          if (trim(psiname) == "ylm") then
+             write(unit,'(a,i0)') 'psi_l = ',ylm_l
+             write(unit,'(a,i0)') 'psi_m = ',ylm_m
+             write(unit,'(a,es25.17)') 'psi_eps = ',ylm_eps
+             write(unit,'(a,es25.17)') 'psi_uscale = ',uscale
+          endif
        else
           write(unit,'(a)') 'velocity = analytic'
        endif
