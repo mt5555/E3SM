@@ -1,18 +1,28 @@
 """
-Block diagonalize swtc1 operators with a rotational symmetry of the cubed
-sphere grid that also preserves the solid-body rotation:
+Block diagonalize swtc1 operators with the symmetries of the cubed sphere grid
+that also preserve the solid-body rotation:
 
-  alpha = 0    : rotation by 90 deg about the z axis      (group Z4)
-  alpha = pi/4 : rotation by 180 deg about the rotation axis a = (-1,0,1)/sqrt(2),
-                 which passes through the midpoints of two cube edges (group Z2)
+  R, a rotation about a grid axis:
+    alpha = 0    : 90 deg about the z axis                              (order m = 4)
+    alpha = pi/4 : 180 deg about the rotation axis a = (-1,0,1)/sqrt(2),
+                   which passes through the midpoints of two cube edges  (order m = 2)
+  J, the antipodal map x -> -x (order 2).  It maps the grid onto itself and
+    commutes with any solid-body rotation, since u(-x) = -u(x).
 
-If P (the permutation of the GLL nodes induced by the rotation) commutes with L,
-then L maps each eigenspace of P (eigenvalue w^k, w = exp(2 pi i/m)) into
-itself, so the spectrum of L is the union of the spectra of the m blocks
-L_k = Q_k^H L Q_k, where the orthonormal columns of Q_k span that eigenspace.
-Dense eigenvalues then cost ~m^2 times less.
+R and J commute, so they generate the abelian group Z_m x Z_2 (8 elements for
+alpha=0, 4 for alpha=pi/4).  If the node permutations P_R and P_J commute with
+L, then L maps each joint eigenspace of (P_R, P_J), eigenvalues (w^k, s) with
+w = exp(2 pi i/m) and s = +-1, into itself.  The spectrum of L is then the union
+of the spectra of the blocks L_ks = Q_ks^H L Q_ks, where the orthonormal columns
+of Q_ks span that eigenspace.  Each block is about n/(2m) in size, so dense
+eigenvalues cost about (2m)^2 times less than for the whole matrix.  Q_ks is
+real when w^k is real; for real L the block (m-k, s) is the complex conjugate of
+(k, s), so for alpha=0 the blocks k=3 are taken from k=1 without a solve.
+
+inversion=False keeps only R (the original Z_m blocks).
 """
 import numpy as np
+import scipy.linalg
 import scipy.sparse as sp
 from scipy.spatial import cKDTree
 
@@ -37,45 +47,66 @@ def node_permutation(lat, lon, R, tol=1e-9):
     X = xyz(lat, lon)
     dist, perm = cKDTree(X).query(X @ R.T)
     if dist.max() > tol or len(np.unique(perm)) != len(perm):
-        raise ValueError(f'grid is not invariant under the rotation (max dist {dist.max():.2e})')
+        raise ValueError(f'grid is not invariant under the map (max dist {dist.max():.2e})')
     return perm
 
 
-def symmetry_blocks(lat, lon, alpha):
-    """list of (k, Q_k) with Q_k sparse n x n_k, orthonormal columns, P Q_k = w^k Q_k"""
+def generators(lat, lon, alpha, inversion=True):
+    """[(perm, order, name)] of the group generators"""
     R, m = rotation(alpha)
-    perm = node_permutation(lat, lon, R)
+    gens = [(node_permutation(lat, lon, R), m, 'R')]
+    if inversion:
+        gens.append((node_permutation(lat, lon, -np.eye(3)), 2, 'J'))
+    return gens
+
+
+def symmetry_blocks(lat, lon, alpha, inversion=True):
+    """(gens, blocks): blocks is a list of (label, Q, src) with Q sparse n x n_k,
+    orthonormal columns, P_R Q = w^k Q and P_J Q = s Q, label = k + m*(s == -1),
+    and src the label of the block whose complex conjugate this one is (None if
+    it must be solved).  (P x)[perm[j]] = x[j]."""
+    gens = generators(lat, lon, alpha, inversion)
     n = len(lat)
-    w = np.exp(2j * np.pi / m)
-    # orbits of the nodes
-    seen = np.zeros(n, bool)
-    orbits = []
-    for j in range(n):
-        if seen[j]:
-            continue
-        orb = [j]
-        while perm[orb[-1]] != j:
-            orb.append(perm[orb[-1]])
-        seen[orb] = True
-        orbits.append(orb)
+    orders = [o for _, o, _ in gens]
+    # image of every node under every group element g = prod_i G_i^{a_i}
+    expo = np.array(np.meshgrid(*[np.arange(o) for o in orders], indexing='ij')).reshape(len(gens), -1).T
+    img = np.empty((n, len(expo)), dtype=np.int64)
+    for c, a in enumerate(expo):
+        j = np.arange(n)
+        for (perm, _, _), ai in zip(gens, a):
+            for _ in range(ai):
+                j = perm[j]
+        img[:, c] = j
+    reps = np.flatnonzero(img.min(axis=1) == np.arange(n))     # one node per orbit
+    m = orders[0]
     blocks = []
-    for k in range(m):
-        rows, cols, vals = [], [], []
-        ncol = 0
-        for orb in orbits:
-            o = len(orb)
-            # P^s e_r = e_{orb[s mod o]};  sum_s w^{-ks} P^s e_r is nonzero iff w^{k o} = 1
-            if (k * o) % m:
-                continue
-            for s in range(o):
-                rows.append(orb[s]); cols.append(ncol); vals.append(w ** (-k * s) / np.sqrt(o))
-            ncol += 1
-        Q = sp.csc_matrix((vals, (rows, cols)), shape=(n, ncol))
-        if m == 2 or k % 2 == 0:
-            Q = Q.real.tocsc()
-        blocks.append((k, Q))
-    assert sum(Q.shape[1] for _, Q in blocks) == n
-    return perm, blocks
+    for lab in range(int(np.prod(orders))):
+        k, b = lab % m, lab // m                                # b = 1: s = -1
+        if m == 4 and k == 3:
+            blocks.append((lab, None, 1 + m * b))
+            continue
+        # basis vector of orbit r: sum_g conj(chi(g)) e_{g r}, chi(R^a J^c) = w^(k a) s^c
+        chi = np.exp(2j * np.pi * k * expo[:, 0] / m)
+        if len(gens) > 1:
+            chi = chi * (-1.0) ** (b * expo[:, 1])
+        rows = img[reps].ravel()
+        cols = np.repeat(np.arange(len(reps)), len(expo))
+        vals = np.tile(np.conj(chi), len(reps))
+        Q = sp.csc_matrix((vals, (rows, cols)), shape=(n, len(reps)))
+        Q.sum_duplicates()
+        nrm = np.sqrt(np.asarray(abs(Q).power(2).sum(axis=0))).ravel()
+        keep = nrm > 1e-8
+        Q = Q[:, keep] @ sp.diags(1 / nrm[keep])
+        if (2 * k) % m == 0:
+            Q = Q.real
+        Q = sp.csc_matrix(Q)
+        Q.eliminate_zeros()
+        blocks.append((lab, Q, None))
+    # fill in the conjugate blocks
+    byl = {lab: Q for lab, Q, _ in blocks}
+    blocks = [(lab, Q if src is None else byl[src].conj().tocsc(), src) for lab, Q, src in blocks]
+    assert sum(Q.shape[1] for _, Q, _ in blocks) == n
+    return gens, blocks
 
 
 def check_commutes(A, perm):
@@ -85,43 +116,72 @@ def check_commutes(A, perm):
     return sp.linalg.norm(P @ A - A @ P) / sp.linalg.norm(A)
 
 
-def block_matrices(A, blocks):
-    """dense blocks Q_k^H A Q_k and the relative norm of the neglected off-block part"""
-    out = []
-    off = 0.0
-    for k, Q in blocks:
-        AQ = A @ Q
-        Ak = (Q.conj().T @ AQ).toarray()
-        # A Q_k should lie in span(Q_k): residual of the projection
-        res = AQ - Q @ sp.csc_matrix(Ak)
-        off = max(off, sp.linalg.norm(res) / max(sp.linalg.norm(AQ), 1e-300))
-        out.append((k, Ak))
-    return out, off
+def block_matrix(A, Q):
+    """dense block Q^H A Q and the relative norm of the neglected off-block part"""
+    AQ = A @ Q
+    Ak = (Q.conj().T @ AQ).toarray()
+    # A Q should lie in span(Q): residual of the projection
+    res = AQ - Q @ sp.csc_matrix(Ak)
+    return Ak, sp.linalg.norm(res) / max(sp.linalg.norm(AQ), 1e-300)
 
 
-def eigvals_by_symmetry(A, lat, lon, alpha, vectors=False):
-    """eigenvalues (and optionally eigenvectors, n x n) of A using the symmetry blocks.
-    returns lam, V (or None), info dict, symmetry class k of each eigenvalue"""
-    perm, blocks = symmetry_blocks(lat, lon, alpha)
-    comm = check_commutes(A, perm)
-    mats, off = block_matrices(A, blocks)
-    m = len(blocks)
-    lams, Vs, ks = [], [], []
-    for (k, Ak), (_, Q) in zip(mats, blocks):
-        if m == 4 and k == 3:
-            # conjugate of block 1 for real A
-            l1 = lams[1]
-            lams.append(np.conj(l1)); ks.append(np.full(len(l1), 3))
-            if vectors:
-                Vs.append(np.conj(Vs[1]))
-            continue
-        if vectors:
-            lam, U = np.linalg.eig(Ak)
-            Vs.append(Q @ U)
+def eig_unbalanced(A, maxscale=1e3, seed=0):
+    """np.linalg.eig, except when LAPACK's balancing would rescale A strongly (a
+    range above maxscale, e.g. 7e7 in some conservation-form blocks): its eigenvectors
+    then have residuals ||A v - lam v|| up to ~1e-9 ||A||.  A random orthogonal
+    similarity Z^T A Z defeats the balancing and restores residuals ~1e-15."""
+    s, _ = scipy.linalg.matrix_balance(A, permute=False, separate=True)[1]
+    if s.max() / s.min() <= maxscale:
+        return np.linalg.eig(A)
+    Z, _ = np.linalg.qr(np.random.default_rng(seed).standard_normal(A.shape))
+    lam, U = np.linalg.eig(Z.T @ A @ Z)
+    return lam, Z @ U
+
+
+def block_eigs(A, lat, lon, alpha, vectors=False, inversion=True, hermitian=None):
+    """generator over the symmetry blocks of A, one at a time:
+    yields (label, lam, Q, U, info), with A (Q U) = (Q U) diag(lam) (U None without
+    vectors).  hermitian: optional function Ak -> Hermitian matrix H, then lam = -i
+    eig(H) (for i K with K skew: the eigenpairs of the skew part).  info holds the
+    commutation errors of the generators, the off-block residual and the block size."""
+    gens, blocks = symmetry_blocks(lat, lon, alpha, inversion)
+    comm = max(check_commutes(A, perm) for perm, _, _ in gens)
+    done = {}
+    for lab, Q, src in blocks:
+        if src is not None:
+            lam, U, off = done.pop(src)
+            lam, U = np.conj(lam), (None if U is None else np.conj(U))
         else:
-            lam = np.linalg.eigvals(Ak)
-        lams.append(lam); ks.append(np.full(len(lam), k))
+            Ak, off = block_matrix(A, Q)
+            if hermitian is not None:
+                H = hermitian(Ak)
+                if vectors:
+                    w, U = np.linalg.eigh(H)
+                else:
+                    w, U = np.linalg.eigvalsh(H), None
+                lam = -1j * w
+                del H
+            elif vectors:
+                lam, U = eig_unbalanced(Ak)
+            else:
+                lam, U = np.linalg.eigvals(Ak), None
+            del Ak
+            if any(s == lab for _, _, s in blocks):
+                done[lab] = (lam, U, off)
+        yield lab, lam, Q, U, dict(commute=comm, offblock=off, size=Q.shape[1], m=len(blocks))
+
+
+def eigvals_by_symmetry(A, lat, lon, alpha, vectors=False, inversion=True):
+    """eigenvalues (and optionally eigenvectors, n x n) of A using the symmetry blocks.
+    returns lam, V (or None), info dict, symmetry class (block label) of each eigenvalue"""
+    lams, Vs, ks = [], [], []
+    off, sizes = 0.0, []
+    for lab, lam, Q, U, inf in block_eigs(A, lat, lon, alpha, vectors, inversion):
+        lams.append(lam); ks.append(np.full(len(lam), lab))
+        if vectors:
+            Vs.append(Q @ U)
+        off = max(off, inf['offblock']); sizes.append(inf['size'])
     lam = np.concatenate(lams)
     V = np.concatenate(Vs, axis=1) if vectors else None
-    info = {'m': m, 'commute': comm, 'offblock': off, 'sizes': [Q.shape[1] for _, Q in blocks]}
+    info = {'m': len(sizes), 'commute': inf['commute'], 'offblock': off, 'sizes': sizes}
     return lam, V, info, np.concatenate(ks)

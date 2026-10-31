@@ -15,8 +15,9 @@ results.txt are written to OUT.
 The exact operator -u.grad for solid body rotation with angular speed
 omega = u0/rearth has eigenvalues -i m omega, m integer (e^{i m phi'}, phi' the
 longitude about the rotation axis), for any alpha.  Eigenvalues are reported in
-units of omega.  Dense eigenvalue problems are reduced with the rotational
-symmetry of the grid and the flow (opmat_sym.py).
+units of omega.  Dense eigenvalue problems are reduced with the symmetries
+of the grid and the flow (a rotation and the antipodal map, opmat_sym.py) and
+solved one block at a time.
 
 NE15 takes ~10 minutes on 4 cores (all cases, B, and L - nu B for 4 nu and
 2 cases).  If the cores are shared with other jobs, set OPENBLAS_NUM_THREADS=1:
@@ -33,7 +34,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from opmat_io import load
-from opmat_sym import eigvals_by_symmetry, symmetry_blocks, xyz
+from opmat_sym import block_eigs, eigvals_by_symmetry, symmetry_blocks, xyz
 
 CASES = [(sc, f, v) for sc in (1, 4) for f in (2, 0) for v in ('analytic', 'curlpsi')]
 FORM = {0: 'conservation', 2: 'split'}
@@ -160,33 +161,54 @@ def vector_diagnostics(V, d, alpha, ne, B=None):
 
 
 # ---------------------------------------------------------------- per-case solves
-def solve_L(cache, d, key, vectors, B=None):
+def solve_L(cache, d, key, vectors, B=None, chunk=1000):
+    """eigenvalues of L block by block; with vectors, the per-mode diagnostics are
+    computed in chunks of eigenvectors, so the n x n eigenvector matrix is never formed"""
     def fn():
         ne = d['meta']['ne']
         alpha = d['meta']['alpha']
-        lam, V, info, ks = eigvals_by_symmetry(d['L'], d['lat'], d['lon'], alpha, vectors=vectors)
-        r = dict(lam=lam, ks=ks, commute=info['commute'], offblock=info['offblock'])
+        lams, ks, diag, cand = [], [], {}, []
+        off = 0.0
+        for lab, lam, Q, U, info in block_eigs(d['L'], d['lat'], d['lon'], alpha, vectors=vectors):
+            lams.append(lam); ks.append(np.full(len(lam), lab))
+            off = max(off, info['offblock'])
+            if not vectors:
+                continue
+            for j0 in range(0, len(lam), chunk):
+                V = Q @ U[:, j0:j0 + chunk]
+                for kk, v in vector_diagnostics(V, d, alpha, ne, B).items():
+                    diag.setdefault(kk, []).append(v)
+                # candidates for the saved maps (largest Re, largest |lam| in this chunk)
+                lc = lam[j0:j0 + chunk]
+                for j in np.unique(np.r_[np.argsort(-lc.real)[:6], np.argsort(-np.abs(lc))[:2]]):
+                    cand.append((lc[j], np.abs(V[:, j]) ** 2))
+        lam = np.concatenate(lams)
+        r = dict(lam=lam, ks=np.concatenate(ks), commute=info['commute'], offblock=off)
         if vectors:
-            r.update(vector_diagnostics(V, d, alpha, ne, B))
+            r.update({kk: np.concatenate(v) for kk, v in diag.items()})
             # save |v|^2 maps of a few modes: largest Re, largest |lam|
             sel = np.unique(np.r_[np.argsort(-lam.real)[:6], np.argsort(-np.abs(lam))[:2]])
+            cl = np.array([c[0] for c in cand])
             r['sel'] = sel
-            r['selmaps'] = np.abs(V[:, sel]) ** 2
+            r['selmaps'] = np.stack([cand[np.argmin(np.abs(cl - lam[s]))][1] for s in sel], axis=1)
         return r
     return cache.get(key, fn)
 
 
 def solve_sym_B(cache, d, key):
-    """eigenvalues of B (M-self-adjoint) with the Z4 symmetry blocks of S = M^1/2 B M^-1/2"""
+    """eigenvalues of B (M-self-adjoint) with the symmetry blocks of S = M^1/2 B M^-1/2"""
     def fn():
         S = mass_sym(d['B'], d['mass'])
         Ss = ((S + S.T) / 2).tocsr()
         _, blocks = symmetry_blocks(d['lat'], d['lon'], 0.0)
-        lam = []
-        for k, Q in blocks:
+        lam = {}
+        for lab, Q, src in blocks:
+            if src is not None:          # conjugate block: same (real) eigenvalues
+                lam[lab] = lam[src]
+                continue
             Bk = (Q.conj().T @ Ss @ Q).toarray()
-            lam.append(np.linalg.eigvalsh((Bk + Bk.conj().T) / 2))
-        return dict(lam=np.sort(np.concatenate(lam)))
+            lam[lab] = np.linalg.eigvalsh((Bk + Bk.conj().T) / 2)
+        return dict(lam=np.sort(np.concatenate(list(lam.values()))))
     return cache.get(key, fn)
 
 
