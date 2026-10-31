@@ -6,12 +6,14 @@ Read the operator matrices written by sweqx with SWEQX_OPMAT=<prefix>
     d = load(prefix)          # d['L'], d['B'] scipy.sparse CSR (n x n), may be absent
                               # d['lat'], d['lon'] (radians), d['mass'] (assembled GLL mass)
                               # d['meta'] dict, d['Ltest'] = (x, y) with y = L x from sweqx
+                              # d['vel'] (n x 2, east/north m/s), d['zeta'] (1/s): curlpsi only
 """
 import glob
 import numpy as np
 import scipy.sparse as sp
 
 DOF = np.dtype([('dof', '<i4'), ('gdof', '<i8'), ('lat', '<f8'), ('lon', '<f8'), ('mass', '<f8')])
+VEL = np.dtype([('dof', '<i4'), ('u', '<f8'), ('v', '<f8'), ('zeta', '<f8')])
 TRIP = np.dtype([('row', '<i4'), ('col', '<i4'), ('val', '<f8')])
 
 
@@ -47,6 +49,12 @@ def load(prefix, ops=('L', 'B')):
     dofs = dofs[order]
     for k in ('gdof', 'lat', 'lon', 'mass'):
         d[k] = dofs[k].copy()
+    vf = _files(prefix, 'vel')
+    if vf:
+        v = np.concatenate([np.fromfile(f, dtype=VEL) for f in vf])
+        v = v[np.argsort(v['dof'])]
+        d['vel'] = np.stack([v['u'], v['v']], axis=1)   # lat-lon velocity (m/s)
+        d['zeta'] = v['zeta'].copy()                      # DSS'd vorticity (1/s)
     for op in ops:
         files = _files(prefix, op)
         if not files:

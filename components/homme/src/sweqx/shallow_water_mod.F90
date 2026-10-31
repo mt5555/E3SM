@@ -69,9 +69,17 @@ module shallow_water_mod
   !   "solidbody" (default): the rigid-body psi of tc1_streamfunction (bit-for-bit as before)
   !   "ylm"                : psi_sb + eps*rearth*u0*Y_l^m, with SWEQX_TC1_PSI_PARAMS="l,m,eps",
   !                          the velocity then rescaled to max|u| = u0 over the GLL nodes
+  !   "file"               : nodal psi/(rearth*u0) read from SWEQX_TC1_PSI_FILE (stream records
+  !                          int64 gdofP, real64 value), optionally added to the solid body with
+  !                          rms(u_file) = r*rms(u_solidbody) (SWEQX_TC1_PSI_PARAMS="r"), then
+  !                          rescaled to max|u| = u0
   character(len=16), private :: tc1_psiname = "solidbody"
   integer, private               :: tc1_ylm_l = 0, tc1_ylm_m = 0
   real (kind=real_kind), private :: tc1_ylm_eps = 0, tc1_uscale = 1
+  character(len=512), private    :: tc1_psifile = ""
+  real (kind=real_kind), private :: tc1_psi_r = -1, tc1_psi_c = 1
+  real (kind=real_kind), private, allocatable :: tc1_psig(:)     ! file psi/(rearth*u0), by gdofP
+  real (kind=real_kind), private, allocatable :: tc1_ucurl(:,:,:,:), tc1_zeta(:,:,:) ! lat-lon u, DSS'd vorticity
   real (kind=real_kind), private, parameter  :: gh0_tc2 = 2.94D4      ! m^2/s^2 (p. 218 of Williamson)
 
   ! ================================================
@@ -209,6 +217,7 @@ module shallow_water_mod
   public  :: tc1_prescribed_velocity ! the selected swtc1 velocity for one element
   public  :: tc1_streamfunction
   public  :: tc1_parameters
+  public  :: tc1_velocity_diag       ! lat-lon velocity and vorticity of the curlpsi velocity
   public  :: tc1_geopotential
   public  :: tc1_phi         ! test case 1 on unstaggered grid (nair) 
   public  :: grad_cosine_bell
@@ -741,12 +750,12 @@ contains
 
   ! swtc1 parameters, for diagnostics.  alpha is set by tc1_init_state
   subroutine tc1_parameters(u0_out,alpha_out,rearth_out,curlpsi_out,psiname_out,ylm_l_out,ylm_m_out, &
-       ylm_eps_out,uscale_out)
+       ylm_eps_out,uscale_out,psifile_out,psi_r_out,psi_c_out)
     real (kind=real_kind), intent(out) :: u0_out,alpha_out,rearth_out
     logical, intent(out) :: curlpsi_out
-    character(len=*), intent(out), optional :: psiname_out
+    character(len=*), intent(out), optional :: psiname_out,psifile_out
     integer, intent(out), optional :: ylm_l_out,ylm_m_out
-    real (kind=real_kind), intent(out), optional :: ylm_eps_out,uscale_out
+    real (kind=real_kind), intent(out), optional :: ylm_eps_out,uscale_out,psi_r_out,psi_c_out
     u0_out = u0
     alpha_out = alpha
     rearth_out = rearth
@@ -756,7 +765,52 @@ contains
     if (present(ylm_m_out))   ylm_m_out = tc1_ylm_m
     if (present(ylm_eps_out)) ylm_eps_out = tc1_ylm_eps
     if (present(uscale_out))  uscale_out = tc1_uscale
+    if (present(psifile_out)) psifile_out = tc1_psifile
+    if (present(psi_r_out))   psi_r_out = tc1_psi_r
+    if (present(psi_c_out))   psi_c_out = tc1_psi_c
   end subroutine tc1_parameters
+
+  ! lat-lon velocity (m/s) and DSS'd vorticity (1/s) of the curlpsi velocity, for one element
+  subroutine tc1_velocity_diag(elem,u,zeta)
+    type (element_t), intent(in) :: elem
+    real (kind=real_kind), intent(out) :: u(np,np,2), zeta(np,np)
+    u = tc1_ucurl(:,:,:,elem%LocalId)
+    zeta = tc1_zeta(:,:,elem%LocalId)
+  end subroutine tc1_velocity_diag
+
+  ! read SWEQX_TC1_PSI_FILE into tc1_psig (indexed by gdofP) and check it covers every GLL node
+  subroutine tc1_read_psifile(elem,nets,nete)
+    use kinds, only : long_kind
+    use parallel_mod, only : abortmp
+    type (element_t), intent(in) :: elem(:)
+    integer, intent(in) :: nets,nete
+    integer :: unit,stat,k,ie,nrec
+    integer(kind=long_kind) :: nbytes
+    integer(kind=long_kind), allocatable :: gd(:)
+    real (kind=real_kind), allocatable :: ps(:)
+    inquire(file=trim(tc1_psifile),size=nbytes)
+    if (nbytes <= 0 .or. mod(nbytes,16_long_kind) /= 0) &
+         call abortmp("SWEQX_TC1_PSI_FILE: missing, or size not a multiple of 16 bytes")
+    nrec = int(nbytes/16)
+    allocate(gd(nrec),ps(nrec))
+    open(newunit=unit,file=trim(tc1_psifile),access='stream',form='unformatted',status='old', &
+         action='read',iostat=stat)
+    if (stat /= 0) call abortmp("SWEQX_TC1_PSI_FILE: cannot open")
+    read(unit,iostat=stat) (gd(k),ps(k),k=1,nrec)
+    if (stat /= 0) call abortmp("SWEQX_TC1_PSI_FILE: read error")
+    close(unit)
+    if (minval(gd) < 1) call abortmp("SWEQX_TC1_PSI_FILE: gdofP < 1")
+    if (allocated(tc1_psig)) deallocate(tc1_psig)
+    allocate(tc1_psig(maxval(gd)))
+    tc1_psig = huge(1.0_real_kind)
+    tc1_psig(gd) = ps
+    do ie=nets,nete
+       if (maxval(elem(ie)%gdofP) > size(tc1_psig)) call abortmp("SWEQX_TC1_PSI_FILE: missing gdofP")
+       if (any(tc1_psig(reshape(elem(ie)%gdofP,[np*np])) == huge(1.0_real_kind))) &
+            call abortmp("SWEQX_TC1_PSI_FILE: missing gdofP")
+    enddo
+    deallocate(gd,ps)
+  end subroutine tc1_read_psifile
 
   ! ===========================================
   !
@@ -773,6 +827,9 @@ contains
   !   "ylm"                : psi_sb + eps*rearth*u0*Y_l^m (tc1_ylm), with
   !                          SWEQX_TC1_PSI_PARAMS="l,m,eps"; DSS(curl psi) is then
   !                          rescaled to max|u| = u0 over the GLL nodes
+  !   "file"               : nodal psi from SWEQX_TC1_PSI_FILE (see tc1_psiname above);
+  !                          SWEQX_TC1_PSI_PARAMS="r" (optional) adds it to the solid body
+  !                          with rms|u_file| = r*rms|u_solidbody|; rescaled to max|u| = u0
   !
   ! ===========================================
   subroutine tc1_init_velocity(elem,deriv,hybrid,nets,nete)
@@ -781,7 +838,7 @@ contains
     use dimensions_mod, only : nelemd
     use parallel_mod, only : abortmp
 #ifdef _MPI
-    use parallel_mod, only : MPI_MAX, MPI_IN_PLACE, MPIreal_t
+    use parallel_mod, only : MPI_MAX, MPI_SUM, MPI_IN_PLACE, MPIreal_t
 #endif
     type (element_t), intent(in) :: elem(:)
     type (derivative_t), intent(in) :: deriv
@@ -792,6 +849,7 @@ contains
     character(len=256) :: psiparams
     integer :: ie,stat,i,j,ierr
     real (kind=real_kind) :: u(np,np,2,nets:nete), divu(np,np,nets:nete), ua(np,np,2), va(np,np,2)
+    real (kind=real_kind) :: un(np,np,2,nets:nete), psi(np,np), esum(2)
     real (kind=real_kind) :: maxdiv,maxdu,maxu,umax0,par(3)
 
     call get_environment_variable("SWEQX_TC1_VELOCITY",velname,status=stat)
@@ -812,6 +870,7 @@ contains
        if (elem(ie)%LocalId /= ie) call abortmp("tc1_init_velocity: elem%LocalId /= ie")
     enddo
     if (.not. allocated(tc1_vcurl)) allocate(tc1_vcurl(np,np,2,nelemd))
+    if (.not. allocated(tc1_ucurl)) allocate(tc1_ucurl(np,np,2,nelemd), tc1_zeta(np,np,nelemd))
 
     call get_environment_variable("SWEQX_TC1_PSI",tc1_psiname,status=stat)
     if (stat /= 0 .or. len_trim(tc1_psiname)==0) tc1_psiname = "solidbody"
@@ -822,13 +881,25 @@ contains
        if (stat /= 0) call abortmp("SWEQX_TC1_PSI_PARAMS: expected three numbers l,m,eps")
        tc1_ylm_l = nint(par(1)); tc1_ylm_m = nint(par(2)); tc1_ylm_eps = par(3)
        if (tc1_ylm_l < 0 .or. abs(tc1_ylm_m) > tc1_ylm_l) call abortmp("SWEQX_TC1_PSI_PARAMS: need 0 <= |m| <= l")
+    else if (trim(tc1_psiname) == "file") then
+       call get_environment_variable("SWEQX_TC1_PSI_FILE",tc1_psifile,status=stat)
+       if (stat /= 0 .or. len_trim(tc1_psifile)==0) call abortmp("SWEQX_TC1_PSI=file needs SWEQX_TC1_PSI_FILE")
+       call tc1_read_psifile(elem,nets,nete)
+       tc1_psi_r = -1
+       call get_environment_variable("SWEQX_TC1_PSI_PARAMS",psiparams,status=stat)
+       if (stat == 0 .and. len_trim(psiparams) > 0) then
+          read(psiparams,*,iostat=stat) tc1_psi_r
+          if (stat /= 0 .or. tc1_psi_r < 0) call abortmp("SWEQX_TC1_PSI_PARAMS: expected r >= 0 for SWEQX_TC1_PSI=file")
+       endif
     else if (trim(tc1_psiname) /= "solidbody") then
-       call abortmp("SWEQX_TC1_PSI must be 'solidbody' or 'ylm'")
+       call abortmp("SWEQX_TC1_PSI must be 'solidbody', 'ylm' or 'file'")
     endif
     if (hybrid%masterthread .and. hybrid%par%masterproc) then
        if (trim(tc1_psiname) == "ylm") then
           print '(a,i0,a,i0,a,es12.4)','swtc1 stream function: solid body + eps*a*u0*Y_l^m, l=',tc1_ylm_l, &
                ' m=',tc1_ylm_m,' eps=',tc1_ylm_eps
+       else if (trim(tc1_psiname) == "file") then
+          print '(a,a,a,es12.4)','swtc1 stream function: file ',trim(tc1_psifile),', r=',tc1_psi_r
        else
           print *,"swtc1 stream function: solidbody"
        endif
@@ -838,6 +909,33 @@ contains
        u(:,:,:,ie) = curl_sphere(tc1_selected_streamfunction(elem(ie)%spherep),deriv,elem(ie))
     end do
     call make_C0_vector(u,elem,hybrid,nets,nete)
+    if (trim(tc1_psiname) == "file") then
+       do ie=nets,nete
+          do j=1,np
+             do i=1,np
+                psi(i,j) = rearth*u0*tc1_psig(elem(ie)%gdofP(i,j))
+             end do
+          end do
+          un(:,:,:,ie) = curl_sphere(psi,deriv,elem(ie))
+       end do
+       call make_C0_vector(un,elem,hybrid,nets,nete)
+       if (tc1_psi_r >= 0) then
+          ! u = u_sb + c*u_file with rms|c*u_file| = r*rms|u_sb| (GLL quadrature)
+          esum = 0
+          do ie=nets,nete
+             esum(1) = esum(1) + sum(elem(ie)%spheremp*(u(:,:,1,ie)**2 + u(:,:,2,ie)**2))
+             esum(2) = esum(2) + sum(elem(ie)%spheremp*(un(:,:,1,ie)**2 + un(:,:,2,ie)**2))
+          end do
+#ifdef _MPI
+          call MPI_Allreduce(MPI_IN_PLACE,esum,2,MPIreal_t,MPI_SUM,hybrid%par%comm,ierr)
+#endif
+          tc1_psi_c = tc1_psi_r*sqrt(esum(1)/esum(2))
+          u = u + tc1_psi_c*un
+       else
+          tc1_psi_c = 1
+          u = un
+       endif
+    endif
 
     if (trim(tc1_psiname) /= "solidbody") then
        ! rescale to max|u| = u0 over the GLL nodes, for a fair comparison between fields
@@ -870,6 +968,12 @@ contains
     do ie=nets,nete
        maxdiv = max(maxdiv,maxval(abs(divu(:,:,ie))))
     end do
+    ! lat-lon velocity and DSS'd vorticity, for diagnostics (opmat_mod writes them)
+    do ie=nets,nete
+       tc1_ucurl(:,:,:,ie) = u(:,:,:,ie)
+       tc1_zeta(:,:,ie) = vorticity_sphere(u(:,:,:,ie),deriv,elem(ie))
+    end do
+    call make_C0(tc1_zeta(:,:,nets:nete),elem,hybrid,nets,nete)
     if (trim(tc1_psiname) == "solidbody") then
        print '(a,i6,a,es12.4,a,es12.4,a,es12.4)','DSS(curl psi) velocity, rank',hybrid%par%rank, &
             ': max|DSS div u|=',maxdiv,'  max|u-u_analytic|=',maxdu,'  max|u|=',maxu
