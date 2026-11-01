@@ -13,6 +13,7 @@ noise alone.  Every field is rescaled to max|u| = u0 at the GLL nodes.
                                   --window LAT LON FLAT TAPER [--bg 0 1]
     python opmat_noise.py extract --psi DIR --mats DIR [--select 'noise*'] [--r none 0.3 1]
                                   [--forms 0 2] [--ne 8]
+    python opmat_noise.py export  --prefix MATS/ne30-sc1-f0-curlpsi-<case> --out FILE.nc [--attr k=v ...]
     python opmat_noise.py analyze --mats DIR --out OUT [--select 'noise*'] [--spectral 6]
                                   [--maps 4] [--tag noise]
 
@@ -41,7 +42,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from opmat_io import load, read_meta
+from opmat_io import load, read_meta, psi_file
 from opmat_eigs import Cache, skew_sym_err, MUTED
 from opmat_sym import xyz
 from opmat_flows import analyze, summarize, regions, style, cube_edge_lines, GROW
@@ -457,6 +458,48 @@ def sparse_all(args):
     print(open(out).read())
 
 
+# ---------------------------------------------------------------- export
+def export(args):
+    """the velocity field of an extracted curlpsi case at the GLL nodes, as netCDF-3 for other codes"""
+    from scipy.io import netcdf_file
+    d = load(args.prefix, ops=())
+    meta = d['meta']
+    a, u0 = meta['rearth'], meta['u0']
+    rec = np.fromfile(psi_file(args.prefix, meta), dtype=[('g', '<i8'), ('p', '<f8')])
+    g2i = {g: i for i, g in enumerate(rec['g'])}
+    psi_f = rec['p'][[g2i[g] for g in d['gdof']]]
+    f = netcdf_file(args.out, 'w', version=2)
+    f.createDimension('node', d['n'])
+    def var(name, data, typ, units, long):
+        v = f.createVariable(name, typ, ('node',))
+        v[:] = data
+        v.units, v.long_name = units, long
+    var('lat', np.degrees(d['lat']), 'd', 'degrees_north', 'latitude of the unique GLL node')
+    var('lon', np.degrees(d['lon']), 'd', 'degrees_east', 'longitude of the unique GLL node')
+    var('gdofP', d['gdof'].astype(np.int32), 'i', '1', 'HOMME elem%gdofP id of the node (the key of the psi file)')
+    var('mass', d['mass'] * a ** 2, 'd', 'm2', 'assembled GLL quadrature weight (1/rspheremp times a^2)')
+    var('psi_file', psi_f, 'd', '1', 'nodal values read by sweqx from SWEQX_TC1_PSI_FILE (psi/(a u0) up to the '
+        'rescaling)')
+    var('psi', psi_f * meta['psi_uscale'] * a * u0, 'd', 'm2 s-1',
+        'stream function: psi_uscale*a*u0*psi_file, so that (u,v) = DSS(curl psi)')
+    var('u', d['vel'][:, 0], 'd', 'm s-1', 'eastward velocity, DSS(curl psi) at the GLL node')
+    var('v', d['vel'][:, 1], 'd', 'm s-1', 'northward velocity, DSS(curl psi) at the GLL node')
+    var('zeta', d['zeta'], 'd', 's-1', 'DSS relative vorticity of (u,v)')
+    f.title = os.path.basename(args.prefix)
+    f.grid = (f'HOMME cubed sphere, equiangular gnomonic, ne={meta["ne"]}, np={meta["np"]} (GLL), '
+              f'{d["n"]} unique nodes; nodes are identified by lat/lon (or gdofP within HOMME)')
+    for k, v in (('rearth', a), ('u0', u0), ('omega', u0 / a), ('psi_uscale', meta['psi_uscale'])):
+        setattr(f, k, np.array([v], dtype='>f8'))   # a bare float is written as float32
+    f.velocity = ('u = DSS(curl psi) with the DSS (assembled, mass-weighted average) at shared nodes, '
+                  'then scaled by psi_uscale to max|u| = u0 at the nodes; discretely divergence-free')
+    f.source = f'sweqx SWEQX_TC1_VELOCITY=curlpsi SWEQX_TC1_PSI=file SWEQX_TC1_PSI_FILE={os.path.basename(meta["psi_file"])}'
+    for kv in args.attr:
+        k, v = kv.split('=', 1)
+        setattr(f, k, v)
+    f.close()
+    print(args.out)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest='cmd', required=True)
@@ -510,8 +553,12 @@ def main():
     q.add_argument('--grid', type=float, nargs='+', help='--track: coarse nu30 grid (default 3e14 1e15 2e15 '
                    '4e15 8e15 1.6e16); the result is grid[0] when that is already stable')
     q.add_argument('--tag', default='sparse')
+    x = sub.add_parser('export')
+    x.add_argument('--prefix', required=True, help='opmat prefix of an extracted curlpsi case')
+    x.add_argument('--out', required=True, help='netCDF file')
+    x.add_argument('--attr', nargs='*', default=[], help='extra global attributes, key=value')
     args = p.parse_args()
-    {'gen': gen, 'patch': patch, 'extract': extract, 'analyze': analyze_all, 'sparse': sparse_all}[args.cmd](args)
+    {'gen': gen, 'patch': patch, 'extract': extract, 'analyze': analyze_all, 'sparse': sparse_all, 'export': export}[args.cmd](args)
 
 
 if __name__ == '__main__':

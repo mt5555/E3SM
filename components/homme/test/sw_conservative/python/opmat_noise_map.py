@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 from matplotlib.colors import LogNorm
 
-from opmat_io import load
+from opmat_io import load, psi_file
 from opmat_sym import xyz
 from opmat_flows_hv import load_B, nu_from30
 
@@ -87,7 +87,7 @@ def main():
     d = load(a.prefix, ops=('L',) if a.mode else ())
     meta, ne = d['meta'], d['meta']['ne']
     om = meta['u0'] / meta['rearth']
-    rec = np.fromfile(meta['psi_file'], dtype=[('g', '<i8'), ('p', '<f8')])
+    rec = np.fromfile(psi_file(a.prefix, meta), dtype=[('g', '<i8'), ('p', '<f8')])
     g2i = {g: i for i, g in enumerate(rec['g'])}
     psi = rec['p'][[g2i[g] for g in d['gdof']]] * meta['psi_uscale'] * meta['rearth'] * meta['u0']
     X = xyz(d['lat'], d['lon'])
