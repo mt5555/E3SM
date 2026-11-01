@@ -9,6 +9,8 @@ noise alone.  Every field is rescaled to max|u| = u0 at the GLL nodes.
 
     python opmat_noise.py gen     --ref PREFIX --psi DIR --lc 4 8 16 32 inf --seeds 10
                                   [--window LAT LON R]
+    python opmat_noise.py patch   --ref PREFIX --psi DIR --mats DIR --src noise-ne30-lcinf-s2
+                                  --window LAT LON FLAT TAPER [--bg 0 1]
     python opmat_noise.py extract --psi DIR --mats DIR [--select 'noise*'] [--r none 0.3 1]
                                   [--forms 0 2] [--ne 8]
     python opmat_noise.py analyze --mats DIR --out OUT [--select 'noise*'] [--spectral 6]
@@ -85,6 +87,32 @@ def gen(args):
             f = os.path.join(args.psi, f'noise-ne{ne}-lc{lc_str(lc)}-s{s}{wtag}.bin')
             rec.tofile(f)
             print(f)
+
+
+# ---------------------------------------------------------------- patch
+def patch(args):
+    """psi = bg*sin(lat) + uscale*w*psi_src: the noise of an existing file, at its physical
+    amplitude (uscale = psi_uscale of the extracted pure-noise case, so that inside the patch the
+    velocity is the one that case was analyzed with), in a flat-top window w = 1 within FLAT deg
+    of the centre and exp(-((d-FLAT)/TAPER)^2) outside, on a solid-body background bg*u0
+    (bg=0: patch alone).  sweqx still rescales the total to max|u| = u0."""
+    d = load(args.ref, ops=())
+    src = np.fromfile(os.path.join(args.psi, args.src + '.bin'), dtype=[('g', '<i8'), ('p', '<f8')])
+    g2i = {g: i for i, g in enumerate(src['g'])}
+    psi_n = src['p'][[g2i[g] for g in d['gdof']]]
+    meta = read_meta(os.path.join(args.mats, f'ne{d["meta"]["ne"]}-sc1-f0-curlpsi-{args.src}'))
+    X = xyz(d['lat'], d['lon'])
+    la, lo, flat, taper = args.window
+    c = xyz(np.radians([la]), np.radians([lo]))[0]
+    dist = np.degrees(np.arccos(np.clip(X @ c, -1, 1)))
+    w = np.exp(-(np.maximum(dist - flat, 0) / taper) ** 2)
+    for bg in args.bg:
+        psi = bg * np.sin(d['lat']) + meta['psi_uscale'] * w * psi_n
+        rec = np.zeros(len(psi), dtype=[('g', '<i8'), ('p', '<f8')])
+        rec['g'], rec['p'] = d['gdof'], psi
+        f = os.path.join(args.psi, f'{args.src}-w{la:g}_{lo:g}_{flat:g}_{taper:g}_bg{bg:g}.bin')
+        rec.tofile(f)
+        print(f)
 
 
 # ---------------------------------------------------------------- extract
@@ -437,6 +465,13 @@ def main():
     g.add_argument('--seeds', type=int, default=10)
     g.add_argument('--seed0', type=int, default=0)
     g.add_argument('--window', type=float, nargs=3, metavar=('LAT', 'LON', 'R'))
+    pt = sub.add_parser('patch')
+    pt.add_argument('--ref', required=True, help='opmat prefix with the dofs (e.g. ne30-sc1-f2-analytic)')
+    pt.add_argument('--psi', required=True)
+    pt.add_argument('--mats', required=True, help='where the pure-noise case of --src was extracted (psi_uscale)')
+    pt.add_argument('--src', required=True, help='noise file name without .bin, e.g. noise-ne30-lcinf-s2')
+    pt.add_argument('--window', type=float, nargs=4, required=True, metavar=('LAT', 'LON', 'FLAT', 'TAPER'))
+    pt.add_argument('--bg', type=float, nargs='+', default=[0.0], help='solid-body background amplitudes (x u0)')
     e = sub.add_parser('extract')
     e.add_argument('--psi', required=True)
     e.add_argument('--mats', required=True)
@@ -473,7 +508,7 @@ def main():
                    '4e15 8e15 1.6e16); the result is grid[0] when that is already stable')
     q.add_argument('--tag', default='sparse')
     args = p.parse_args()
-    {'gen': gen, 'extract': extract, 'analyze': analyze_all, 'sparse': sparse_all}[args.cmd](args)
+    {'gen': gen, 'patch': patch, 'extract': extract, 'analyze': analyze_all, 'sparse': sparse_all}[args.cmd](args)
 
 
 if __name__ == '__main__':
