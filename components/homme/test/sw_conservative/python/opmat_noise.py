@@ -268,11 +268,11 @@ def sym_bound(A, mass):
     return spla.eigsh((0.5 * (S + S.T)).tocsc(), k=1, which='LA', return_eigenvectors=False)[0]
 
 
-def rightmost(A, om, bound, k=16, floor=1e-3):
+def rightmost(A, om, bound, k=16, floor=1e-3, fracs=(0.5, 0.2, 0.05)):
     """max Re lambda(A) by shift-invert Arnoldi at real shifts from the symmetric-part bound
     down to floor*omega (the growing modes found so far have Im lambda ~ 0); also the
     eigenvalues found"""
-    shifts = [bound * 1.02 + floor * om] + [bound * f for f in (0.5, 0.2, 0.05)] + [floor * om]
+    shifts = [bound * 1.02 + floor * om] + [bound * f for f in fracs] + [floor * om]
     lam = []
     A = A.tocsc()
     for sg in sorted(set(x for x in shifts if x >= floor * om), reverse=True):
@@ -285,12 +285,12 @@ def rightmost(A, om, bound, k=16, floor=1e-3):
 
 
 def nu_sparse(L, B, mass, om, ne, tol, bound, grid=(1e12, 3e12, 1e13, 3e13, 1e14, 3e14, 1e15, 3e15, 1e16),
-              nbis=7):
+              nbis=7, fracs=(0.5, 0.2, 0.05)):
     """spectral nu30 threshold, max Re lambda(L - nu B) <= tol*omega, with rightmost():
     coarse grid, then bisection in log nu30 above the last unstable grid point.  bound =
     lambda_max(sym S) of L, also a bound for L - nu B (M^1/2 B M^-1/2 is positive semidefinite)"""
     def unstable(n30):
-        return rightmost(L - nu_from30(n30, ne) * B, om, bound)[0] > tol * om
+        return rightmost(L - nu_from30(n30, ne) * B, om, bound, fracs=fracs)[0] > tol * om
     lo = None
     for n30 in grid:
         if not unstable(n30):
@@ -335,10 +335,11 @@ def sparse_all(args):
                            sk=skew_sym_err(L, mass)[0], nus=np.nan)
                 if args.nu:
                     Bl = load_B(args.mats, ne, d['lat'], d['lon'])
-                    out['nus'] = nu_sparse(L, Bl, mass, om, ne, TOL, bnd)
+                    kw = dict(grid=(1e14, 3e14, 1e15, 3e15, 1e16), nbis=5, fracs=(0.3,)) if args.fast else {}
+                    out['nus'] = nu_sparse(L, Bl, mass, om, ne, TOL, bnd, **kw)
                 out['time'] = time.time() - t0
                 return out
-            key = f'sparse{"-nu" if args.nu else ""}{"-dense" if args.dense else ""}-' + nm
+            key = f'sparse{"-nu" if args.nu else ""}{"-fast" if args.fast else ""}{"-dense" if args.dense else ""}-' + nm
             r = cache.get(key, comp)
             row = dict(name=nm, ne=ne, lc=m.group(4), seed=int(m.group(5)), win=m.group(6) or '',
                        r=float(m.group(7)) if m.group(7) else np.inf, **{k: float(v) for k, v in r.items()})
@@ -400,6 +401,8 @@ def main():
     q.add_argument('--sc', type=int, default=1)
     q.add_argument('--nu', action='store_true', help='also the spectral nu30 threshold')
     q.add_argument('--dense', action='store_true', help='also the dense max Re lambda (small NE only)')
+    q.add_argument('--fast', action='store_true', help='nu search: 3 shifts, grid from nu30=1e14, 5 bisections '
+                   '(resolution about 1.04x); assumes nu30 > 1e14')
     q.add_argument('--tag', default='sparse')
     args = p.parse_args()
     {'gen': gen, 'extract': extract, 'analyze': analyze_all, 'sparse': sparse_all}[args.cmd](args)
