@@ -393,13 +393,15 @@ def sparse_all(args):
                 if args.nu:
                     Bl = load_B(args.mats, ne, d['lat'], d['lon'])
                     if args.track:
-                        out['nus'] = nu_track(L, Bl, om, ne, TOL, mr)
+                        out['nus'] = nu_track(L, Bl, om, ne, TOL, mr, **({'grid': args.grid} if args.grid else {}))
                     else:
                         kw = dict(grid=(1e14, 3e14, 1e15, 3e15, 1e16), nbis=5, fracs=(0.3,)) if args.fast else {}
                         out['nus'] = nu_sparse(L, Bl, mass, om, ne, TOL, bnd, **kw)
                 out['time'] = time.time() - t0
                 return out
             mode = '-track' if args.track else '-fast' if args.fast else ''
+            if args.track and args.grid:
+                mode += f'-g{args.grid[0]:.0e}'
             key = f'sparse{"-nu" if args.nu else ""}{mode}{"-dense" if args.dense else ""}-' + nm
             r = cache.get(key, comp)
             row = dict(name=nm, ne=ne, lc=m.group(4), seed=int(m.group(5)), win=m.group(6) or '',
@@ -467,6 +469,8 @@ def main():
     q.add_argument('--track', action='store_true', help='nu search with nu_track(): shifts placed from the '
                    'rightmost eigenvalue at the last unstable nu, capped ARPACK restarts (needed at NE30); grid '
                    'from nu30=3e14')
+    q.add_argument('--grid', type=float, nargs='+', help='--track: coarse nu30 grid (default 3e14 1e15 2e15 '
+                   '4e15 8e15 1.6e16); the result is grid[0] when that is already stable')
     q.add_argument('--tag', default='sparse')
     args = p.parse_args()
     {'gen': gen, 'extract': extract, 'analyze': analyze_all, 'sparse': sparse_all}[args.cmd](args)
