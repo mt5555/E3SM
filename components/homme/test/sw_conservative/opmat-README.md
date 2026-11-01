@@ -56,6 +56,9 @@ divergence (about 1e-18). Default runs are unchanged (bit-for-bit checked at NE8
 | `SWEQX_OPMAT_OPS=L\|B\|LB` | operators to extract (default LB) |
 | `SWEQX_OPMAT_COLOR=0` | one column per level per call (no coloring), for checking |
 | `SWEQX_TC1_VELOCITY=analytic\|curlpsi` | swtc1 prescribed velocity |
+| `SWEQX_TC1_PSI=solidbody\|ylm\|file` | stream function for `curlpsi` (default solidbody, bit-for-bit unchanged) |
+| `SWEQX_TC1_PSI_FILE=<path>` | for `file`: nodal ψ/(a·u0), stream records (int64 gdofP, real64 value) |
+| `SWEQX_TC1_PSI_PARAMS=...` | `l,m,eps` for ylm; `r` for file (add to the solid body with rms ratio r) |
 
 Requirements checked at run time: 1 thread, `kmass=-1`, `test_case='swtc1'` for L,
 `hypervis_order=2` for B.
@@ -139,6 +142,15 @@ B takes 2 min at NE60 and 9 min at NE120 on 4 ranks (NE120 B: 94.5 M entries, 1.
   (`results_proj.txt`) and figures: convergence, error maps with the cube edges, error vs
   distance to the edges, error history scaled by NE⁴, Gaussian amplitude per mode, error per
   frequency band, and maps of the top error-carrying modes.
+
+- `opmat_noise.py gen|patch|extract|sparse|analyze|export`: random nodal stream functions,
+  their extraction, the sparse threshold search (`sparse --nu --track`, needed at NE30) and a
+  netCDF export of a field; see the section on unstable steady flows below.
+- `opmat_noise_map.py --prefix PREFIX --center LAT LON [--mode NU30 --mats DIR]`: regional maps
+  of ψ, speed with arrows, vorticity and the threshold eigenmode of L − νB, with element edges.
+- `opmat_dense.py --prefix PREFIX --mats DIR --nu30 ... --out OUT [--vectors K] [--skew]`: all
+  eigenvalues of L − νB by dense `dgeev` (for a big machine; needs only numpy, scipy and
+  `opmat_io.py`), restartable per ν; `--skew` gets the split-form spectrum from singular values.
 
 ### HOMME details found along the way
 
@@ -324,6 +336,109 @@ log(error) against log ν around the minimum of the scan. ν₃₀ = ν·(NE/30)
 Cost on 4 cores: B extraction 30 s (NE30), 2 min (NE60), 9 min (NE120, 94.5 M entries, 1.5 GB);
 scans with about 30 ν values 1.5 min (NE30), 10 min (NE60) and 2 h (NE120, 20 ν values).
 
+## Unstable steady flows for the conservation form (November 2026)
+
+Goal: steady, discretely divergence-free velocities u = DSS(curl ψ) for which the
+conservation form (`theta_advect_form=0`) is unstable and needs a large hyperviscosity, to
+contrast with the split form (`theta_advect_form=2`), whose L is skew in the mass inner
+product (Re λ = 0 for every such u). Motivation: rare 3-D E3SM cases near mountains that
+seemed to need ν > 1e15 at NE30.
+
+Method. `opmat_noise.py gen` draws ψ at the unique GLL nodes (white noise, optionally smoothed
+to degree lc with (I + (a⁴/(lc(lc+1))²)B)⁻¹, optionally windowed); `patch` windows an
+existing field with a flat top and a Gaussian taper; sweqx reads it with
+`SWEQX_TC1_VELOCITY=curlpsi SWEQX_TC1_PSI=file SWEQX_TC1_PSI_FILE=<file>`, forms
+u = DSS(curl(a u0 ψ)) and rescales to max|u| = u0 at the nodes (`tc1_init_velocity`);
+`extract` runs `swtc1-opmat.sh` for L. The spectral threshold is the smallest ν with
+max Re λ(L − νB) ≤ 1e-6 ω (ω = u0/a), reported as ν₃₀ = ν·(NE/30)⁴. At NE30 `sparse --nu
+--track` finds it with shift-invert Arnoldi (fill-reducing `MMD_AT_PLUS_A` LU, about 3× less
+fill than COLAMD; ARPACK restarts capped; shifts placed from the rightmost eigenvalue at the
+last unstable ν; validated against dense solves at NE15). An "unstable" verdict is a converged
+eigenvalue; a "stable" one is a search that found none. Spot checks with shifts up to 100ω off
+the real axis found no missed modes: at these ν every eigenvalue near Re λ = 0 is close to the
+real axis.
+
+Results (all at the GLL nodes, max|u| = u0):
+
+- **Grid-scale noise (lc = ∞, whole sphere) is the hardest family.** NE8 screen over 200
+  fields (lc 4–∞, alone or added to the solid body): pure noise median ν₃₀ = 3.1e14, max
+  3.8e14; smoothing or mixing with the solid body lowers it (lc = 16: 7e13).
+- **Scaling: ν₃₀ ∝ NE, i.e. ν ∝ dx³.** Whole-sphere noise, ν₃₀: NE8 3.0–3.4e14 (5 seeds),
+  NE15 6.6–7.7e14 (3), NE30 1.19–2.04e15 (5). Fit ν ≈ K·max|ζ|·dx⁴ with K ≈ 0.009–0.014
+  (dx = 2πa/(12 NE)); max Re λ at ν = 0 is about 12, 20, 40 ω and max|ζ| about 29, 67, 137 ω.
+  Every NE30 seed needs ν > 1e15.
+- **The threshold mode is not the fastest-growing one.** The modes that grow fastest at ν = 0
+  are grid-scale and damped first; the one that sets the threshold is smoother, inside an
+  element, in a weak-flow spot next to strong vorticity.
+- **A background flow removes the problem.** Patch P1 below on the full solid body (bg = 1):
+  max Re λ = 0.13 ω, ν₃₀ ≤ 3e14. The background carries the localized growing modes out of the
+  patch (the instability becomes convective rather than absolute), so the search is restricted
+  to flows with no background.
+- **Windowed patches at NE30 (6° flat top, 3° taper, no background).** 11 patches from 8 noise
+  seeds and 5 centres (mid-latitude, face centre, cube edge, cube corner, 60S 120E):
+  ν₃₀ = 0.83–1.68e15 (median 1.0e15) for 10 of them, and 2.77e15 for P1. The cube geometry does
+  not matter. P1 is the worst of 11 draws, not a typical one; it comes from the seed with the
+  highest whole-sphere threshold, and its window happens to contain that seed's worst spot.
+  K ranges over 0.006–0.023, so max|ζ| predicts the threshold only to a factor of 3.
+
+### P1: the test field
+
+ψ_file = w(d)·ξ on the NE30 np=4 grid. ξ: i.i.d. N(0,1) at the unique GLL nodes in HOMME's
+unique-point (dof) order, `numpy.random.default_rng(2).standard_normal(48602)`, mass-weighted
+mean removed, scaled to max|ξ| = 1. w = 1 within d = 6° of 30N 35W and exp(−((d − 6)/3)²)
+beyond (d = great-circle distance). No background flow. Constant factors do not matter (sweqx
+rescales; the original file holds 7.415e-3·w·ξ). Properties: max|u| = u0 = 38.64 m/s,
+max|ζ| = 130 ω, max Re λ(L) = 40.75 ω at ν = 0; threshold ν₃₀ in (2.5e15, 2.77e15]: at 2.5e15
+the rightmost eigenvalue is 0.388 ω (a compact mode about two elements across near the patch
+centre), and 2.77e15 and 3.0e15 are stable. The split form has max Re λ = 0 (skew to 1e-15).
+The field depends on the grid (it is nodal noise), so other codes should take it from the
+netCDF file, or regenerate the recipe on their own nodes, which gives a statistically similar
+field with a different threshold.
+
+```bash
+cd test/sw_conservative/python
+M=~/scratch/opmat-noise; P=~/scratch/noise-psi
+python opmat_noise.py gen --ref $M/ne30-sc1-f2-analytic --psi $P --lc inf --seed0 2 --seeds 1
+python opmat_noise.py patch --ref $M/ne30-sc1-f2-analytic --psi $P --src noise-ne30-lcinf-s2 --window 30 -35 6 3
+python opmat_noise.py extract --psi $P --mats $M --select 'noise-ne30-lcinf-s2-w30_-35_6_3_bg0' --ne 30 --forms 0 2
+python opmat_noise.py sparse --mats $M --out OUT --select 'noise-ne30-lcinf-s2-w30_-35_6_3_bg0' --ne 30 --nu --track
+python opmat_noise_map.py --prefix $M/ne30-sc1-f0-curlpsi-noise-ne30-lcinf-s2-w30_-35_6_3_bg0 \
+    --center 30 -35 --mode 2.5e15 --shift 0.3 --mats $M --out p1-map.png
+python opmat_noise.py export --prefix $M/ne30-sc1-f0-curlpsi-noise-ne30-lcinf-s2-w30_-35_6_3_bg0 --out P1-ne30.nc
+```
+
+`gen` needs B (`swtc1-opmat.sh 30 1 2 analytic B 4`, 2 min). The regenerated file differs
+from the original by the constant factor only, and its L agrees with the original to 4e-16.
+The NE30 extraction takes 15 s per form, the sparse threshold search about 15 min.
+
+Package for other machines (not in git): `~/scratch/p1-package` (`p1-package.tar.gz`, about
+190 MB unpacked) holds the ψ files, the NE30 L for both forms, B, the dofs and meta files,
+`P1-ne30.nc` (lat, lon, gdofP, mass, ψ, u, v, ζ at the nodes, with the recipe and results as
+global attributes) and `p1-map.png`.
+
+### Full NE30 spectrum on a big machine
+
+```bash
+K=/path/to/p1-package; C=ne30-sc1-f0-curlpsi-noise-ne30-lcinf-s2-w30_-35_6_3_bg0
+OPENBLAS_NUM_THREADS=<cores> python opmat_dense.py --prefix $K/mats/$C --mats $K/mats \
+    --nu30 0 2.5e15 2.77e15 3e15 --out $K/dense --vectors 4
+OPENBLAS_NUM_THREADS=<cores> python opmat_dense.py --prefix $K/mats/${C/f0/f2} --out $K/dense --skew
+```
+
+Each ν is a separate `dgeev` (eigenvalues only) on an 18.9 GB array overwritten in place:
+about 20 GB peak and 1.7e15 flops. On the 4-core development machine one NE15 `dgeev`
+(n = 12,152) took 4.7 min, which scales (n³) to about 5 h per ν at NE30 on 4 cores; the
+Hessenberg QR phase does not use many threads well, so a large node may be only a few times
+faster (ScaLAPACK `pdgeev`/`pdhseqr` or ELPA-style libraries would be the next step). Results go to
+`dense/<case>-dense-nu<nu30>.npz` (all λ/ω, plus the rightmost eigenvectors from inverse
+iteration with `--vectors`), and a rerun skips the ν already done. Expected: max Re λ = 40.75 ω
+at ν = 0, 0.388 ω at 2.5e15, and ≤ 0 at 2.77e15 and 3e15. A positive value at 2.77e15 or 3e15
+would mean the sparse search missed a mode. On NE8 (s0) the script reproduces the sparse
+max Re λ (12.4416 ω) and threshold (3.12e14, between the dense 3.0e14 unstable and 3.2e14
+stable), with eigenvector residuals ≤ 1e-11, and on NE15 (s0) it brackets the tracked 6.86e14
+between 6.7e14 (unstable, 0.0077 ω) and 7.0e14 (stable). At ν = 0 that L has four eigenvalues at roundoff
+level (discrete steady states, the constant among them); for ν > 0 only the constant is left.
+
 ## Open questions and suggested next steps
 
 1. **Link the spectrum to the convergence orders: done** (section above). Remaining: a proof
@@ -339,6 +454,8 @@ scans with about 30 ν values 1.5 min (NE30), 10 min (NE60) and 2 h (NE120, 20 �
    For the split form with the curl ψ velocity, S = M^½ L M^-½ is skew, so use a symmetric
    solver on −S² (or Hermitian iS): much faster and parallel (dsyevd, ELPA, cuSOLVER).
    Regenerate the NE30 matrices with `swtc1-opmat.sh` (minutes); they are not in git.
+   For the unstable conservation-form test field P1, `opmat_dense.py` and a ready package exist
+   (section on unstable steady flows above).
    NE30 eigenvectors would give the edge-trapped modes and the modal budget in the asymptotic
    regime (`opmat_proj.py --eig 30`). With the antipodal symmetry (October 2026) the skew-part
    eigenvectors fit on a 15 GB machine: four Hermitian blocks of about 12,150 for α=π/4.
