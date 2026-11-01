@@ -31,6 +31,7 @@ import glob
 import os
 import re
 import subprocess
+import time
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
@@ -42,7 +43,7 @@ from opmat_io import load, read_meta
 from opmat_eigs import Cache, skew_sym_err, MUTED
 from opmat_sym import xyz
 from opmat_flows import analyze, summarize, regions, style, cube_edge_lines, GROW
-from opmat_flows_hv import load_B, spectral_nu, nu30, TOL
+from opmat_flows_hv import load_B, spectral_nu, nu30, nu_from30, TOL
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 NAME = re.compile(r'ne(\d+)-sc(\d+)-f(\d)-curlpsi-noise-ne\d+-lc(\w+?)-s(\d+)(?:-w(\S+?))?(?:_r(\S+))?$')
@@ -259,6 +260,104 @@ def analyze_all(args):
         plot_modes(worst[:args.maps], args.out, f'ne{args.ne}-sc{args.sc}-{args.tag}-modes.png')
 
 
+# ---------------------------------------------------------------- sparse (large NE)
+def sym_bound(A, mass):
+    """largest eigenvalue of sym(M^1/2 A M^-1/2): an upper bound for max Re lambda(A)"""
+    sq = np.sqrt(mass)
+    S = sp.diags(sq) @ A @ sp.diags(1 / sq)
+    return spla.eigsh((0.5 * (S + S.T)).tocsc(), k=1, which='LA', return_eigenvectors=False)[0]
+
+
+def rightmost(A, om, bound, k=16, floor=1e-3):
+    """max Re lambda(A) by shift-invert Arnoldi at real shifts from the symmetric-part bound
+    down to floor*omega (the growing modes found so far have Im lambda ~ 0); also the
+    eigenvalues found"""
+    shifts = [bound * 1.02 + floor * om] + [bound * f for f in (0.5, 0.2, 0.05)] + [floor * om]
+    lam = []
+    for sg in sorted(set(x for x in shifts if x >= floor * om), reverse=True):
+        lam.append(spla.eigs(A.tocsc(), k=k, sigma=sg, which='LM', return_eigenvectors=False, tol=1e-10))
+    lam = np.concatenate(lam)
+    return lam.real.max(), lam
+
+
+def nu_sparse(L, B, mass, om, ne, tol, grid=(1e12, 3e12, 1e13, 3e13, 1e14, 3e14, 1e15, 3e15, 1e16), nbis=7):
+    """spectral nu30 threshold, max Re lambda(L - nu B) <= tol*omega, with rightmost():
+    coarse grid, then bisection in log nu30 above the last unstable grid point"""
+    def unstable(n30):
+        A = (L - nu_from30(n30, ne) * B).tocsc()
+        return rightmost(A, om, max(sym_bound(A, mass), 0.0))[0] > tol * om
+    lo = None
+    for n30 in grid:
+        if not unstable(n30):
+            hi = n30
+            break
+        lo = n30
+    else:
+        return np.inf
+    if lo is None:
+        return grid[0]
+    for _ in range(nbis):
+        mid = np.sqrt(lo * hi)
+        lo, hi = (mid, hi) if unstable(mid) else (lo, mid)
+    return hi
+
+
+def sparse_all(args):
+    """max Re lambda, symmetric-part bound, vorticity scale and the spectral nu30 threshold
+    without dense matrices (large NE); --dense also computes the dense max Re for checking"""
+    os.makedirs(args.out, exist_ok=True)
+    cache = Cache(args.out)
+    rows = []
+    for ne in args.ne:
+        pat = [os.path.join(args.mats, f'ne{ne}-sc{args.sc}-f0-curlpsi-{sel}.meta') for sel in args.select]
+        for path in sorted(set(f[:-5] for p in pat for f in glob.glob(p))):
+            nm = os.path.basename(path)
+            m = NAME.match(nm)
+            if not m:
+                continue
+
+            def comp():
+                t0 = time.time()
+                d = load(path, ops=('L',))
+                L, mass, meta = d['L'], d['mass'], d['meta']
+                om = meta['u0'] / meta['rearth']
+                bnd = sym_bound(L, mass)
+                mr, lam = rightmost(L, om, bnd)
+                dmr = np.linalg.eigvals(L.toarray()).real.max() if args.dense else np.nan
+                speed = np.linalg.norm(d['vel'], axis=1)
+                out = dict(maxre=mr / om, bound=bnd / om, dense=dmr / om, zmax=np.abs(d['zeta']).max() / om,
+                           umax_rms=speed.max() / np.sqrt((mass * speed ** 2).sum() / mass.sum()),
+                           sk=skew_sym_err(L, mass)[0], nus=np.nan)
+                if args.nu:
+                    Bl = load_B(args.mats, ne, d['lat'], d['lon'])
+                    out['nus'] = nu_sparse(L, Bl, mass, om, ne, TOL)
+                out['time'] = time.time() - t0
+                return out
+            key = f'sparse{"-nu" if args.nu else ""}{"-dense" if args.dense else ""}-' + nm
+            r = cache.get(key, comp)
+            row = dict(name=nm, ne=ne, lc=m.group(4), seed=int(m.group(5)), win=m.group(6) or '',
+                       r=float(m.group(7)) if m.group(7) else np.inf, **{k: float(v) for k, v in r.items()})
+            rows.append(row)
+            print(f'{nm}: maxRe={row["maxre"]:.3f} (dense {row["dense"]:.3f}) bound={row["bound"]:.2f} '
+                  f'zeta={row["zmax"]:.1f} nu30={row["nus"]:.2e}  {row["time"]:.0f} s', flush=True)
+    out = os.path.join(args.out, f'results_noise-sparse-{args.tag}.txt')
+    with open(out, 'w') as f:
+        f.write('random nodal psi, conservation form: max Re lambda by shift-invert (dense check where given); '
+                'bound = lambda_max(sym S); zeta = max|vorticity|/omega; nu30 = nu*(NE/30)^4 spectral threshold; '
+                'nu_actual = nu30*(30/NE)^4; K = nu_actual/(max|zeta| dx^4), dx = 2 pi a/(12 NE) the mean GLL spacing\n')
+        f.write(f'{"case":44s} {"NE":>3s} {"maxRe/om":>9s} {"dense":>9s} {"bound":>7s} {"zeta":>7s} {"maxRe/z":>7s} '
+                f'{"umax/rms":>8s} {"skew":>6s} {"nu30":>9s} {"nu_actual":>9s} {"K":>7s}\n')
+        for row in sorted(rows, key=lambda row: (row['lc'], row['r'], row['seed'], row['ne'])):
+            a, om = 6.37122e6, 2 * np.pi / (12 * 86400.0)
+            dx = 2 * np.pi * a / (12 * row['ne'])
+            nua = row['nus'] * (30 / row['ne']) ** 4
+            K = nua / (row['zmax'] * om * dx ** 4)
+            f.write(f'{row["name"].split("-curlpsi-")[1]:44s} {row["ne"]:3d} {row["maxre"]:9.3f} {row["dense"]:9.3f} '
+                    f'{row["bound"]:7.2f} {row["zmax"]:7.1f} {row["maxre"] / row["zmax"]:7.4f} {row["umax_rms"]:8.2f} '
+                    f'{row["sk"]:6.3f} {row["nus"]:9.2e} {nua:9.2e} {K:7.4f}\n')
+    print(open(out).read())
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest='cmd', required=True)
@@ -288,8 +387,17 @@ def main():
     a.add_argument('--spectral', type=int, default=6)
     a.add_argument('--maps', type=int, default=4)
     a.add_argument('--tag', default='noise')
+    q = sub.add_parser('sparse')
+    q.add_argument('--mats', required=True)
+    q.add_argument('--out', required=True)
+    q.add_argument('--select', nargs='+', default=['noise*'])
+    q.add_argument('--ne', type=int, nargs='+', default=[8])
+    q.add_argument('--sc', type=int, default=1)
+    q.add_argument('--nu', action='store_true', help='also the spectral nu30 threshold')
+    q.add_argument('--dense', action='store_true', help='also the dense max Re lambda (small NE only)')
+    q.add_argument('--tag', default='sparse')
     args = p.parse_args()
-    {'gen': gen, 'extract': extract, 'analyze': analyze_all}[args.cmd](args)
+    {'gen': gen, 'extract': extract, 'analyze': analyze_all, 'sparse': sparse_all}[args.cmd](args)
 
 
 if __name__ == '__main__':
