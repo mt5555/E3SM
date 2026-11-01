@@ -307,6 +307,62 @@ def nu_sparse(L, B, mass, om, ne, tol, bound, grid=(1e12, 3e12, 1e13, 3e13, 1e14
     return hi
 
 
+def eigs_near(A, sg, k=8, maxiter=40, tol=1e-8):
+    """converged eigenvalues of A nearest the real shift sg, by shift-invert with a fill-reducing
+    LU (minimum degree on A^T+A: about 3x less fill than the default COLAMD for L - nu B, whose B
+    stencil is wide) and capped restarts.  Far from any eigenvalue ARPACK converges slowly, and
+    with the default restart limit (10 n) a single call can run for hours at NE30; with the cap,
+    the eigenvalues that did converge are returned (possibly none)"""
+    n = A.shape[0]
+    lu = spla.splu((A - sg * sp.identity(n, format='csc')).tocsc(), permc_spec='MMD_AT_PLUS_A',
+                   diag_pivot_thresh=0.1)
+    op = spla.LinearOperator((n, n), matvec=lu.solve, dtype=float)
+    try:
+        return spla.eigs(A, k=k, sigma=sg, OPinv=op, which='LM', return_eigenvectors=False, tol=tol,
+                         maxiter=maxiter)
+    except spla.ArpackNoConvergence as e:
+        return e.eigenvalues
+
+
+def nu_track(L, B, om, ne, tol, lam0, grid=(3e14, 1e15, 2e15, 4e15, 8e15, 1.6e16), nbis=5,
+             fracs=(1.05, 0.4, 0.15), low=0.03, log=lambda s: print(s, flush=True)):
+    """spectral nu30 threshold for large NE (NE30), where nu_sparse() stalls.  A test of L - nu B
+    places real shifts at fracs x ref, ref = the rightmost Re lambda found at the largest unstable
+    nu so far (lam0 = max Re lambda(L) to start; the growing modes have Im lambda ~ 0 and Re lambda
+    falls as nu grows), then one at low*omega with k=16.  Unstable as soon as a converged eigenvalue
+    has Re > tol*omega.  Coarse grid, then bisection in log nu30 (resolution (2^(1/2^nbis)) for a
+    factor-2 bracket)"""
+    ref = [lam0]
+
+    def unstable(n30):
+        t0 = time.time()
+        A = (L - nu_from30(n30, ne) * B).tocsc()
+        shifts = [(f * ref[0], 8) for f in fracs if f * ref[0] > low * om] + [(low * om, 16)]
+        for sg, k in shifts:
+            lam = eigs_near(A, sg, k=k)
+            mr = lam.real.max() if len(lam) else -np.inf
+            if mr > tol * om:
+                ref[0] = mr
+                log(f'    nu30={n30:.3e}: unstable, Re/om={mr / om:.4f} (shift {sg / om:.3f}, {time.time() - t0:.0f} s)')
+                return True
+        log(f'    nu30={n30:.3e}: stable ({len(shifts)} shifts, {time.time() - t0:.0f} s)')
+        return False
+    lo = None
+    for n30 in grid:
+        if not unstable(n30):
+            hi = n30
+            break
+        lo = n30
+    else:
+        return np.inf
+    if lo is None:
+        return grid[0]
+    for _ in range(nbis):
+        mid = np.sqrt(lo * hi)
+        lo, hi = (mid, hi) if unstable(mid) else (lo, mid)
+    return hi
+
+
 def sparse_all(args):
     """max Re lambda, symmetric-part bound, vorticity scale and the spectral nu30 threshold
     without dense matrices (large NE); --dense also computes the dense max Re for checking"""
@@ -328,6 +384,7 @@ def sparse_all(args):
                 om = meta['u0'] / meta['rearth']
                 bnd = sym_bound(L, mass)
                 mr, lam = rightmost(L, om, bnd)
+                print(f'  {nm}: bound {bnd / om:.2f}, max Re {mr / om:.3f} ({time.time() - t0:.0f} s)', flush=True)
                 dmr = np.linalg.eigvals(L.toarray()).real.max() if args.dense else np.nan
                 speed = np.linalg.norm(d['vel'], axis=1)
                 out = dict(maxre=mr / om, bound=bnd / om, dense=dmr / om, zmax=np.abs(d['zeta']).max() / om,
@@ -335,11 +392,15 @@ def sparse_all(args):
                            sk=skew_sym_err(L, mass)[0], nus=np.nan)
                 if args.nu:
                     Bl = load_B(args.mats, ne, d['lat'], d['lon'])
-                    kw = dict(grid=(1e14, 3e14, 1e15, 3e15, 1e16), nbis=5, fracs=(0.3,)) if args.fast else {}
-                    out['nus'] = nu_sparse(L, Bl, mass, om, ne, TOL, bnd, **kw)
+                    if args.track:
+                        out['nus'] = nu_track(L, Bl, om, ne, TOL, mr)
+                    else:
+                        kw = dict(grid=(1e14, 3e14, 1e15, 3e15, 1e16), nbis=5, fracs=(0.3,)) if args.fast else {}
+                        out['nus'] = nu_sparse(L, Bl, mass, om, ne, TOL, bnd, **kw)
                 out['time'] = time.time() - t0
                 return out
-            key = f'sparse{"-nu" if args.nu else ""}{"-fast" if args.fast else ""}{"-dense" if args.dense else ""}-' + nm
+            mode = '-track' if args.track else '-fast' if args.fast else ''
+            key = f'sparse{"-nu" if args.nu else ""}{mode}{"-dense" if args.dense else ""}-' + nm
             r = cache.get(key, comp)
             row = dict(name=nm, ne=ne, lc=m.group(4), seed=int(m.group(5)), win=m.group(6) or '',
                        r=float(m.group(7)) if m.group(7) else np.inf, **{k: float(v) for k, v in r.items()})
@@ -403,6 +464,9 @@ def main():
     q.add_argument('--dense', action='store_true', help='also the dense max Re lambda (small NE only)')
     q.add_argument('--fast', action='store_true', help='nu search: 3 shifts, grid from nu30=1e14, 5 bisections '
                    '(resolution about 1.04x); assumes nu30 > 1e14')
+    q.add_argument('--track', action='store_true', help='nu search with nu_track(): shifts placed from the '
+                   'rightmost eigenvalue at the last unstable nu, capped ARPACK restarts (needed at NE30); grid '
+                   'from nu30=3e14')
     q.add_argument('--tag', default='sparse')
     args = p.parse_args()
     {'gen': gen, 'extract': extract, 'analyze': analyze_all, 'sparse': sparse_all}[args.cmd](args)
