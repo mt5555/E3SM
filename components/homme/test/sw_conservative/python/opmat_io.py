@@ -9,6 +9,7 @@ Read the operator matrices written by sweqx with SWEQX_OPMAT=<prefix>
                               # d['vel'] (n x 2, east/north m/s), d['zeta'] (1/s): curlpsi only
 """
 import glob
+import os
 import numpy as np
 import scipy.sparse as sp
 
@@ -69,3 +70,17 @@ def load(prefix, ops=('L', 'B')):
         tt = tt[np.argsort(tt['dof'])]
         d[op + 'test'] = (tt['x'], tt['y'])
     return d
+
+
+def psi_file(prefix, meta=None):
+    """the curlpsi stream-function file of an extraction: the path in the meta file, else the same
+    basename in ../psi or next to the matrices (for copied packages such as p1-package)"""
+    meta = meta or read_meta(prefix)
+    f = meta['psi_file']
+    if os.path.exists(f):
+        return f
+    here = os.path.dirname(os.path.abspath(prefix))
+    for c in (os.path.join(here, '..', 'psi', os.path.basename(f)), os.path.join(here, os.path.basename(f))):
+        if os.path.exists(c):
+            return c
+    raise FileNotFoundError(f'{prefix}: psi file {f} not found')
