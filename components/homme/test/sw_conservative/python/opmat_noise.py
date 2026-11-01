@@ -100,14 +100,16 @@ def patch(args):
     src = np.fromfile(os.path.join(args.psi, args.src + '.bin'), dtype=[('g', '<i8'), ('p', '<f8')])
     g2i = {g: i for i, g in enumerate(src['g'])}
     psi_n = src['p'][[g2i[g] for g in d['gdof']]]
-    meta = read_meta(os.path.join(args.mats, f'ne{d["meta"]["ne"]}-sc1-f0-curlpsi-{args.src}'))
+    # with no background the amplitude is irrelevant (sweqx rescales to max|u| = u0)
+    uscale = 1.0 if not any(args.bg) else \
+        read_meta(os.path.join(args.mats, f'ne{d["meta"]["ne"]}-sc1-f0-curlpsi-{args.src}'))['psi_uscale']
     X = xyz(d['lat'], d['lon'])
     la, lo, flat, taper = args.window
     c = xyz(np.radians([la]), np.radians([lo]))[0]
     dist = np.degrees(np.arccos(np.clip(X @ c, -1, 1)))
     w = np.exp(-(np.maximum(dist - flat, 0) / taper) ** 2)
     for bg in args.bg:
-        psi = bg * np.sin(d['lat']) + meta['psi_uscale'] * w * psi_n
+        psi = bg * np.sin(d['lat']) + uscale * w * psi_n
         rec = np.zeros(len(psi), dtype=[('g', '<i8'), ('p', '<f8')])
         rec['g'], rec['p'] = d['gdof'], psi
         f = os.path.join(args.psi, f'{args.src}-w{la:g}_{lo:g}_{flat:g}_{taper:g}_bg{bg:g}.bin')
@@ -468,7 +470,8 @@ def main():
     pt = sub.add_parser('patch')
     pt.add_argument('--ref', required=True, help='opmat prefix with the dofs (e.g. ne30-sc1-f2-analytic)')
     pt.add_argument('--psi', required=True)
-    pt.add_argument('--mats', required=True, help='where the pure-noise case of --src was extracted (psi_uscale)')
+    pt.add_argument('--mats', help='where the pure-noise case of --src was extracted (psi_uscale; '
+                    'needed only with a nonzero --bg)')
     pt.add_argument('--src', required=True, help='noise file name without .bin, e.g. noise-ne30-lcinf-s2')
     pt.add_argument('--window', type=float, nargs=4, required=True, metavar=('LAT', 'LON', 'FLAT', 'TAPER'))
     pt.add_argument('--bg', type=float, nargs='+', default=[0.0], help='solid-body background amplitudes (x u0)')
