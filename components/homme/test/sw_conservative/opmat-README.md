@@ -121,7 +121,7 @@ B takes 2 min at NE60 and 9 min at NE120 on 4 ranks (NE120 B: 94.5 M entries, 1.
   (four blocks of about 5,460, peak 3.3 GB). With 4 threads, one NE20 α=π/4 block takes 2 min.
   Peak memory is about 4 × 16 n_k² bytes per block (n_k the block size), so NE30 α=π/4
   (blocks of about 12,150) needs about 10 GB. Measured at NE30 on 4 threads: α=0 36 min (peak
-  6.2 GB), α=π/4 about 27 min per block. Each finished block is checkpointed in
+  6.2 GB), α=π/4 106 min (four blocks of 25–28 min, peak 11.9 GB). Each finished block is checkpointed in
   `OUT/<case>-ckpt` (its per-mode results and its parts of the error fields, not the
   eigenvectors), so a run interrupted by, e.g., a container restart resumes when started again
   with the same arguments; a checkpoint made for different settings is not reused, and it is
@@ -162,6 +162,20 @@ B takes 2 min at NE60 and 9 min at NE120 on 4 ranks (NE120 B: 94.5 M entries, 1.
   otherwise, e.g. for P1), with a checkpoint per block. NE30 α=π/4 then takes 15–20 min and
   2.6 GB per ν on 4 threads, instead of hours and 20 GB. At NE8 it matches the full `dgeev` to
   3e-11 ω (both forms, both α, ν₃₀ = 0 and 1e14), and resumed runs are identical.
+
+**NE30 dense costs** (n = 48,602; the development machine has 4 cores and about 15 GB):
+
+| Tool | Flow | Computes | Peak memory | Time on 4 threads |
+|---|---|---|---|---|
+| `opmat_dense.py --sym` | solid body, α=π/4 | all eigenvalues of L − νB | 2.6 GB (measured) | 15–22 min per ν (measured) |
+| `opmat_dense.py --sym` | solid body, α=0 | all eigenvalues of L − νB | under 2 GB (estimate) | about 5 min per ν (estimate) |
+| `opmat_proj.py --eig 30` | solid body, α=0 | eigenvalues and eigenvectors of the skew part, modal budget | 6.2 GB (measured) | 36 min (measured) |
+| `opmat_proj.py --eig 30` | solid body, α=π/4 | same | 11.9 GB (measured) | 106 min (measured) |
+| `opmat_dense.py` | any (e.g. P1) | all eigenvalues of L − νB | about 20 GB (estimate: one 18.9 GB array overwritten in place) | about 5 h per ν (estimate, n³ from NE15) |
+| `opmat_dense.py --skew` | any, split form with curl ψ | singular values of S | about 20 GB (estimate) | not measured |
+
+Without the symmetry the problem does not fit on the development machine; see the P1 package
+below. The `--sym` estimates for α=0 assume six solved blocks of about 6,075.
 
 ### HOMME details found along the way
 
@@ -463,7 +477,8 @@ level (discrete steady states, the constant among them); for ν > 0 only the con
    (θ = 0, flow across the edge). Corners (valence 3) need a separate 2-D local model.
    `mt5555/sem-advection-tests` already has planar kinked-mesh SEM codes.
 2. **NE30 dense spectra and eigenvectors on a bigger machine** (e.g. a Perlmutter CPU node, 512 GB). n=48,602:
-   dense L is 19 GB, `dgeev` eigenvalues-only needs about 40–60 GB and ~1e15 flops (hours).
+   dense L is 19 GB, `dgeev` eigenvalues-only (`opmat_dense.py`, in place) needs about 20 GB and
+   ~1.7e15 flops (hours); see the NE30 cost table.
    For the split form with the curl ψ velocity, S = M^½ L M^-½ is skew, so use a symmetric
    solver on −S² (or Hermitian iS): much faster and parallel (dsyevd, ELPA, cuSOLVER).
    Regenerate the NE30 matrices with `swtc1-opmat.sh` (minutes); they are not in git.
