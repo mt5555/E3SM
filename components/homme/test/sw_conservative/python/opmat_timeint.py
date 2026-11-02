@@ -4,7 +4,7 @@ Time integration of a tracer with the extracted operators, HOMME's way:
     q <- (I - (dt/s) nu B)^s R4(dt L) q
 
 (RK4 for the transport, then s forward-Euler hyperviscosity subcycles, as advance_hypervis with
-hypervis_subcycle=s; s is the smallest with (dt/s) nu lambda_max(B) <= 1.5).  Tracks the
+hypervis_subcycle=s; s is the smallest with (dt/s) nu lambda_max(B) <= --hvmax, default 1.5).  Tracks the
 mass-weighted variance  Var = sum m (q - qbar)^2 / sum m,  the mass  sum m q,  and max|q|;
 q is rescaled whenever it grows past 1e100 (the log of the factor is kept), so a run of the
 unstable conservation form does not overflow.
@@ -45,6 +45,8 @@ def main():
     p.add_argument('--dt', type=float, default=1800.0)
     p.add_argument('--gauss', type=float, nargs=3, default=[30.0, -35.0, 6.0], metavar=('LAT', 'LON', 'R'))
     p.add_argument('--snap', type=float, nargs='*', default=[0, 1, 12], help='snapshot times (days)')
+    p.add_argument('--hvmax', type=float, default=1.5, help='largest (dt/s) nu lambda_max(B) per hyperviscosity '
+                   'subcycle (forward Euler is stable up to 2; 1.5 leaves the top B modes only weakly damped)')
     p.add_argument('--out', required=True)
     a = p.parse_args()
     os.makedirs(a.out, exist_ok=True)
@@ -66,7 +68,7 @@ def main():
                 B = load_B(a.mats, a.ne, d['lat'], d['lon']).tocsr()
                 lmax = np.abs(spla.eigs(B, k=1, which='LM', return_eigenvectors=False, maxiter=5000, tol=1e-4)).max()
                 print(f'lambda_max(B) = {lmax:.4e}', flush=True)
-            s = max(1, int(np.ceil(a.dt * nu * lmax / 1.5)))
+            s = max(1, int(np.ceil(a.dt * nu * lmax / a.hvmax)))
         X = xyz(d['lat'], d['lon'])
         la, lo, R = a.gauss
         c = xyz(np.radians([la]), np.radians([lo]))[0]
@@ -102,7 +104,7 @@ def main():
               f'({time.time() - t0:.0f} s)', flush=True)
         np.savez(f, t=np.array(T), log10var=np.array(LV), massdrift=np.array(MD), log10max=np.array(LMX),
                  snap_t=np.array(ST), snap_q=np.array(SQ), snap_log10scale=np.array(SS),
-                 form=int(form), nu30=n30, nu=nu, dt=a.dt, subcycles=s, gauss=np.array(a.gauss),
+                 form=int(form), nu30=n30, nu=nu, dt=a.dt, subcycles=s, hvmax=a.hvmax, gauss=np.array(a.gauss),
                  lat=d['lat'], lon=d['lon'], mass=m, case=a.case, ne=a.ne)
         print(f, flush=True)
 
