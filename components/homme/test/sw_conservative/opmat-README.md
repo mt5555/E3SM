@@ -154,9 +154,14 @@ B takes 2 min at NE60 and 9 min at NE120 on 4 ranks (NE120 B: 94.5 M entries, 1.
   netCDF export of a field; see the section on unstable steady flows below.
 - `opmat_noise_map.py --prefix PREFIX --center LAT LON [--mode NU30 --mats DIR]`: regional maps
   of ψ, speed with arrows, vorticity and the threshold eigenmode of L − νB, with element edges.
-- `opmat_dense.py --prefix PREFIX --mats DIR --nu30 ... --out OUT [--vectors K] [--skew]`: all
-  eigenvalues of L − νB by dense `dgeev` (for a big machine; needs only numpy, scipy and
+- `opmat_dense.py --prefix PREFIX --mats DIR --nu30 ... --out OUT [--vectors K] [--skew] [--sym]`:
+  all eigenvalues of L − νB by dense `dgeev` (for a big machine; needs only numpy, scipy and
   `opmat_io.py`), restartable per ν; `--skew` gets the split-form spectrum from singular values.
+  `--sym` solves block by block with the grid symmetries of `opmat_sym.py`, only for the
+  solid-body rotation (α = 0 or π/4; it checks that they commute with L − νB and refuses
+  otherwise, e.g. for P1), with a checkpoint per block. NE30 α=π/4 then takes 15–20 min and
+  2.6 GB per ν on 4 threads, instead of hours and 20 GB. At NE8 it matches the full `dgeev` to
+  3e-11 ω (both forms, both α, ν₃₀ = 0 and 1e14), and resumed runs are identical.
 
 ### HOMME details found along the way
 
@@ -463,8 +468,11 @@ level (discrete steady states, the constant among them); for ν > 0 only the con
    solver on −S² (or Hermitian iS): much faster and parallel (dsyevd, ELPA, cuSOLVER).
    Regenerate the NE30 matrices with `swtc1-opmat.sh` (minutes); they are not in git.
    NE30 skew-part eigenvectors are done (`opmat_proj.py --eig 30`, October 2026, with the antipodal
-   symmetry on a 15 GB machine; results in the modal table above). Full dense L at NE30 still needs
-   the bigger machine. For the unstable conservation-form test field P1, `opmat_dense.py` and a
+   symmetry on a 15 GB machine; results in the modal table above). Full dense spectra of L − νB at
+   NE30 for the solid-body rotation fit here too (`opmat_dense.py --sym`): split form, analytic
+   velocity, α=π/4, max Re λ = 4.2e-7 ω at ν = 0 (the ±200.4i ω modes), and all damped at
+   ν = 1e14 and 1e15 (Re λ ≥ −62 and −786 ω). Flows without the symmetry still need the bigger
+   machine. For the unstable conservation-form test field P1, `opmat_dense.py` and a
    ready package exist (section on unstable steady flows above).
 3. **Why α=π/4's max norm drops to p=3: largely answered** (edge-trapped modes, section
    above). Worth checking whether the planar kinked-mesh tests had flow running parallel to a

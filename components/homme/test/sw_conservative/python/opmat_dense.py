@@ -23,9 +23,19 @@ inverse iteration with a sparse LU of A - lam I, with their residuals |A v - lam
 a DSS(curl psi) velocity, so its eigenvalues are +-i sigma with sigma the singular values of S;
 dgesdd values-only is symmetric-type work and parallelizes far better than dgeev.  The skew
 error |S + S^T|/|S| is reported, and the Re lam = 0 claim rests on it.
+
+--sym: for flows that keep the symmetries of the cubed-sphere grid (the solid-body rotation
+with alpha = 0 or pi/4, opmat_sym.py), solve the dense eigenvalue problem block by block:
+8 blocks of about n/8 (alpha = 0, two of them complex conjugates of others) or 4 real blocks
+of about n/4 (alpha = pi/4).  NE30 alpha = pi/4 then takes 15-20 min and 2.6 GB on 4 threads,
+so it runs on a laptop-sized machine.  The rotation and the antipodal map must commute with
+A = L - nu B (checked first, to 1e-12 relative); P1 and other localized flows break them and
+are refused.  Each block is checkpointed in OUT/<case>-dense-nu<nu30>-ckpt/ and the run
+resumes from there; the block label of each eigenvalue is saved as `block`.
 """
 import argparse
 import os
+import shutil
 import time
 import numpy as np
 import scipy.linalg as la
@@ -62,6 +72,48 @@ def report(lam, om_tol=1e-6, null=1e-8, top=12):
     return r[idx]
 
 
+def sym_eigvals(A, d, f, om, tol=1e-12):
+    """all eigenvalues of A (divided by om) via the symmetry blocks of opmat_sym, with a
+    checkpoint per block in f[:-4] + '-ckpt'; returns (lam, block label)"""
+    from opmat_sym import generators, check_commutes, block_eigs
+    try:
+        gens = generators(d['lat'], d['lon'], d['meta']['alpha'])
+    except (ValueError, KeyError) as e:
+        raise SystemExit(f'--sym: no grid symmetry for this case ({e})')
+    comm = max(check_commutes(A, perm) for perm, _, _ in gens)
+    if comm > tol:
+        raise SystemExit(f'--sym: the grid symmetries do not commute with A (relative error {comm:.1e}); '
+                         'run without --sym')
+    ck = f[:-4] + '-ckpt'
+    os.makedirs(ck, exist_ok=True)
+    def ckf(k):
+        return os.path.join(ck, f'block{k}.npz')
+    key = np.array([A.shape[0], spla.norm(A)])
+    def load_ck(k):
+        if not os.path.exists(ckf(k)):
+            return None
+        c = np.load(ckf(k))
+        return c['lam'] if np.allclose(c['key'], key, rtol=1e-12, atol=0) else None
+    skip = [k for k in range(8) if load_ck(k) is not None]
+    if skip:
+        print(f'  resuming: blocks {skip} from {ck}', flush=True)
+    t0 = time.time()
+    lams, labs = [], []
+    for lab, lam, Q, U, info in block_eigs(A, d['lat'], d['lon'], d['meta']['alpha'], skip=skip):
+        if lam is None:
+            lam, how = load_ck(lab), 'from checkpoint'
+        else:
+            lam = lam / om
+            tmp = ckf(lab) + '.tmp.npz'
+            np.savez(tmp, lam=lam, key=key)
+            os.replace(tmp, ckf(lab))
+            how = f'{time.time() - t0:.0f} s, off-block residual {info["offblock"]:.1e}'
+        print(f'  block {lab} of {info["m"]}: size {info["size"]}, {how}, commute {info["commute"]:.1e}, '
+              f'max Re {lam.real.max():.4g} omega', flush=True)
+        lams.append(lam); labs.append(np.full(len(lam), lab))
+    return np.concatenate(lams), np.concatenate(labs), ck
+
+
 def inverse_vectors(A, lams, om, iters=12):
     n = A.shape[0]
     Ac = A.astype(complex).tocsc()
@@ -90,6 +142,8 @@ def main():
     p.add_argument('--out', required=True)
     p.add_argument('--vectors', type=int, default=0)
     p.add_argument('--skew', action='store_true', help='split form at nu=0: singular values of S')
+    p.add_argument('--sym', action='store_true',
+                   help='solve by grid-symmetry blocks (solid-body rotation, alpha = 0 or pi/4)')
     p.add_argument('--dry', action='store_true')
     a = p.parse_args()
 
@@ -99,6 +153,13 @@ def main():
     case = os.path.basename(a.prefix)
     print(f'{case}: n = {n}, dense array {8 * n * n / 1e9:.1f} GB, about {15 * n ** 3:.2e} flops per dgeev '
           f'({4 * n ** 3:.2e} for --skew)', flush=True)
+    if a.sym and a.skew:
+        raise SystemExit('--sym and --skew together are not supported')
+    if a.sym:
+        from opmat_sym import symmetry_blocks
+        nk = [Q.shape[1] for _, Q, src in symmetry_blocks(d['lat'], d['lon'], meta['alpha'])[1] if src is None]
+        print(f'  --sym: {len(nk)} blocks to solve, sizes {nk}, about {sum(15 * k ** 3 for k in nk):.2e} flops, '
+              f'largest dense block {8 * max(nk) ** 2 / 1e9:.2f} GB', flush=True)
     if a.dry:
         return
     os.makedirs(a.out, exist_ok=True)
@@ -126,16 +187,26 @@ def main():
             print(f'{f} exists: skipped'); continue
         A = d['L'] if n30 == 0 else (d['L'] - nu_from30(n30, ne) * B).tocsr()
         t0 = time.time()
-        lam = la.eigvals(A.toarray(order='F'), overwrite_a=True, check_finite=False) / om
+        ck = None
+        if a.sym:
+            print(f'nu30 = {n30:.4g} (nu = {nu_from30(n30, ne):.4g}): by symmetry blocks', flush=True)
+            lam, block, ck = sym_eigvals(A, d, f, om)
+        else:
+            lam = la.eigvals(A.toarray(order='F'), overwrite_a=True, check_finite=False) / om
         dt = time.time() - t0
-        print(f'nu30 = {n30:.4g} (nu = {nu_from30(n30, ne):.4g}): dgeev {dt:.0f} s', flush=True)
+        print(f'nu30 = {n30:.4g} (nu = {nu_from30(n30, ne):.4g}): {"blocks" if a.sym else "dgeev"} {dt:.0f} s',
+              flush=True)
         top = report(lam)
         out = dict(lam=lam, nu30=n30, nu=nu_from30(n30, ne), n=n, ne=ne, omega=om, time=dt, case=case)
+        if a.sym:
+            out.update(block=block)
         if a.vectors:
             V, res = inverse_vectors(A, top[:a.vectors], om)
             out.update(vectors=V, vector_lam=top[:a.vectors], vector_res=res,
                        lat=d['lat'], lon=d['lon'], mass=d['mass'])
         np.savez(f, **out)
+        if ck is not None:
+            shutil.rmtree(ck)
         print(f, flush=True)
 
 
