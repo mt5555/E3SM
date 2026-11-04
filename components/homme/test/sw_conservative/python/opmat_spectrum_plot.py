@@ -11,7 +11,8 @@ F*.npz are opmat_dense.py outputs (lam already divided by omega = u0/a, plus ome
 case).  Hull mode (the default) fills each spectrum's convex hull, so several spectra fit on
 one axis; a spectrum on the imaginary axis (|Re| below 1e-6 of its extent, e.g. the split
 form at nu = 0) is drawn as a segment of the axis.  --scatter plots every eigenvalue instead
-(one panel per file).  --dt draws the boundary |R(dt lam)| = 1 of RK4 (R from
+(one panel per file).  An opmat_dense.py --skew file (singular values sigma of the split
+form's skew S) is read as the eigenvalues +-i sigma.  --dt draws the boundary |R(dt lam)| = 1 of RK4 (R from
 opmat_eigs.rk4_amp) for each dt in seconds.  --zoom XMIN adds a panel limited to
 Re lam/omega >= XMIN (and wide enough on the right for any Re lam > 0).  The legend gives each spectrum's range of Re and its max |Im|.
 
@@ -34,8 +35,15 @@ SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300']   # 
 
 
 def load(f):
+    """lam/omega, omega (None if the file does not say) and the file.  An opmat_dense.py --skew
+    file holds the singular values sigma of the skew S (in units of omega); its eigenvalues are
+    +-i sigma (each pair gives sigma twice), so the pairs are given alternating signs."""
     d = np.load(f, allow_pickle=True)
-    return d['lam'], float(d['omega']), d
+    om = float(d['omega']) if 'omega' in d else None
+    if 'lam' in d:
+        return d['lam'], om, d
+    sig = np.sort(d['sigma'])
+    return 1j * sig * np.where(np.arange(len(sig)) % 2 == 0, 1, -1), om, d
 
 
 def default_label(f, d):
@@ -96,7 +104,9 @@ def main():
         lab = a.labels[i] if a.labels else default_label(f, d)
         lab += f'  (Re λ/ω in [{lam.real.min():.3g}, {lam.real.max():.2g}], |Im λ|/ω ≤ {np.abs(lam.imag).max():.0f})'
         data.append((lam, om, lab, SERIES[i]))
-    oms = [om for _, om, _, _ in data]
+    oms = [om for _, om, _, _ in data if om is not None]
+    if not oms:                       # only --skew files: swtc1's u0/a
+        oms = [38.6396503844300128 / 6.376e6]
     if max(oms) - min(oms) > 1e-12 * max(oms):
         raise SystemExit('the files have different omega')
     om = oms[0]
