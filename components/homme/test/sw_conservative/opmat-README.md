@@ -162,6 +162,11 @@ B takes 2 min at NE60 and 9 min at NE120 on 4 ranks (NE120 B: 94.5 M entries, 1.
   otherwise, e.g. for P1), with a checkpoint per block. NE30 α=π/4 then takes 15–20 min and
   2.6 GB per ν on 4 threads, instead of hours and 20 GB. At NE8 it matches the full `dgeev` to
   3e-11 ω (both forms, both α, ν₃₀ = 0 and 1e14), and resumed runs are identical.
+- `opmat_spectrum_plot.py --files F.npz ... --out OUT.png [--labels ...] [--dt S ...] [--scatter]
+  [--zoom XMIN]`: complex-plane plots of `opmat_dense.py` spectra: the convex hull of each
+  (several on one axis; a spectrum on the imaginary axis is drawn as a segment), or every
+  eigenvalue with `--scatter`, plus the RK4 stability boundary for each dt and an optional
+  zoom panel near the imaginary axis.
 
 **NE30 dense costs** (n = 48,602; the development machine has 4 cores and about 15 GB):
 
