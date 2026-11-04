@@ -176,7 +176,10 @@ def main():
         sig = la.svdvals(S.toarray(order='F'), overwrite_a=True, check_finite=False) / om
         print(f'  svdvals: {time.time() - t0:.0f} s; max sigma = {sig.max():.6g} omega, '
               f'{(sig < 1e-8 * sig.max()).sum()} zero', flush=True)
-        np.savez(f, sigma=sig, skew_err=err, n=n, ne=ne, time=time.time() - t0)
+        sig_s = np.sort(sig)                      # eigenvalues +-i sigma, each pair gives sigma twice
+        lam = 1j * sig_s * np.where(np.arange(n) % 2 == 0, 1, -1)
+        np.savez(f, sigma=sig, lam=lam, skew_err=err, n=n, ne=ne, nu30=0.0, omega=om, case=case,
+                 time=time.time() - t0)
         print(f)
         return
 
