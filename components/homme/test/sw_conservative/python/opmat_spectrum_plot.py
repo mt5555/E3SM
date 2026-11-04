@@ -5,7 +5,7 @@ the eigenvalues of each file, with the RK4 stability boundary for given time ste
 
 usage:
   opmat_spectrum_plot.py --files F1.npz [F2.npz ...] --out OUT.png [--labels L1 L2 ...]
-                         [--dt 1800 ...] [--scatter] [--zoom XMIN] [--title TEXT]
+                         [--dt 1800 ...] [--fe 600 ...] [--scatter] [--zoom XMIN] [--title TEXT]
 
 F*.npz are opmat_dense.py outputs (lam already divided by omega = u0/a, plus omega, nu30,
 case).  Hull mode (the default) fills each spectrum's convex hull, so several spectra fit on
@@ -13,7 +13,8 @@ one axis; a spectrum on the imaginary axis (|Re| below 1e-6 of its extent, e.g. 
 form at nu = 0) is drawn as a segment of the axis.  --scatter plots every eigenvalue instead
 (one panel per file).  An opmat_dense.py --skew file (singular values sigma of the split
 form's skew S) is read as the eigenvalues +-i sigma.  --dt draws the boundary |R(dt lam)| = 1 of RK4 (R from
-opmat_eigs.rk4_amp) for each dt in seconds.  --zoom XMIN adds a panel limited to
+opmat_eigs.rk4_amp) for each dt in seconds; --fe the forward-Euler circle |1 + dt lam| = 1 (HOMME's
+hyperviscosity step, dt = the subcycle step).  --zoom XMIN adds a panel limited to
 Re lam/omega >= XMIN (and wide enough on the right for any Re lam > 0).  The legend gives each spectrum's range of Re and its max |Im|.
 
 Example (NE30 solid body, alpha = pi/4, split form, nu = 0, 1e14, 1e15, from
@@ -83,12 +84,24 @@ def rk4_boundary(axs, dts, om, xlim, ylim):
             ax.plot([], [], color=INK, lw=1.5, ls=ls, label=f'RK4 stability boundary, dt = {dt:g} s')
 
 
+def fe_boundary(axs, dts, om):
+    """forward Euler: |1 + dt lam| = 1, the circle of radius 1/dt about -1/dt (HOMME's hyperviscosity step)"""
+    t = np.linspace(0, 2 * np.pi, 400)
+    for j, dt in enumerate(dts):
+        r = 1 / (dt * om)
+        ls = ['-.', (0, (1, 1.5)), (0, (6, 2, 1, 2, 1, 2))][j % 3]
+        for ax in axs:
+            ax.plot(-r + r * np.cos(t), r * np.sin(t), color=MUTED, lw=1.5, ls=ls,
+                    label=f'forward Euler stability boundary, dt = {dt:g} s')
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--files', nargs='+', required=True)
     p.add_argument('--labels', nargs='+')
     p.add_argument('--out', required=True)
     p.add_argument('--dt', type=float, nargs='*', default=[])
+    p.add_argument('--fe', type=float, nargs='*', default=[], help='forward Euler stability circle for each dt (s)')
     p.add_argument('--scatter', action='store_true')
     p.add_argument('--zoom', type=float, help='extra panel with Re lam/omega >= ZOOM')
     p.add_argument('--title')
@@ -145,6 +158,13 @@ def main():
         xmin = min(xmin, -1.0 * reach)
         span = max(-xmin, ymax)
         rk4_boundary(axs, a.dt, om, (xmin - 0.05 * span, 0.15 * span), (-1.1 * ymax, 1.1 * ymax))
+    if a.fe:
+        r = max(1 / (dt * om) for dt in a.fe)
+        ymax = max(ymax, 1.04 * r)
+        xmin = min(xmin, -2 * r)
+        fe_boundary(axs, a.fe, om)
+        for ax in main_axs:
+            ax.set_xlim(left=1.05 * xmin)
     for ax in axs:
         style(ax)
         ax.set_ylim(-1.1 * ymax, 1.1 * ymax)
