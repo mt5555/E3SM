@@ -115,7 +115,7 @@ def main():
     for i, f in enumerate(a.files):
         lam, om, d = load(f)
         lab = a.labels[i] if a.labels else default_label(f, d)
-        lab += f'  (Re λ/ω in [{lam.real.min():.3g}, {lam.real.max():.2g}], |Im λ|/ω ≤ {np.abs(lam.imag).max():.0f})'
+        lab += f'  (Re λ/ω in [{lam.real.min():.3g}, {lam.real.max():.2g}], |Im λ|/ω ≤ {np.abs(lam.imag).max():.3g})'
         data.append((lam, om, lab, SERIES[i]))
     oms = [om for _, om, _, _ in data if om is not None]
     if not oms:                       # only --skew files: swtc1's u0/a
