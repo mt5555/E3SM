@@ -16,9 +16,9 @@
 #     wave length     degree N
 #       2 dx            90            should be horrible
 #       4 dx            45            modes above this are horrible
-#       8 dx            22            good phase errors, transport
-#                                     error probably large after 12 days
-#      16 dx            11            very well resolved, small errors?
+#       8 dx            22            phase error ~1%, so transport
+#                                     error will be large after 12 days
+#      16 dx            11            very well resolved, expect small errors
 #
 #
 """
