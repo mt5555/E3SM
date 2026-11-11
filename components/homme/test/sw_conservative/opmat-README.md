@@ -162,6 +162,13 @@ B takes 2 min at NE60 and 9 min at NE120 on 4 ranks (NE120 B: 94.5 M entries, 1.
   otherwise, e.g. for P1), with a checkpoint per block. NE30 α=π/4 then takes 15–20 min and
   2.6 GB per ν on 4 threads, instead of hours and 20 GB. At NE8 it matches the full `dgeev` to
   3e-11 ω (both forms, both α, ν₃₀ = 0 and 1e14), and resumed runs are identical.
+- `opmat_shnorm.py --mats DIR --out OUT --ne 10 [--sc 1] [--forms 2 0] [--nu30 NU] [--rk4]` and
+  `opmat_shnorm_figs.py`: the worst-case error after one revolution per spherical harmonic
+  degree N, E(N) = σ_max(M^½ (exp(AT) − I) Q_N) with Q_N the degree-N harmonics at the nodes,
+  mass-orthonormal (Q_Nᵀ M Q_N = I); every degree in one `expm_multiply` block, with the error
+  split into the part that stays in degree N and the part scattered to other degrees, and plots
+  against N or k·dx/π. `opmat_shnorm_simple.py --prefix PREFIX [--nmax 30]` is the same
+  computation written out step by step, one degree at a time (it matches to 3e-12).
 - `opmat_spectrum_plot.py --files F.npz ... --out OUT.png [--labels ...] [--dt S ...] [--scatter]
   [--zoom XMIN]`: complex-plane plots of `opmat_dense.py` spectra: the convex hull of each
   (several on one axis; a spectrum on the imaginary axis is drawn as a segment), or every
