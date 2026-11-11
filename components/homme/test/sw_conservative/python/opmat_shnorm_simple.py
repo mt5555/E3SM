@@ -16,8 +16,9 @@
 #     wave length     degree N
 #       2 dx            90            should be horrible
 #       4 dx            45            modes above this are horrible
-#       8 dx            22            well enough resolve to have ok
-#                                     errors after on revolution?
+#       8 dx            22            good phase errors, transport
+#                                     error probably large after 12 days
+#      16 dx            11            very well resolved, small errors?
 #
 #
 """
