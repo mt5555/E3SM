@@ -6,8 +6,8 @@
 #SBATCH -C cpu                                                                                                                           
 #SBATCH --time=0:30:00                                                                                                                   
 
-bld=~/scratch1/homme/swtc1
-HOMME=~/codes/acme2/components/homme
+bld=${bld:-~/scratch1/homme/swtc1}
+HOMME=${HOMME:-~/codes/acme/components/homme}
 MACH=$HOMME/cmake/machineFiles/darwin.cmake
 input=$HOMME/test/sw_conservative
 output=$bld                # output will be in $output/subcase#
