@@ -39,7 +39,7 @@ import matplotlib.pyplot as plt
 from opmat_io import load
 from opmat_sym import xyz
 from opmat_eigs import name, omega, rotation_axis, style_ax, INK, MUTED, GRID
-from opmat_proj import gaussian, timestep, rk4_run
+from opmat_proj import gaussian, timestep, rk4_run, RR, LATC, LONC
 
 FORM = {0: 'conservation form', 2: 'split form'}
 FCOL = {2: '#eb6834', 0: '#6250d6'}
@@ -66,6 +66,25 @@ def real_harmonics(lat, lon, alpha, nmax):
             cols.append(y.real if m == 0 else np.sqrt(2) * (y.real if m > 0 else y.imag))
             deg.append(N)
     return np.stack(cols, axis=1), np.array(deg)
+
+
+def cosine_bell(lat, lon):
+    """swtc1 level 1 (tc1_geopotential, k=1): h0/2 (1 + cos(pi r/R)) for r < R, R = 1/3 radian,
+    same center as the Gaussian"""
+    A = np.sin(LATC) * np.sin(lat) + np.cos(LATC) * np.cos(lat) * np.cos(lon - LONC)
+    r = np.arccos(np.clip(A, -1, 1))
+    return np.where(r < RR, 500.0 * (1.0 + np.cos(np.pi * r / RR)), 0.0)
+
+
+def degree_spectrum(p, Qs, sq):
+    """||p_N|| / ||p|| per degree N in the mass norm, with Qs the mass-orthonormal bases per degree"""
+    q = sq * p
+    return np.array([np.linalg.norm(Q.T @ q) for Q in Qs]) / np.linalg.norm(q)
+
+
+def degree_bases(Y, deg, sq):
+    """mass-orthonormal basis Q_N of each degree (W^1/2 Y_N = Q R), as in degree_norms"""
+    return [np.linalg.qr(sq[:, None] * Y[:, deg == N])[0] for N in np.unique(deg)]
 
 
 def propagate(L, Y, T, dt=None, nstep=None):
@@ -95,35 +114,45 @@ def degree_norms(P, Y, deg, sq):
 def plot(curves, title, n, nmax, ppw_min, outfile):
     """curves: list of (label, color, result dict with E, rms, in, out, cN)"""
     dx = np.sqrt(4 * np.pi / n)               # mean node spacing on the unit sphere
-    nplot = min(nmax, int(2 * np.pi / (ppw_min * dx)))
+    xmax = min(nmax, 2 * np.pi / (ppw_min * dx))   # degree with wavelength ppw_min * dx
+    nplot = min(nmax, int(np.ceil(xmax)))           # one point past xmax so curves reach the edge
     N = np.arange(nplot + 1)
-    fig, axs = plt.subplots(1, 2, figsize=(13, 4.6))
+    fig, axs = plt.subplots(1, 3, figsize=(19, 4.6))
     for lab, col, r in curves:
         r = {k: v[:nplot + 1] for k, v in r.items()}
-        axs[0].semilogy(N[1:], r['E'][1:], '-', color=col, lw=1.6, label=f'{lab}: worst case E(N)')
-        axs[0].semilogy(N[1:], r['rms'][1:], ':', color=col, lw=1.4, label=f'{lab}: RMS over degree N')
-        axs[1].semilogy(N[1:], r['in'][1:], '-', color=col, lw=1.6, label=f'{lab}: in-degree')
-        axs[1].semilogy(N[1:], r['out'][1:], '--', color=col, lw=1.4, label=f'{lab}: scattered')
-    axs[0].semilogy(N[1:], curves[0][2]['cN'][1:nplot + 1], color=MUTED, lw=1,
-                    label='Gaussian ||p0_N||/||p0||')
+        # degree 0 is plotted too; the y-limits below come from N >= 1, so a roundoff-level
+        # N = 0 value (e.g. the in-degree part, or E(0) for a divergence-free velocity)
+        # falls below the axis instead of stretching it
+        axs[0].semilogy(N, r['E'], '-', color=col, lw=1.6, label=f'{lab}: worst case E(N)')
+        axs[1].semilogy(N, r['in'], '-', color=col, lw=1.6, label=f'{lab}: in-degree')
+        axs[1].semilogy(N, r['out'], '--', color=col, lw=1.4, label=f'{lab}: scattered')
+    # third panel: degree spectra of the swtc1 initial conditions (independent of form and nu)
+    axs[2].semilogy(N, curves[0][2]['cN'][:nplot + 1], color=INK, lw=1.4, label='Gaussian')
+    if 'cN_bell' in curves[0][2]:
+        axs[2].semilogy(N, curves[0][2]['cN_bell'][:nplot + 1], color=INK, lw=1.4, ls='--',
+                        label='cosine bell')
     style_ax(axs[0], title)
     style_ax(axs[1], 'worst-case error split: within degree N vs scattered to other degrees')
-    # left: fit the error curves; right: the in-degree part reaches much lower values
-    emin = min(min(r['E'][1:nplot + 1].min(), r['rms'][1:nplot + 1].min()) for _, _, r in curves)
+    style_ax(axs[2], 'degree spectrum of the swtc1 initial conditions')
+    # left: fit the error curves; middle: the in-degree part reaches much lower values
+    emin = min(r['E'][1:nplot + 1].min() for _, _, r in curves)
     axs[0].set_ylim(10 ** np.floor(np.log10(emin / 2)), 3)
     imin = min(r['in'][1:nplot + 1].min() for _, _, r in curves)
     axs[1].set_ylim(10 ** np.floor(np.log10(imin / 2)), 3)
-    for ax in axs:
+    axs[2].set_ylim(1e-8, 1)
+    for i, ax in enumerate(axs):
         ax.set_xlabel('spherical harmonic degree N')
-        ax.set_xlim(0, nplot)
-        ax.axhline(2, color=MUTED, lw=0.8, ls='--')
+        ax.set_xlim(0, xmax)
+        if i < 2:
+            ax.axhline(2, color=MUTED, lw=0.8, ls='--')
         top = ax.secondary_xaxis('top', functions=(lambda x: 2 * np.pi / (np.maximum(x, 1e-9) * dx),
                                                     lambda y: 2 * np.pi / (np.maximum(y, 1e-9) * dx)))
-        top.set_xlabel('mean GLL points per wavelength', color=MUTED)
+        top.set_xlabel(r'wavelength $2\pi a/N$ in units of mean $\Delta x$', color=MUTED)
         top.set_xticks([5, 6, 8, 10, 15, 20, 40])
-    axs[0].legend(fontsize=7, loc='center right')
-    axs[1].legend(fontsize=7, loc='lower right')
+    for ax in axs:
+        ax.legend(fontsize=7, loc='lower right')
     axs[0].set_ylabel('relative l2 error at day 12')
+    axs[2].set_ylabel('||p0_N|| / ||p0||')
     fig.tight_layout()
     fig.savefig(outfile)
     plt.close(fig)
@@ -162,7 +191,7 @@ def main():
     p.add_argument('--sub', type=int, default=1)
     p.add_argument('--dt30', type=float, default=1800.0)
     p.add_argument('--dense', action='store_true')
-    p.add_argument('--ppw-min', type=float, default=4.5,
+    p.add_argument('--ppw-min', type=float, default=6.0,
                    help='plot degrees with at least this many mean GLL points per wavelength '
                         '(beyond it interpolated harmonics alias onto lower degrees)')
     p.add_argument('--replot', action='store_true', help='only redo the plot from the saved npz files')
@@ -184,7 +213,16 @@ def main():
                     col = SCCOL[sc] if len(args.forms) == 1 else (SCCOL[sc] if f == 2 else FCOL[0])
                 else:
                     lab, col = FORM[f], FCOL[f]
-                curves.append((lab, col, {k: r[k] for k in ('E', 'rms', 'in', 'out', 'cN')}))
+                cv = {k: r[k] for k in ('E', 'rms', 'in', 'out', 'cN')}
+                if 'cN_bell' in r:
+                    cv['cN_bell'] = r['cN_bell']
+                else:   # older files: compute the cosine bell spectrum from the node coordinates
+                    d = load(os.path.join(args.mats, name(args.ne, sc, f, args.velocity)), ops=())
+                    nmax = len(r['E']) - 1
+                    Y, deg = real_harmonics(d['lat'], d['lon'], d['meta']['alpha'], nmax)
+                    sq = np.sqrt(d['mass'])
+                    cv['cN_bell'] = degree_spectrum(cosine_bell(d['lat'], d['lon']), degree_bases(Y, deg, sq), sq)
+                curves.append((lab, col, cv))
                 n = int(r['n'])
         if args.compare_alpha:
             forms = ', '.join(FORM[f] for f in args.forms)
@@ -242,9 +280,10 @@ def main():
                        f'||exp(A T) - I||_2 = {la.norm(Ed - np.eye(len(sq)), 2):.4f}, max Re(lambda)/omega = '
                        f'{lam.real.max():.3e}')
             print(rep[-1], flush=True)
-        res[f] = dict(r, cN=cN / np.linalg.norm(q0))
+        cN_bell = degree_spectrum(cosine_bell(d['lat'], d['lon']), Qs, sq)
+        res[f] = dict(r, cN=cN / np.linalg.norm(q0), cN_bell=cN_bell)
         np.savez(os.path.join(args.out, f'{nm}-{tag}-shnorm.npz'), N=np.arange(args.nmax + 1), n=d['n'], **r,
-                 cN=cN / np.linalg.norm(q0), actual=actual, bound=bound)
+                 cN=cN / np.linalg.norm(q0), cN_bell=cN_bell, actual=actual, bound=bound)
         rep.append('    N  E(N)        RMS         in-degree   scattered   Gaussian ||p0_N||/||p0||')
         for N in range(0, args.nmax + 1, 5 if args.nmax > 20 else 1):
             rep.append(f'   {N:2d}  {r["E"][N]:.3e}   {r["rms"][N]:.3e}   {r["in"][N]:.3e}   {r["out"][N]:.3e}   '
