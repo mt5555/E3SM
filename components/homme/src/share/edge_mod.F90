@@ -39,7 +39,7 @@ module edge_mod
   public :: edgeVpack, edgeVunpack            ! old interface
   public :: edgeVpack_nlyr, edgeVunpack_nlyr  ! new interface, allows setting nlyr_tot
   public :: edgeVunpackMIN, edgeVunpackMAX
-  public :: edgeDGVpack, edgeDGVunpack
+  public :: edgeDGVpack, edgeDGVunpack, edgeDGVunpack_nlyr
   public :: edgeVunpackVert
   
   !----------------------------------------------------------------
@@ -1192,7 +1192,6 @@ endif
 
   subroutine edgeDGVunpack(edge,v,vlyr,kptr,ielem)
     use dimensions_mod, only : np
-    use control_mod, only : north, south, east, west
 
     type (EdgeBuffer_t),         intent(in)  :: edge
     integer,               intent(in)  :: vlyr
@@ -1200,15 +1199,37 @@ endif
     integer,               intent(in)  :: kptr
     integer,               intent(in)  :: ielem
 
+    call edgeDGVunpack_nlyr(edge,edge%desc(ielem),v,vlyr,kptr,edge%nlyr_max)
+
+  end subroutine edgeDGVunpack
+
+  ! ========================================
+  ! edgeDGVunpack_nlyr:
+  !
+  ! Unpack the neighbors' edge values into the halo of v:
+  !   v(1:np,0,:)    south neighbor     v(np+1,1:np,:) east neighbor
+  !   v(1:np,np+1,:) north neighbor     v(0,1:np,:)    west neighbor
+  ! ordered along this element's edges (edgeVpack_nlyr applies any
+  ! reversal).  The interior and the corners of v are not set.
+  ! nlyr_tot must match the value used by edgeVpack_nlyr.
+  ! ========================================
+
+  subroutine edgeDGVunpack_nlyr(edge,desc,v,vlyr,kptr,nlyr_tot)
+    use dimensions_mod, only : np
+    use control_mod, only : north, south, east, west
+
+    type (EdgeBuffer_t),         intent(in)  :: edge
+    type (EdgeDescriptor_t),     intent(in)  :: desc
+    integer,               intent(in)  :: vlyr
+    real (kind=real_kind), intent(out) :: v(0:np+1,0:np+1,vlyr)
+    integer,               intent(in)  :: kptr
+    integer,               intent(in)  :: nlyr_tot
+
     ! Local
     integer :: i,k,iptr
-    integer :: is,ie,in,iw, nlyr_tot
-    type (EdgeDescriptor_t), pointer   :: desc
+    integer :: is,ie,in,iw
 
     threadsafe=.false.
-
-    desc => edge%desc(ielem)
-    nlyr_tot = edge%nlyr_max
 
     is=nlyr_tot*desc%getmapP(south)
     ie=nlyr_tot*desc%getmapP(east)
@@ -1226,7 +1247,7 @@ endif
     end do
 
     ! DG code ignores all corner data
-  end subroutine edgeDGVunpack
+  end subroutine edgeDGVunpack_nlyr
 
   ! ========================================
   ! edgeVunpackMIN/MAX:

@@ -100,6 +100,7 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
     tol,           &
     debug_level,   &
     theta_advect_form,   &
+    dg_flux,             &
     vtheta_thresh,   &
     dp3d_thresh,   &
     pgrad_correction,    &
@@ -267,6 +268,7 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
       pertlim,           &         ! temperature initial perturbation
       omega,                   &   ! scaled rotation rate
       rearth,                  &   ! scaled earth radius
+      dg_flux,                 &   ! sweqx: -1 CG, 0 DG central, 1 DG upwind
 #endif
       COORD_TRANSFORM_METHOD, &
       Z2_MAP_METHOD,  &
@@ -785,6 +787,7 @@ use physical_constants, only : Sx, Sy, Lx, Ly, dx, dy, dx_ref, dy_ref
     call MPI_bcast(dcmip2_x_xi,     1, MPIreal_t,    par%root,par%comm,ierr)
     call MPI_bcast(dcmip4_moist,    1, MPIinteger_t, par%root,par%comm,ierr)
     call MPI_bcast(dcmip4_X,        1, MPIreal_t,    par%root,par%comm,ierr)
+    call MPI_bcast(dg_flux,         1, MPIinteger_t, par%root,par%comm,ierr)
 #endif
     call MPI_bcast(vthreads  ,      1, MPIinteger_t, par%root,par%comm,ierr)
     call MPI_bcast(smooth,          1, MPIreal_t,    par%root,par%comm,ierr)
@@ -1198,6 +1201,9 @@ end if
        write(iulog,*)"readnl: semi_lagrange_diagnostics   = ",semi_lagrange_diagnostics
        write(iulog,*)"readnl: tstep_type    = ",tstep_type
        write(iulog,*)"readnl: theta_advect_form = ",theta_advect_form
+#if !defined(CAM) && !defined(SCREAM)
+       write(iulog,*)"readnl: dg_flux           = ",dg_flux
+#endif
        write(iulog,*)"readnl: vtheta_thresh     = ",vtheta_thresh
        write(iulog,*)"readnl: dp3d_thresh     = ",dp3d_thresh
        write(iulog,*)"readnl: pgrad_correction  = ",pgrad_correction

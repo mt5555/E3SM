@@ -84,6 +84,7 @@ private
 !  public  :: laplace_eta
   public  :: laplace_z
   public  :: element_boundary_integral
+  public  :: element_boundary_integral_jcontra
   public  :: limiter_optim_iter_full
   public  :: limiter_clip_and_sum
 
@@ -865,7 +866,9 @@ contains
 !   ouput:  result(i,j) = contour integral of PHI_ij * v dot normal
 !           where PHI_ij = cardinal function at i,j GLL point 
 !
-!   this routine is used just to check spectral element integration by parts identities
+!   used to check spectral element integration by parts identities
+!   (unit_tests_mod: test_edge_flux).  The DG option in sweqx uses
+!   element_boundary_integral_jcontra directly for its edge fluxes.
 !
     real(kind=real_kind), intent(in) :: v(np,np,2)  ! in lat-lon coordinates
     type (derivative_t), intent(in) :: deriv
@@ -873,39 +876,65 @@ contains
     real(kind=real_kind) :: result(np,np)
 
     ! Local
-    real(kind=real_kind) :: ucontra(np,np,2)  ! in lat-lon coordinates
+    real(kind=real_kind) :: gv(np,np,2)  ! metdet * contravariant components
     integer i,j
 
-    ! latlon->contra
+    ! latlon->contra, times metdet
     do j=1,np
        do i=1,np
-          ucontra(i,j,1)=(elem%Dinv(i,j,1,1)*v(i,j,1) + elem%Dinv(i,j,1,2)*v(i,j,2))
-          ucontra(i,j,2)=(elem%Dinv(i,j,2,1)*v(i,j,1) + elem%Dinv(i,j,2,2)*v(i,j,2))
+          gv(i,j,1)=elem%metdet(i,j)*(elem%Dinv(i,j,1,1)*v(i,j,1) + elem%Dinv(i,j,1,2)*v(i,j,2))
+          gv(i,j,2)=elem%metdet(i,j)*(elem%Dinv(i,j,2,1)*v(i,j,1) + elem%Dinv(i,j,2,2)*v(i,j,2))
        enddo
     enddo
+    result = element_boundary_integral_jcontra(gv,deriv)
+  end function element_boundary_integral
+
+
+
+  function element_boundary_integral_jcontra(gv,deriv) result(result)
+!
+!   input:  gv = metdet * (contravariant components of a vector field)
+!                i.e. the flux densities through the xi=const and eta=const
+!                lines of the reference element, the same quantity that
+!                divergence_sphere differentiates.  Only edge values are used:
+!                gv(:,:,1) on the west (i=1) and east (i=np) edges,
+!                gv(:,:,2) on the south (j=1) and north (j=np) edges.
+!                Corner nodes take component 1 from their west/east edge and
+!                component 2 from their south/north edge.
+!   ouput:  result(i,j) = contour integral of PHI_ij * v dot normal
+!           where PHI_ij = cardinal function at i,j GLL point 
+!
+!   With spheremp = mp*metdet, the element-local identity checked by test_edge_flux is
+!       spheremp*divergence_sphere(v) - divergence_sphere_wk(v) = result
+!
+    real(kind=real_kind), intent(in) :: gv(np,np,2)
+    type (derivative_t), intent(in) :: deriv
+    real(kind=real_kind) :: result(np,np)
+
+    integer i,j
 
     ! note: GLL weights  weight(i) = Mvv_twt(i,i)
     result=0
     j=1
     do i=1,np
-       result(i,j)=result(i,j)-deriv%Mvv_twt(i,i)*elem%metdet(i,j)*ucontra(i,j,2)*scale_factor_inv
+       result(i,j)=result(i,j)-deriv%Mvv_twt(i,i)*gv(i,j,2)*scale_factor_inv
     enddo
     
     j=np
     do i=1,np
-       result(i,j)=result(i,j)+deriv%Mvv_twt(i,i)*elem%metdet(i,j)*ucontra(i,j,2)*scale_factor_inv
+       result(i,j)=result(i,j)+deriv%Mvv_twt(i,i)*gv(i,j,2)*scale_factor_inv
     enddo
     
     i=1
     do j=1,np
-       result(i,j)=result(i,j)-deriv%Mvv_twt(j,j)*elem%metdet(i,j)*ucontra(i,j,1)*scale_factor_inv
+       result(i,j)=result(i,j)-deriv%Mvv_twt(j,j)*gv(i,j,1)*scale_factor_inv
     enddo
     
     i=np
     do j=1,np
-       result(i,j)=result(i,j)+deriv%Mvv_twt(j,j)*elem%metdet(i,j)*ucontra(i,j,1)*scale_factor_inv
+       result(i,j)=result(i,j)+deriv%Mvv_twt(j,j)*gv(i,j,1)*scale_factor_inv
     enddo
-  end function element_boundary_integral
+  end function element_boundary_integral_jcontra
 
 
 

@@ -56,6 +56,8 @@ module control_mod
 
   integer, public  :: tstep_type= 5                           ! preqx timestepping options
   integer, public  :: rk_stage_user  = 0                      ! number of RK stages (shallow water model) 
+  integer, public  :: dg_flux = -1                            ! sweqx transport: -1 = CG (DSS, default)
+                                                               !   0 = DG with central flux, 1 = DG with upwind flux
   integer, public  :: ftype = 0                                ! Forcing Type
                                                                ! ftype = 0  HOMME ApplyColumn() type forcing process split
                                                                ! ftype = -1   ignore forcing  (used for testing energy balance)
