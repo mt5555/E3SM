@@ -42,9 +42,23 @@ unpack `edgeDGVunpack_nlyr` in `src/share/edge_mod.F90`.
 
 ## Time step
 
-DG needs a smaller RK4 time step than CG.  swtc1 at NE30 (np=4): CG is stable
-at 1800 s; DG blows up at 1800 s and runs at 900 s.  Swirl at NE20: DG at 240 s.
-Shallow water TC2 at NE15: 300 s (dt*NE = 4500).
+DG needs a smaller RK4 time step than CG.  Largest stable dt, swtc1 sub_case 4,
+NE30, np=4, nu=0 (DG: 12-day runs, bisection; CG: 3 revolutions):
+
+| method | dt limit (s) | ratio to CG | 1D linear analysis, ratio to CG |
+| --- | --- | --- | --- |
+| CG | 2329 | 1 | 1 |
+| DG upwind | ~1600 (1650 grows) | 0.70 | 0.56 |
+| DG central | ~1370 | 0.59 | 0.60 |
+
+The 1D analysis is periodic constant-velocity advection, np=4: the DG
+spectral radius is larger because the edge correction is divided by the end
+point GLL weight (1/w_end = 6).  In 2D the upwind flux gains ~20% over central,
+which linear 1D theory does not show; most likely it damps the slightly
+non-skew modes of the variable-wind central operator.
+
+Other runs: swirl at NE20 with DG at 240 s; shallow water TC2 at NE15 at
+300 s (dt*NE = 4500).
 
 ## Results (np = 4, RK4, nu = 0)
 
