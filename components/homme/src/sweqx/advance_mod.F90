@@ -12,7 +12,48 @@ module advance_mod
   ! semi-implicit needs to be re-initialized each time dt changes
   real (kind=real_kind) :: initialized_for_dt   = 0
 
+  ! swtc1 prescribed wind: 0 = analytic (default), 1 = curl_sphere(stream function),
+  ! which is discretely divergence free (environment SWEQX_TC1_VELOCITY=curlpsi)
+  integer :: tc1_velocity_mode = 0
+
 contains
+
+  subroutine advance_rk_init_options(hybrid)
+  ! ===================================
+  ! read run-time options of the runge_kutta driver and check the DG option
+  ! (dg_flux >= 0) is used where it is supported
+  ! ===================================
+  use hybrid_mod,   only : hybrid_t
+  use control_mod,  only : dg_flux, rk_stage_user, test_case, nu, nu_s, hypervis_order
+  use parallel_mod, only : abortmp
+  implicit none
+  type (hybrid_t), intent(in) :: hybrid
+
+  character(len=32) :: envval
+  integer :: envlen, envstat
+
+  call get_environment_variable("SWEQX_TC1_VELOCITY",envval,envlen,envstat)
+  tc1_velocity_mode = 0
+  if (envstat==0 .and. trim(envval)=="curlpsi") tc1_velocity_mode = 1
+  if (hybrid%masterthread .and. test_case(1:5)=="swtc1") then
+     if (tc1_velocity_mode==1) then
+        print *,'swtc1 prescribed wind: curl of stream function (SWEQX_TC1_VELOCITY=curlpsi)'
+     else
+        print *,'swtc1 prescribed wind: analytic'
+     endif
+  endif
+
+  if (dg_flux < 0) return
+  if (dg_flux > 1) call abortmp('dg_flux must be -1 (CG), 0 (DG central) or 1 (DG upwind)')
+  if (rk_stage_user /= -4) call abortmp('dg_flux>=0 requires RK4 (rk_stage_user=-4)')
+  if (hypervis_order /= 0 .and. (nu /= 0 .or. nu_s /= 0)) &
+       call abortmp('dg_flux>=0: hyperviscosity is not supported (set nu=nu_s=0)')
+  if (hybrid%masterthread) then
+     if (dg_flux==0) print *,'DG spectral elements with central fluxes (dg_flux=0)'
+     if (dg_flux==1) print *,'DG spectral elements with upwind fluxes (dg_flux=1)'
+  endif
+  end subroutine advance_rk_init_options
+
 
   subroutine advance_nonstag( elem, edge2,  edge3,  deriv,  hybrid,  &
        dt,  pmean,     tl,   nets,   nete)
@@ -1017,22 +1058,37 @@ contains
 !----------------------------------------------------------------------------------------
 
 
-  subroutine set_prescribed_velocity(elem,n0,time)
+  subroutine set_prescribed_velocity(elem,n0,time,deriv)
   use control_mod, only :  test_case
   use element_mod, only : element_t
   use dimensions_mod, only : nlev
-  use shallow_water_mod, only : tc1_velocity, vortex_velocity, swirl_velocity
+  use derivative_mod, only : derivative_t, curl_sphere
+  use shallow_water_mod, only : tc1_velocity, vortex_velocity, swirl_velocity, tc1_streamfunction
   implicit none
 
   type (element_t)     , intent(inout) :: elem
+  type (derivative_t)  , intent(in), optional :: deriv
 
   ! local
-  integer :: n0,k
+  integer :: n0,k,i,j
   real (kind=real_kind) :: time
+  real (kind=real_kind) :: ulatlon(np,np,2)
 
   ! the prescribed velocity is the same on every level: compute it once, then copy
   if (test_case=="swtc1") then
-     elem%state%v(:,:,:,1,n0)=tc1_velocity(elem%spherep,elem%Dinv)
+     if (tc1_velocity_mode==1 .and. present(deriv)) then
+        ! curl of the stream function: its strong divergence is zero to roundoff
+        ! within each element, and its normal component is continuous across edges
+        ulatlon = curl_sphere(tc1_streamfunction(elem%spherep),deriv,elem)
+        do j=1,np
+           do i=1,np
+              elem%state%v(i,j,1,1,n0)=elem%Dinv(i,j,1,1)*ulatlon(i,j,1) + elem%Dinv(i,j,1,2)*ulatlon(i,j,2)
+              elem%state%v(i,j,2,1,n0)=elem%Dinv(i,j,2,1)*ulatlon(i,j,1) + elem%Dinv(i,j,2,2)*ulatlon(i,j,2)
+           enddo
+        enddo
+     else
+        elem%state%v(:,:,:,1,n0)=tc1_velocity(elem%spherep,elem%Dinv)
+     endif
   else if (test_case=="vortex") then
      elem%state%v(:,:,:,1,n0)=vortex_velocity(time,elem%spherep,elem%Dinv)
   else if (test_case=="swirl") then
@@ -1047,6 +1103,106 @@ contains
 
 !----------------------------------------------------------------------------------------
 
+
+  subroutine dg_edge_correction(elem,deriv,n0,pmean,ph,uh,ptens)
+  ! ===================================
+  ! DG coupling for the transport equations (replaces the DSS of ptens)
+  !
+  ! input:  ptens = -spheremp*div(F), the mass-weighted strong-form tendency
+  !         ph, uh = neighbors' p and lat-lon velocity on this element's edges
+  ! output: ptens = dp/dt = ( ptens - B(Fhat - F^-) ) / spheremp
+  !
+  ! B is element_boundary_integral_jcontra (spheremp*div - div_wk = B, see
+  ! test_edge_flux), F^- the element's own flux and Fhat the numerical flux.
+  ! a = metdet*u^n is the outward normal flux density, from each side's
+  ! velocity with this element's metric.  Fluxes (Ricardo, Lee & Duru 2024):
+  !    mass (level kmass, or rho=1 if kmass=-1):  Fr = {{a rho}}         (central)
+  !    density level kmass:                       Fhat = Fr
+  !    other levels, q = p/rho:                   Fhat = qhat*Fr
+  !       qhat = {q}                           dg_flux=0 (central)
+  !       qhat = q from the upwind side of Fr  dg_flux=1 (upwind)
+  ! The interior flux is a^- p^- for flux and split forms alike.
+  ! ===================================
+  use dimensions_mod, only : nlev
+  use element_mod,    only : element_t
+  use derivative_mod, only : derivative_t, element_boundary_integral_jcontra
+  use control_mod,    only : dg_flux, kmass
+  implicit none
+  type (element_t),      intent(in)    :: elem
+  type (derivative_t),   intent(in)    :: deriv
+  integer,               intent(in)    :: n0
+  real (kind=real_kind), intent(in)    :: pmean
+  real (kind=real_kind), intent(in)    :: ph(0:np+1,0:np+1,nlev)
+  real (kind=real_kind), intent(in)    :: uh(0:np+1,0:np+1,2*nlev)
+  real (kind=real_kind), intent(inout) :: ptens(np,np,nlev)
+
+  real (kind=real_kind) :: gv(np,np,2)
+  real (kind=real_kind) :: am,ap,rm,rp,qm,qp,fr,fhat,qhat,sgn,lam,u1,u2
+  integer :: e,n,i,j,ih,jh,c,k
+
+  lam = dg_flux   ! 0: central, 1: upwind
+
+  do k=1,nlev
+     gv = 0
+     do e=1,4
+        do n=1,np
+           call dg_edge_node(e,n,i,j,ih,jh,c,sgn)
+           ! outward normal flux densities from own (-) and neighbor (+) velocity
+           u1 = elem%D(i,j,1,1)*elem%state%v(i,j,1,k,n0) + elem%D(i,j,1,2)*elem%state%v(i,j,2,k,n0)
+           u2 = elem%D(i,j,2,1)*elem%state%v(i,j,1,k,n0) + elem%D(i,j,2,2)*elem%state%v(i,j,2,k,n0)
+           am = sgn*elem%metdet(i,j)*(elem%Dinv(i,j,c,1)*u1 + elem%Dinv(i,j,c,2)*u2)
+           u1 = uh(ih,jh,1+2*(k-1))
+           u2 = uh(ih,jh,2+2*(k-1))
+           ap = sgn*elem%metdet(i,j)*(elem%Dinv(i,j,c,1)*u1 + elem%Dinv(i,j,c,2)*u2)
+           if (kmass /= -1) then
+              rm = elem%state%p(i,j,kmass,n0)
+              rp = ph(ih,jh,kmass)
+           else
+              rm = 1
+              rp = 1
+           endif
+           fr = 0.5D0*(am*rm + ap*rp)    ! central mass flux
+           if (k == kmass) then
+              fhat = fr
+           else
+              qm = (pmean + elem%state%p(i,j,k,n0))/rm
+              qp = (pmean + ph(ih,jh,k))/rp
+              if (fr > 0) then
+                 qhat = 0.5D0*(qm+qp) - 0.5D0*lam*(qp-qm)
+              else if (fr < 0) then
+                 qhat = 0.5D0*(qm+qp) + 0.5D0*lam*(qp-qm)
+              else
+                 qhat = 0.5D0*(qm+qp)
+              endif
+              fhat = qhat*fr
+           endif
+           ! outward (Fhat - F^-), stored as metdet*contravariant component c
+           gv(i,j,c) = sgn*(fhat - am*(pmean + elem%state%p(i,j,k,n0)))
+        enddo
+     enddo
+     ptens(:,:,k) = (ptens(:,:,k) - element_boundary_integral_jcontra(gv,deriv))/elem%spheremp(:,:)
+  enddo
+  end subroutine dg_edge_correction
+
+  subroutine dg_edge_node(e,n,i,j,ih,jh,c,sgn)
+  ! node n (1..np) of edge e (1=south, 2=east, 3=north, 4=west):
+  ! (i,j) its index, (ih,jh) the neighbor's value in the DG halo,
+  ! c the contravariant component normal to the edge, sgn the outward sign
+  implicit none
+  integer, intent(in)  :: e,n
+  integer, intent(out) :: i,j,ih,jh,c
+  real (kind=real_kind), intent(out) :: sgn
+  select case (e)
+  case (1)
+     i=n;  j=1;  ih=n;    jh=0;    c=2; sgn=-1
+  case (2)
+     i=np; j=n;  ih=np+1; jh=n;    c=1; sgn=1
+  case (3)
+     i=n;  j=np; ih=n;    jh=np+1; c=2; sgn=1
+  case default
+     i=1;  j=n;  ih=0;    jh=n;    c=1; sgn=-1
+  end select
+  end subroutine dg_edge_node
 
   subroutine compute_and_apply_rhs(np1,nm1,n0,dt2,real_time,edge3,elem,pmean,hybrid,deriv,vtens,ptens,nets,nete)
   ! ===================================
@@ -1076,11 +1232,11 @@ contains
   use hybrid_mod, only : hybrid_t
   use element_mod, only : element_t
   use derivative_mod, only : derivative_t, divergence_sphere, gradient_sphere, vorticity_sphere
-  use edge_mod, only : edgevpack_nlyr, edgevunpack_nlyr
+  use edge_mod, only : edgevpack_nlyr, edgevunpack_nlyr, edgeDGVunpack_nlyr
   use edgetype_mod, only : EdgeBuffer_t
   use bndry_mod, only : bndry_exchangev
   use perf_mod, only : t_startf, t_stopf ! _EXTERNAL
-  use control_mod, only : theta_advect_form, kmass
+  use control_mod, only : theta_advect_form, kmass, dg_flux
   implicit none
 
   type (hybrid_t)      , intent(in) :: hybrid
@@ -1106,6 +1262,9 @@ contains
   real (kind=real_kind), dimension(np,np,2)      :: gradq   ! strong gradient of q
   real (kind=real_kind), dimension(np,np,2)      :: rhou    ! mass flux rho*u lat-lon
   real (kind=real_kind), dimension(np,np)        :: divrhou ! strong divergence of rho*u
+  real (kind=real_kind), dimension(np,np,2,nlev) :: ull     ! lat-lon velocity on all levels (DG halo)
+  real (kind=real_kind), dimension(0:np+1,0:np+1,nlev)   :: ph ! DG halo: neighbors' p
+  real (kind=real_kind), dimension(0:np+1,0:np+1,2*nlev) :: uh ! DG halo: neighbors' lat-lon velocity
 
   integer i,j,k,kptr,ie
   real (kind=real_kind) ::  v1,v2
@@ -1122,7 +1281,7 @@ contains
      fcor   => elem(ie)%fcor
      spheremp     => elem(ie)%spheremp
 
-     call set_prescribed_velocity(elem(ie),n0,real_time)
+     call set_prescribed_velocity(elem(ie),n0,real_time,deriv)
 
      if (kmass /= -1) then
         rho = elem(ie)%state%p(:,:,kmass,n0)
@@ -1149,6 +1308,7 @@ contains
               pv(i,j,2) = ulatlon(i,j,2)*(pmean+elem(ie)%state%p(i,j,k,n0))
            end do
         end do
+        ull(:,:,:,k) = ulatlon
         grade = gradient_sphere(E,deriv,elem(ie)%Dinv)       ! scalar -> latlon vector
         zeta = vorticity_sphere(ulatlon,deriv,elem(ie)) ! latlon vector -> scalar 
         div = divergence_sphere(pv,deriv,elem(ie))      ! latlon vector -> scalar 
@@ -1189,10 +1349,19 @@ contains
      ! ===================================================
      ! Pack cube edges of tendencies, rotate velocities
      ! ===================================================
-     kptr=0
-     call edgeVpack_nlyr(edge3,elem(ie)%desc,ptens(1,1,1,ie),nlev,kptr,3*nlev)
-     kptr=nlev
-     call edgeVpack_nlyr(edge3,elem(ie)%desc,vtens(1,1,1,1,ie),2*nlev,kptr,3*nlev)
+     if (dg_flux >= 0) then
+        ! DG: no DSS.  Exchange the edge values of p and of the lat-lon velocity,
+        ! from which each element computes its numerical fluxes
+        kptr=0
+        call edgeVpack_nlyr(edge3,elem(ie)%desc,elem(ie)%state%p(1,1,1,n0),nlev,kptr,3*nlev)
+        kptr=nlev
+        call edgeVpack_nlyr(edge3,elem(ie)%desc,ull,2*nlev,kptr,3*nlev)
+     else
+        kptr=0
+        call edgeVpack_nlyr(edge3,elem(ie)%desc,ptens(1,1,1,ie),nlev,kptr,3*nlev)
+        kptr=nlev
+        call edgeVpack_nlyr(edge3,elem(ie)%desc,vtens(1,1,1,1,ie),2*nlev,kptr,3*nlev)
+     endif
   end do
   
   
@@ -1207,6 +1376,17 @@ contains
   do ie=nets,nete
      rspheremp     => elem(ie)%rspheremp
      
+     if (dg_flux >= 0) then
+        ! ===========================================================
+        ! DG: neighbors' edge values -> numerical fluxes -> edge corrections
+        ! ===========================================================
+        kptr=0
+        call edgeDGVunpack_nlyr(edge3, elem(ie)%desc, ph, nlev, kptr, 3*nlev)
+        kptr=nlev
+        call edgeDGVunpack_nlyr(edge3, elem(ie)%desc, uh, 2*nlev, kptr, 3*nlev)
+        call dg_edge_correction(elem(ie),deriv,n0,pmean,ph,uh,ptens(:,:,:,ie))
+        vtens(:,:,:,:,ie) = 0   ! transport only: the velocity is prescribed
+     else
      ! ===========================================================
      ! Unpack the edges for vgradp and vtens
      ! ===========================================================
@@ -1232,6 +1412,7 @@ contains
            end do
         end do
      end do
+     endif  ! dg_flux
      
      if (dt2/=0) then
      do k=1,nlev

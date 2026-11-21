@@ -52,6 +52,7 @@ contains
     use restart_io_mod, only : readrestart, writerestart
     !-----------------
     use advance_mod, only : advance_nonstag
+    use control_mod, only : dg_flux
     !-----------------
 #ifdef TRILINOS
     use implicit_mod, only : advance_imp_nonstag
@@ -213,6 +214,8 @@ contains
     ! quadrature points...
     ! ========================================
     gp =gausslobatto(np)
+
+    if (dg_flux >= 0) call abortmp('dg_flux>=0 (DG) requires integration="runge_kutta" with rk_stage_user=-4')
 
 !   some test code
 #if 0
@@ -859,7 +862,7 @@ contains
     !-----------------
     use restart_io_mod, only : readrestart, writerestart
     !-----------------
-    use advance_mod, only : advance_nonstag_rk, advance_nonstag_rk4
+    use advance_mod, only : advance_nonstag_rk, advance_nonstag_rk4, advance_rk_init_options
     !-----------------
     use control_mod, only : integration, &
          restartfreq, statefreq, runtype, &
@@ -1119,6 +1122,8 @@ contains
     ! times will all be off by tstep. 
     tl%nstep=0 
 
+
+    call advance_rk_init_options(hybrid)
 
     if(Debug) print *,'homme: point #11'
 

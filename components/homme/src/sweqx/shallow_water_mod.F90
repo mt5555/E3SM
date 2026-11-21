@@ -191,6 +191,7 @@ module shallow_water_mod
   public  :: tc1_init_state  ! Initialize test case 1: Cosine Bell
   public  :: tc1_init_pmean  ! Initialize pmean for test case 1
   public  :: tc1_velocity
+  public  :: tc1_streamfunction
   public  :: tc1_geopotential
   public  :: tc1_phi         ! test case 1 on unstaggered grid (nair) 
   public  :: grad_cosine_bell
@@ -711,6 +712,30 @@ contains
     end do
 
   end function tc1_velocity
+
+  ! ===========================================
+  ! tc1_streamfunction:
+  !
+  ! Stream function of the test case 1 solid body rotation, signed so that
+  ! curl_sphere(psi) (= curl(psi khat)) is the tc1_velocity wind.  Used for a
+  ! discretely divergence-free prescribed wind (SWEQX_TC1_VELOCITY=curlpsi).
+  ! ===========================================
+
+  function tc1_streamfunction(sphere) result(psi)
+
+    type (spherical_polar_t), intent(in) :: sphere(np,np)
+    real (kind=real_kind)                :: psi(np,np)
+
+    integer i,j
+
+    do j=1,np
+       do i=1,np
+          psi(i,j) = rearth*u0*( SIN(sphere(i,j)%lat)*COS(alpha) - &
+               COS(sphere(i,j)%lon)*COS(sphere(i,j)%lat)*SIN(alpha) )
+       end do
+    end do
+
+  end function tc1_streamfunction
 
 
 
