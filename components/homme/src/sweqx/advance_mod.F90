@@ -24,7 +24,8 @@ contains
   ! (dg_flux >= 0) is used where it is supported
   ! ===================================
   use hybrid_mod,   only : hybrid_t
-  use control_mod,  only : dg_flux, rk_stage_user, test_case, nu, nu_s, hypervis_order
+  use control_mod,  only : dg_flux, rk_stage_user, test_case, nu, nu_s, hypervis_order, &
+                           theta_advect_form
   use parallel_mod, only : abortmp
   implicit none
   type (hybrid_t), intent(in) :: hybrid
@@ -48,6 +49,10 @@ contains
   if (rk_stage_user /= -4) call abortmp('dg_flux>=0 requires RK4 (rk_stage_user=-4)')
   if (hypervis_order /= 0 .and. (nu /= 0 .or. nu_s /= 0)) &
        call abortmp('dg_flux>=0: hyperviscosity is not supported (set nu=nu_s=0)')
+  ! the energy-conserving shallow water fluxes assume the flux form div(Phi u) of the
+  ! mass equation; the split form is for tracers (prescribed velocity) only
+  if (.not. prescribed_velocity_case() .and. theta_advect_form == 2) &
+       call abortmp('dg_flux>=0 for shallow water requires theta_advect_form /= 2')
   if (hybrid%masterthread) then
      if (dg_flux==0) print *,'DG spectral elements with central fluxes (dg_flux=0)'
      if (dg_flux==1) print *,'DG spectral elements with upwind fluxes (dg_flux=1)'
@@ -1184,6 +1189,118 @@ contains
   enddo
   end subroutine dg_edge_correction
 
+  subroutine dg_swe_correction(elem,deriv,n0,pmean,ph,uh,ptens,vtens)
+  ! ===================================
+  ! DG coupling for the vector-invariant shallow water equations
+  ! (Ricardo, Lee & Duru, JCP 2024), replacing the DSS of ptens and vtens.
+  !
+  ! input:  ptens = -spheremp*div(F),  F = Phi u,  Phi = pmean+p (geopotential)
+  !         vtens = spheremp*( -(f+zeta) k x u - grad(G) ),  G = |u|^2/2 + p + ps  (lat-lon)
+  !         ph, uh = neighbors' p and lat-lon velocity on this element's edges
+  ! output: ptens = dp/dt,  vtens = du/dt (contravariant)
+  !
+  ! Edge terms, with B = element_boundary_integral_jcontra (see test_edge_flux):
+  !   mass:      ptens -= B(Fhat - F^-),  Fhat = {{F}}.n                      (central)
+  !   Bernoulli: vtens -= Dinv^T [ B(metdet*dG,0), B(0,metdet*dG) ],  dG = Ghat - G^-,
+  !              Ghat = {{G}} + alpha [[F]].n+,  alpha = 0 (dg_flux=0) or
+  !              alpha = max(c^-/Phi^-, c^+/Phi^+)/2,  c = |u| + sqrt(Phi)  (dg_flux=1)
+  !   vorticity: omega = f + zeta + zeta_c, with spheremp*zeta_c = B(du_cov2, -du_cov1)
+  !              where du = ({{u}} - u^-) (tangential part enters), so
+  !              vtens += spheremp*zeta_c*(u2,-u1)
+  ! ps is continuous and drops out of the jumps of G.
+  ! ===================================
+  use dimensions_mod, only : nlev
+  use element_mod,    only : element_t
+  use derivative_mod, only : derivative_t, element_boundary_integral_jcontra
+  use control_mod,    only : dg_flux
+  implicit none
+  type (element_t),      intent(in)    :: elem
+  type (derivative_t),   intent(in)    :: deriv
+  integer,               intent(in)    :: n0
+  real (kind=real_kind), intent(in)    :: pmean
+  real (kind=real_kind), intent(in)    :: ph(0:np+1,0:np+1,nlev)
+  real (kind=real_kind), intent(in)    :: uh(0:np+1,0:np+1,2*nlev)
+  real (kind=real_kind), intent(inout) :: ptens(np,np,nlev)
+  real (kind=real_kind), intent(inout) :: vtens(np,np,2,nlev)
+
+  real (kind=real_kind) :: gvm(np,np,2),gvt(np,np,2),gvg1(np,np,2),gvg2(np,np,2)
+  real (kind=real_kind) :: bt(np,np),b1(np,np),b2(np,np),ull(np,np,2)
+  real (kind=real_kind) :: um1,um2,up1,up2,am,ap,phim,phip,nrm,unm,unp,gm,gp,alpha,cm,cp,dg
+  real (kind=real_kind) :: du1,du2,sgn,vt1,vt2
+  integer :: e,n,i,j,ih,jh,c,k
+
+  do k=1,nlev
+     do j=1,np
+        do i=1,np
+           ull(i,j,1) = elem%D(i,j,1,1)*elem%state%v(i,j,1,k,n0) + elem%D(i,j,1,2)*elem%state%v(i,j,2,k,n0)
+           ull(i,j,2) = elem%D(i,j,2,1)*elem%state%v(i,j,1,k,n0) + elem%D(i,j,2,2)*elem%state%v(i,j,2,k,n0)
+        enddo
+     enddo
+     gvm = 0; gvt = 0; gvg1 = 0; gvg2 = 0
+     do e=1,4
+        do n=1,np
+           call dg_edge_node(e,n,i,j,ih,jh,c,sgn)
+           um1 = ull(i,j,1);              um2 = ull(i,j,2)
+           up1 = uh(ih,jh,1+2*(k-1));     up2 = uh(ih,jh,2+2*(k-1))
+           phim = pmean + elem%state%p(i,j,k,n0)
+           phip = pmean + ph(ih,jh,k)
+           ! outward normal flux densities metdet*u^n, both with this element's metric
+           am = sgn*elem%metdet(i,j)*(elem%Dinv(i,j,c,1)*um1 + elem%Dinv(i,j,c,2)*um2)
+           ap = sgn*elem%metdet(i,j)*(elem%Dinv(i,j,c,1)*up1 + elem%Dinv(i,j,c,2)*up2)
+           ! mass: central flux
+           gvm(i,j,c) = sgn*(0.5D0*(am*phim + ap*phip) - am*phim)
+           ! Bernoulli flux: physical outward normal velocity u.nhat
+           nrm = sqrt(elem%Dinv(i,j,c,1)**2 + elem%Dinv(i,j,c,2)**2)
+           unm = am/(elem%metdet(i,j)*nrm)
+           unp = ap/(elem%metdet(i,j)*nrm)
+           gm = 0.5D0*(um1**2 + um2**2) + phim
+           gp = 0.5D0*(up1**2 + up2**2) + phip
+           if (dg_flux == 1) then
+              cm = sqrt(um1**2 + um2**2) + sqrt(phim)
+              cp = sqrt(up1**2 + up2**2) + sqrt(phip)
+              alpha = 0.5D0*max(cm/phim, cp/phip)
+           else
+              alpha = 0
+           endif
+           ! Ghat - G^-, with [[F]].n+ = F^-.n - F^+.n  (n = this element's outward normal)
+           dg = 0.5D0*(gp - gm) + alpha*(phim*unm - phip*unp)
+           ! vorticity: ({{u}} - u^-) in this element's covariant components
+           du1 = 0.5D0*(up1 - um1)
+           du2 = 0.5D0*(up2 - um2)
+           if (c == 1) then
+              gvg1(i,j,1) = elem%metdet(i,j)*dg
+              gvt(i,j,1)  =  elem%D(i,j,1,2)*du1 + elem%D(i,j,2,2)*du2   ! du_cov2
+           else
+              gvg2(i,j,2) = elem%metdet(i,j)*dg
+              gvt(i,j,2)  = -(elem%D(i,j,1,1)*du1 + elem%D(i,j,2,1)*du2) ! -du_cov1
+           endif
+        enddo
+     enddo
+     ptens(:,:,k) = (ptens(:,:,k) - element_boundary_integral_jcontra(gvm,deriv))/elem%spheremp(:,:)
+     bt = element_boundary_integral_jcontra(gvt,deriv)    ! spheremp*zeta_c
+     b1 = element_boundary_integral_jcontra(gvg1,deriv)   ! covariant components of
+     b2 = element_boundary_integral_jcontra(gvg2,deriv)   ! the Bernoulli edge term
+     do j=1,np
+        do i=1,np
+           vt1 = vtens(i,j,1,k) + bt(i,j)*ull(i,j,2) - (elem%Dinv(i,j,1,1)*b1(i,j) + elem%Dinv(i,j,2,1)*b2(i,j))
+           vt2 = vtens(i,j,2,k) - bt(i,j)*ull(i,j,1) - (elem%Dinv(i,j,1,2)*b1(i,j) + elem%Dinv(i,j,2,2)*b2(i,j))
+           vt1 = vt1/elem%spheremp(i,j)
+           vt2 = vt2/elem%spheremp(i,j)
+           ! lat-lon -> contra
+           vtens(i,j,1,k) = elem%Dinv(i,j,1,1)*vt1 + elem%Dinv(i,j,1,2)*vt2
+           vtens(i,j,2,k) = elem%Dinv(i,j,2,1)*vt1 + elem%Dinv(i,j,2,2)*vt2
+        enddo
+     enddo
+  enddo
+  end subroutine dg_swe_correction
+
+  logical function prescribed_velocity_case()
+  ! test cases whose velocity set_prescribed_velocity overwrites (transport only)
+  use control_mod, only : test_case
+  implicit none
+  prescribed_velocity_case = (test_case=="swtc1" .or. test_case=="vortex" .or. test_case=="swirl")
+  end function prescribed_velocity_case
+
   subroutine dg_edge_node(e,n,i,j,ih,jh,c,sgn)
   ! node n (1..np) of edge e (1=south, 2=east, 3=north, 4=west):
   ! (i,j) its index, (ih,jh) the neighbor's value in the DG halo,
@@ -1384,8 +1501,14 @@ contains
         call edgeDGVunpack_nlyr(edge3, elem(ie)%desc, ph, nlev, kptr, 3*nlev)
         kptr=nlev
         call edgeDGVunpack_nlyr(edge3, elem(ie)%desc, uh, 2*nlev, kptr, 3*nlev)
-        call dg_edge_correction(elem(ie),deriv,n0,pmean,ph,uh,ptens(:,:,:,ie))
-        vtens(:,:,:,:,ie) = 0   ! transport only: the velocity is prescribed
+        if (prescribed_velocity_case()) then
+           ! transport: the velocity is prescribed
+           call dg_edge_correction(elem(ie),deriv,n0,pmean,ph,uh,ptens(:,:,:,ie))
+           vtens(:,:,:,:,ie) = 0
+        else
+           ! vector-invariant shallow water equations
+           call dg_swe_correction(elem(ie),deriv,n0,pmean,ph,uh,ptens(:,:,:,ie),vtens(:,:,:,:,ie))
+        endif
      else
      ! ===========================================================
      ! Unpack the edges for vgradp and vtens
