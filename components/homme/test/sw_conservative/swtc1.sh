@@ -32,6 +32,7 @@ make -j4 sweqx
 # subcase 3, nu=0, 500 days it will go unstable
 subcase=4          # 1,2,3,4 for alpha=0,pi/2,pi/2-0.05,pi/4
 adv_form=2        # theta_advect_form: 0 = conservation form, 2 = split form
+dg_flux=${dg_flux:--1}  # -1 = CG (DSS), 0 = DG central, 1 = DG upwind.  DG needs RK4, nu=0 and a smaller tstep (see DG notes)
 
 ndays=$((12*30))   # 12 days per revolution
 NE=30
@@ -73,6 +74,7 @@ nu_s=$nu
 
 rundir=$output/subcase$subcase
 [ $adv_form -eq 2 ] && rundir=$rundir-splitform
+[ $dg_flux -ge 0 ] && rundir=$rundir-dg$dg_flux
 [ $rk_stage -gt 0 ] && rundir=$rundir-ssp2s${rk_stage}   # 2nd-order SSP, rk_stage stages
 [ $rk_stage -eq -4 ] && rundir=$rundir-rk4
 awk -v n="$nu" 'BEGIN{exit !(n+0!=0)}' && rundir=$rundir-nu$nu   # only when nu is nonzero
@@ -84,7 +86,7 @@ sed s/^ne.\*/"ne = $NE"/  $input/swtc1.nl |\
 sed s/tstep.\*/"tstep = $tstep"/  |\
 sed s/limiter_option.\*/"limiter_option = $limiter"/  |\
 sed s/smooth.\*/"smooth = $smooth"/  |\
-sed s/test_case.\*/"test_case = \'$test_case\', sub_case = $subcase, theta_advect_form = $adv_form"/  |\
+sed s/test_case.\*/"test_case = \'$test_case\', sub_case = $subcase, theta_advect_form = $adv_form, dg_flux = $dg_flux"/  |\
 sed s/rk_stage_user.\*/"rk_stage_user = $rk_stage"/  |\
 sed "s/^integration.*/integration = \"$integration\"/"  |\
 sed s/LFTfreq.\*/"LFTfreq = $LFTfreq"/  |\
