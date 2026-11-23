@@ -12,37 +12,19 @@ module advance_mod
   ! semi-implicit needs to be re-initialized each time dt changes
   real (kind=real_kind) :: initialized_for_dt   = 0
 
-  ! swtc1 prescribed wind: 0 = analytic (default), 1 = curl_sphere(stream function),
-  ! which is discretely divergence free (environment SWEQX_TC1_VELOCITY=curlpsi)
-  integer :: tc1_velocity_mode = 0
-
 contains
 
   subroutine advance_rk_init_options(hybrid)
   ! ===================================
-  ! read run-time options of the runge_kutta driver and check the DG option
-  ! (dg_flux >= 0) is used where it is supported
+  ! check the DG option (dg_flux >= 0) is used where it is supported.  The swtc1
+  ! prescribed wind (SWEQX_TC1_VELOCITY) is selected in shallow_water_mod:tc1_init_velocity
   ! ===================================
   use hybrid_mod,   only : hybrid_t
-  use control_mod,  only : dg_flux, rk_stage_user, test_case, nu, nu_s, hypervis_order, &
+  use control_mod,  only : dg_flux, rk_stage_user, nu, nu_s, hypervis_order, &
                            theta_advect_form
   use parallel_mod, only : abortmp
   implicit none
   type (hybrid_t), intent(in) :: hybrid
-
-  character(len=32) :: envval
-  integer :: envlen, envstat
-
-  call get_environment_variable("SWEQX_TC1_VELOCITY",envval,envlen,envstat)
-  tc1_velocity_mode = 0
-  if (envstat==0 .and. trim(envval)=="curlpsi") tc1_velocity_mode = 1
-  if (hybrid%masterthread .and. test_case(1:5)=="swtc1") then
-     if (tc1_velocity_mode==1) then
-        print *,'swtc1 prescribed wind: curl of stream function (SWEQX_TC1_VELOCITY=curlpsi)'
-     else
-        print *,'swtc1 prescribed wind: analytic'
-     endif
-  endif
 
   if (dg_flux < 0) return
   if (dg_flux > 1) call abortmp('dg_flux must be -1 (CG), 0 (DG central) or 1 (DG upwind)')
@@ -1064,37 +1046,25 @@ contains
 
 
   subroutine set_prescribed_velocity(elem,n0,time,deriv)
-  use control_mod, only :  test_case, dg_flux
+  use control_mod, only :  test_case
   use element_mod, only : element_t
   use dimensions_mod, only : nlev
-  use derivative_mod, only : derivative_t, curl_sphere
-  use shallow_water_mod, only : tc1_prescribed_velocity, vortex_velocity, swirl_velocity, tc1_streamfunction
+  use derivative_mod, only : derivative_t
+  use shallow_water_mod, only : tc1_prescribed_velocity, vortex_velocity, swirl_velocity
   implicit none
 
   type (element_t)     , intent(inout) :: elem
   type (derivative_t)  , intent(in), optional :: deriv
 
   ! local
-  integer :: n0,k,i,j
+  integer :: n0,k
   real (kind=real_kind) :: time
-  real (kind=real_kind) :: ulatlon(np,np,2)
 
   ! the prescribed velocity is the same on every level: compute it once, then copy
   if (test_case=="swtc1") then
-     if (dg_flux>=0 .and. tc1_velocity_mode==1 .and. present(deriv)) then
-        ! DG: curl of the stream function in each element: its strong divergence is zero
-        ! to roundoff within each element, and its normal component is continuous across edges
-        ulatlon = curl_sphere(tc1_streamfunction(elem%spherep),deriv,elem)
-        do j=1,np
-           do i=1,np
-              elem%state%v(i,j,1,1,n0)=elem%Dinv(i,j,1,1)*ulatlon(i,j,1) + elem%Dinv(i,j,1,2)*ulatlon(i,j,2)
-              elem%state%v(i,j,2,1,n0)=elem%Dinv(i,j,2,1)*ulatlon(i,j,1) + elem%Dinv(i,j,2,2)*ulatlon(i,j,2)
-           enddo
-        enddo
-     else
-        ! CG: analytic solid-body rotation, or DSS(curl psi): see tc1_init_velocity
-        elem%state%v(:,:,:,1,n0)=tc1_prescribed_velocity(elem)
-     endif
+     ! analytic solid-body rotation, or curl(psi) (CG: DSS'd; DG: element-local):
+     ! see shallow_water_mod:tc1_init_velocity
+     elem%state%v(:,:,:,1,n0)=tc1_prescribed_velocity(elem)
   else if (test_case=="vortex") then
      elem%state%v(:,:,:,1,n0)=vortex_velocity(time,elem%spherep,elem%Dinv)
   else if (test_case=="swirl") then

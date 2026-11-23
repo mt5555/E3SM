@@ -1126,8 +1126,8 @@ contains
           call sweq_invariants(elem,190,tl,pmean,edge3,deriv,hybrid,nets,nete)
        endif  ! if initial run 
 
-    ! run-time options of the RK driver (DG checks, swtc1 velocity choice); before
-    ! opmat_extract, which applies the operators with these options
+    ! DG option checks; before opmat_extract, which applies the operators with these
+    ! options (the swtc1 velocity is set up by tc1_init_velocity, called above)
     call advance_rk_init_options(hybrid)
 
     ! optional (environment variable SWEQX_OPMAT): write the matrices of the

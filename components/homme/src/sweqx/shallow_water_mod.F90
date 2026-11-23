@@ -62,7 +62,11 @@ module shallow_water_mod
   ! (see tc1_init_velocity):
   !   "analytic" (default): solid-body rotation evaluated at each GLL node (tc1_velocity)
   !   "curlpsi"           : u = DSS(curl(psi khat)) for the rigid-body stream function psi,
-  !                         whose discrete divergence (DSS'd) is zero to roundoff
+  !                         whose discrete divergence (DSS'd) is zero to roundoff.  DG
+  !                         (dg_flux >= 0) uses curl(psi khat) without the DSS: its strong
+  !                         divergence is zero in each element and its normal component is
+  !                         continuous, so the DG divergence is zero (a DSS would average the
+  !                         tangential component at edge nodes and break that)
   logical, private :: tc1_curlpsi = .false.
   real (kind=real_kind), private, allocatable :: tc1_vcurl(:,:,:,:) ! (np,np,2,nelemd), contravariant
   ! stream function for "curlpsi", selected by SWEQX_TC1_PSI (see tc1_init_velocity):
@@ -818,7 +822,8 @@ contains
   !
   ! Select the swtc1 prescribed velocity from the environment variable
   ! SWEQX_TC1_VELOCITY ("analytic" (default) or "curlpsi").  For "curlpsi",
-  ! compute and save u = DSS(curl(psi khat)).  Must be called after
+  ! compute and save u = DSS(curl(psi khat)) for CG, or the element-local
+  ! u = curl(psi khat) for DG (dg_flux >= 0).  Must be called after
   ! tc1_init_state (which sets alpha).  The velocity is applied in
   ! advance_mod:set_prescribed_velocity via tc1_prescribed_velocity.
   !
@@ -837,6 +842,7 @@ contains
     use viscosity_base, only : make_C0, make_C0_vector
     use dimensions_mod, only : nelemd
     use parallel_mod, only : abortmp
+    use control_mod, only : dg_flux
 #ifdef _MPI
     use parallel_mod, only : MPI_MAX, MPI_SUM, MPI_IN_PLACE, MPIreal_t
 #endif
@@ -851,6 +857,8 @@ contains
     real (kind=real_kind) :: u(np,np,2,nets:nete), divu(np,np,nets:nete), ua(np,np,2), va(np,np,2)
     real (kind=real_kind) :: un(np,np,2,nets:nete), psi(np,np), esum(2)
     real (kind=real_kind) :: maxdiv,maxdu,maxu,umax0,par(3)
+    logical :: dg
+    character(len=32) :: vlab, dlab
 
     call get_environment_variable("SWEQX_TC1_VELOCITY",velname,status=stat)
     if (stat /= 0 .or. len_trim(velname)==0) velname = "analytic"
@@ -864,6 +872,12 @@ contains
     if (hybrid%masterthread .and. hybrid%par%masterproc) &
          print *,"swtc1 prescribed velocity: ",trim(velname)
     if (.not. tc1_curlpsi) return
+    dg = (dg_flux >= 0)   ! DG: element-local curl(psi), no DSS
+    if (dg) then
+       vlab = 'DG curl psi (no DSS) velocity'; dlab = ': max|element div u|='
+    else
+       vlab = 'DSS(curl psi) velocity';        dlab = ': max|DSS div u|='
+    endif
 
     if (hybrid%hthreads /= 1) call abortmp("SWEQX_TC1_VELOCITY=curlpsi requires 1 thread")
     do ie=1,nelemd
@@ -908,7 +922,7 @@ contains
     do ie=nets,nete
        u(:,:,:,ie) = curl_sphere(tc1_selected_streamfunction(elem(ie)%spherep),deriv,elem(ie))
     end do
-    call make_C0_vector(u,elem,hybrid,nets,nete)
+    if (.not. dg) call make_C0_vector(u,elem,hybrid,nets,nete)
     if (trim(tc1_psiname) == "file") then
        do ie=nets,nete
           do j=1,np
@@ -918,7 +932,7 @@ contains
           end do
           un(:,:,:,ie) = curl_sphere(psi,deriv,elem(ie))
        end do
-       call make_C0_vector(un,elem,hybrid,nets,nete)
+       if (.not. dg) call make_C0_vector(un,elem,hybrid,nets,nete)
        if (tc1_psi_r >= 0) then
           ! u = u_sb + c*u_file with rms|c*u_file| = r*rms|u_sb| (GLL quadrature)
           esum = 0
@@ -950,7 +964,8 @@ contains
        u = tc1_uscale*u
     endif
 
-    ! diagnostics: DSS'd divergence of u, and difference from the analytic velocity
+    ! diagnostics: divergence of u (CG: DSS'd; DG: element-local strong divergence),
+    ! and difference from the analytic velocity
     maxdiv=0; maxdu=0; maxu=0
     do ie=nets,nete
        divu(:,:,ie) = divergence_sphere(u(:,:,:,ie),deriv,elem(ie))
@@ -964,7 +979,7 @@ contains
        maxdu = max(maxdu, maxval(abs(u(:,:,:,ie)-ua)))
        maxu  = max(maxu,  maxval(abs(ua)))
     end do
-    call make_C0(divu,elem,hybrid,nets,nete)
+    if (.not. dg) call make_C0(divu,elem,hybrid,nets,nete)
     do ie=nets,nete
        maxdiv = max(maxdiv,maxval(abs(divu(:,:,ie))))
     end do
@@ -975,16 +990,16 @@ contains
     end do
     call make_C0(tc1_zeta(:,:,nets:nete),elem,hybrid,nets,nete)
     if (trim(tc1_psiname) == "solidbody") then
-       print '(a,i6,a,es12.4,a,es12.4,a,es12.4)','DSS(curl psi) velocity, rank',hybrid%par%rank, &
-            ': max|DSS div u|=',maxdiv,'  max|u-u_analytic|=',maxdu,'  max|u|=',maxu
+       print '(a,i6,a,es12.4,a,es12.4,a,es12.4)',trim(vlab)//', rank',hybrid%par%rank, &
+            trim(dlab),maxdiv,'  max|u-u_analytic|=',maxdu,'  max|u|=',maxu
     else
        ! u_analytic (solid body) is not the target here: report max|u| of DSS(curl psi) instead
        maxu = 0
        do ie=nets,nete
           maxu = max(maxu, maxval(sqrt(u(:,:,1,ie)**2 + u(:,:,2,ie)**2)))
        end do
-       print '(a,i6,a,es12.4,a,es12.4,a,es12.4,a,es12.4)','DSS(curl psi) velocity, rank',hybrid%par%rank, &
-            ': max|DSS div u|=',maxdiv,'  max|u| (this rank)=',maxu,'  u0=',u0,'  scale=',tc1_uscale
+       print '(a,i6,a,es12.4,a,es12.4,a,es12.4,a,es12.4)',trim(vlab)//', rank',hybrid%par%rank, &
+            trim(dlab),maxdiv,'  max|u| (this rank)=',maxu,'  u0=',u0,'  scale=',tc1_uscale
     endif
 
     ! save in contravariant components
