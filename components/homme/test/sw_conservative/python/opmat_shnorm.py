@@ -131,7 +131,8 @@ def plot(curves, title, n, nmax, ppw_min, outfile):
     if 'cN_bell' in curves[0][2]:
         axs[2].semilogy(N, curves[0][2]['cN_bell'][:nplot + 1], color=INK, lw=1.4, ls='--',
                         label='cosine bell')
-    style_ax(axs[0], title)
+    fig.suptitle(title, color=INK, fontsize=10)    # the case; panel titles say what is plotted
+    style_ax(axs[0], 'worst-case error after one revolution: E(N) = ||(exp(AT) - I) Q_N||')
     style_ax(axs[1], 'worst-case error split: within degree N vs scattered to other degrees')
     style_ax(axs[2], 'degree spectrum of the swtc1 initial conditions')
     # left: fit the error curves; middle: the in-degree part reaches much lower values
@@ -141,14 +142,7 @@ def plot(curves, title, n, nmax, ppw_min, outfile):
     axs[1].set_ylim(10 ** np.floor(np.log10(imin / 2)), 3)
     axs[2].set_ylim(1e-8, 1)
     for i, ax in enumerate(axs):
-        ax.set_xlabel('spherical harmonic degree N')
-        ax.set_xlim(0, xmax)
-        if i < 2:
-            ax.axhline(2, color=MUTED, lw=0.8, ls='--')
-        top = ax.secondary_xaxis('top', functions=(lambda x: 2 * np.pi / (np.maximum(x, 1e-9) * dx),
-                                                    lambda y: 2 * np.pi / (np.maximum(y, 1e-9) * dx)))
-        top.set_xlabel(r'wavelength $2\pi a/N$ in units of mean $\Delta x$', color=MUTED)
-        top.set_xticks([5, 6, 8, 10, 15, 20, 40])
+        degree_axis(ax, dx, xmax, bound=i < 2)
     for ax in axs:
         ax.legend(fontsize=7, loc='lower right')
     axs[0].set_ylabel('relative l2 error at day 12')
@@ -156,6 +150,81 @@ def plot(curves, title, n, nmax, ppw_min, outfile):
     fig.tight_layout()
     fig.savefig(outfile)
     plt.close(fig)
+
+
+def degree_axis(ax, dx, xmax, bound=True):
+    """x axis in degree N with a top axis in wavelength / mean dx; bound: the line E = 2"""
+    ax.set_xlabel('spherical harmonic degree N')
+    ax.set_xlim(0, xmax)
+    if bound:
+        ax.axhline(2, color=MUTED, lw=0.8, ls='--')
+    top = ax.secondary_xaxis('top', functions=(lambda x: 2 * np.pi / (np.maximum(x, 1e-9) * dx),
+                                                lambda y: 2 * np.pi / (np.maximum(y, 1e-9) * dx)))
+    top.set_xlabel(r'wavelength $2\pi a/N$ in units of mean $\Delta x$', color=MUTED)
+    top.set_xticks([5, 6, 8, 10, 15, 20, 40])
+
+
+SCAT_COL = {'in': '#eb6834', 'out': '#2a9d8f'}    # in-degree (split-form orange), scattered
+
+
+def plot_compare(curves, title, n, nmax, ppw_min, outfile, split=None):
+    """E(N) of several cases on one axis, plus the initial-condition spectra.
+    curves: list of (label, color, linestyle, result dict with E, cN, cN_bell);
+    split: optional list of (label, linestyle, result dict) whose in-degree and scattered
+    parts get a middle panel (color = part, line style = case)"""
+    dx = np.sqrt(4 * np.pi / n)
+    xmax = min(nmax, 2 * np.pi / (ppw_min * dx))
+    nplot = min(nmax, int(np.ceil(xmax)))
+    N = np.arange(nplot + 1)
+    if split:
+        fig, axs = plt.subplots(1, 3, figsize=(19, 4.6), gridspec_kw={'width_ratios': [3, 3, 2]})
+    else:
+        fig, axs = plt.subplots(1, 2, figsize=(13, 4.6), gridspec_kw={'width_ratios': [3, 2]})
+    ax_e, ax_s = axs[0], axs[-1]
+    for lab, col, ls, r in curves:
+        ax_e.semilogy(N, r['E'][:nplot + 1], ls, color=col, lw=1.6, label=lab)
+    r = curves[0][3]
+    ax_s.semilogy(N, r['cN'][:nplot + 1], color=INK, lw=1.4, label='Gaussian')
+    ax_s.semilogy(N, r['cN_bell'][:nplot + 1], color=INK, lw=1.4, ls='--', label='cosine bell')
+    fig.suptitle(title, color=INK, fontsize=10)
+    style_ax(ax_e, 'worst-case error after one revolution: E(N) = ||(exp(AT) - I) Q_N||')
+    style_ax(ax_s, 'degree spectrum of the swtc1 initial conditions')
+    emin = min(c[3]['E'][1:nplot + 1].min() for c in curves)
+    ax_e.set_ylim(10 ** np.floor(np.log10(emin / 2)), 3)
+    ax_s.set_ylim(1e-8, 1)
+    degree_axis(ax_e, dx, xmax)
+    degree_axis(ax_s, dx, xmax, bound=False)
+    if split:
+        ax_m = axs[1]
+        for lab, ls, r in split:
+            ax_m.semilogy(N, r['in'][:nplot + 1], ls, color=SCAT_COL['in'], lw=1.6, label=f'in-degree, {lab}')
+            ax_m.semilogy(N, r['out'][:nplot + 1], ls, color=SCAT_COL['out'], lw=1.6, label=f'scattered, {lab}')
+        style_ax(ax_m, 'split form: worst-case error within degree N vs scattered to other degrees')
+        imin = min(r['in'][1:nplot + 1].min() for _, _, r in split)
+        ax_m.set_ylim(10 ** np.floor(np.log10(imin / 2)), 3)
+        degree_axis(ax_m, dx, xmax)
+    for ax in axs:
+        ax.legend(fontsize=7, loc='lower right')
+    ax_e.set_ylabel('relative l2 error at day 12')
+    ax_s.set_ylabel('||p0_N|| / ||p0||')
+    fig.tight_layout()
+    fig.savefig(outfile)
+    plt.close(fig)
+
+
+def load_curve(args, sc, f):
+    """saved results of one case (nu from args), with the cosine bell spectrum computed for older files"""
+    t = f'ne{args.ne}-sc{sc}-{nu_tag(args)}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd')
+    r = np.load(os.path.join(args.out, f'{name(args.ne, sc, f, args.velocity)}-{t}-shnorm.npz'))
+    cv = {k: r[k] for k in ('E', 'rms', 'in', 'out', 'cN')}
+    if 'cN_bell' in r:
+        cv['cN_bell'] = r['cN_bell']
+    else:   # older files: compute the cosine bell spectrum from the node coordinates
+        d = load(os.path.join(args.mats, name(args.ne, sc, f, args.velocity)), ops=())
+        Y, deg = real_harmonics(d['lat'], d['lon'], d['meta']['alpha'], len(r['E']) - 1)
+        sq = np.sqrt(d['mass'])
+        cv['cN_bell'] = degree_spectrum(cosine_bell(d['lat'], d['lon']), degree_bases(Y, deg, sq), sq)
+    return cv, int(r['n'])
 
 
 def nu_tag(args):
@@ -197,41 +266,55 @@ def main():
     p.add_argument('--replot', action='store_true', help='only redo the plot from the saved npz files')
     p.add_argument('--compare-alpha', action='store_true',
                    help='with --replot: overlay alpha=0 (sc1) and alpha=pi/4 (sc4) for each of --forms')
+    p.add_argument('--compare-nu', type=float, nargs='+', metavar='NU30',
+                   help='with --replot: E(N) for these nu30 values (0 allowed, scaled with --nu-exp) and '
+                        'each of --forms on one axis; color = form, line style = nu')
     args = p.parse_args()
     os.makedirs(args.out, exist_ok=True)
     rep, res = [], {}
     tag = f'ne{args.ne}-sc{args.sc}-{nu_tag(args)}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd')
+    if args.replot and args.compare_nu:
+        curves, split = [], []
+        for f in args.forms:
+            for nu30, ls in zip(args.compare_nu, ('-', '--', ':', '-.')):
+                a = argparse.Namespace(**vars(args))
+                a.nu30 = nu30
+                try:
+                    cv, n = load_curve(a, args.sc, f)
+                except FileNotFoundError as e:     # run not finished yet: plot the rest
+                    print(f'skipping {FORM[f]}, {nu_label(a)}: {e.filename} not found')
+                    continue
+                curves.append((f'{FORM[f]}, {nu_label(a)}', FCOL[f], ls, cv))
+                if f == 2:      # the in-degree / scattered panel shows the split form only
+                    split.append((nu_label(a).split(' (')[0], ls, cv))
+        forms = ''.join(map(str, args.forms))
+        nus = '_'.join(f'{v:g}' for v in args.compare_nu)
+        dxs = '' if args.nu_exp == 4 else f'_dx{args.nu_exp:g}'
+        out = os.path.join(args.out, f'shnorm_ne{args.ne}-sc{args.sc}-f{forms}-nu30_{nus}{dxs}'
+                                     + (f'-rk4sub{args.sub}' if args.rk4 else '-sd') + '.png')
+        plot_compare(curves, f'NE{args.ne}, alpha={ALPHA[args.sc]}, {sub_label(args)}',
+                     n, args.nmax, args.ppw_min, out, split=split)
+        print(out)
+        return
     if args.replot:
         scs = (1, 4) if args.compare_alpha else (args.sc,)
         curves = []
         for f in args.forms:
             for sc in scs:
-                t = f'ne{args.ne}-sc{sc}-{nu_tag(args)}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd')
-                r = np.load(os.path.join(args.out, f'{name(args.ne, sc, f, args.velocity)}-{t}-shnorm.npz'))
                 if args.compare_alpha:
                     lab = f'alpha={ALPHA[sc]}' + (f', {FORM[f]}' if len(args.forms) > 1 else '')
                     col = SCCOL[sc] if len(args.forms) == 1 else (SCCOL[sc] if f == 2 else FCOL[0])
                 else:
                     lab, col = FORM[f], FCOL[f]
-                cv = {k: r[k] for k in ('E', 'rms', 'in', 'out', 'cN')}
-                if 'cN_bell' in r:
-                    cv['cN_bell'] = r['cN_bell']
-                else:   # older files: compute the cosine bell spectrum from the node coordinates
-                    d = load(os.path.join(args.mats, name(args.ne, sc, f, args.velocity)), ops=())
-                    nmax = len(r['E']) - 1
-                    Y, deg = real_harmonics(d['lat'], d['lon'], d['meta']['alpha'], nmax)
-                    sq = np.sqrt(d['mass'])
-                    cv['cN_bell'] = degree_spectrum(cosine_bell(d['lat'], d['lon']), degree_bases(Y, deg, sq), sq)
+                cv, n = load_curve(args, sc, f)
                 curves.append((lab, col, cv))
-                n = int(r['n'])
         if args.compare_alpha:
             forms = ', '.join(FORM[f] for f in args.forms)
-            title = f'NE{args.ne}, {forms}, {nu_label(args)}, {sub_label(args)}: ||(exp(AT)-I) Q_N|| per degree'
+            title = f'NE{args.ne}, {forms}, {nu_label(args)}, {sub_label(args)}'
             out = os.path.join(args.out, f'shnorm_ne{args.ne}-alpha-f{"".join(map(str, args.forms))}'
                                          f'-{nu_tag(args)}' + (f'-rk4sub{args.sub}' if args.rk4 else '-sd') + '.png')
         else:
-            title = (f'NE{args.ne}, alpha={ALPHA[args.sc]}, {nu_label(args)}, {sub_label(args)}: '
-                     f'||(exp(AT)-I) Q_N|| per degree')
+            title = f'NE{args.ne}, alpha={ALPHA[args.sc]}, {nu_label(args)}, {sub_label(args)}'
             out = os.path.join(args.out, f'shnorm_{tag}.png')
         plot(curves, title, n, args.nmax, args.ppw_min, out)
         return
@@ -290,8 +373,7 @@ def main():
                        f'{cN[N] / np.linalg.norm(q0):.3e}')
 
     plot([(FORM[f], FCOL[f], res[f]) for f in args.forms],
-         f'NE{args.ne}, alpha={ALPHA[args.sc]}, {nu_label(args)}, {sub_label(args)}: '
-         f'||(exp(AT)-I) Q_N|| per degree', d['n'], args.nmax, args.ppw_min,
+         f'NE{args.ne}, alpha={ALPHA[args.sc]}, {nu_label(args)}, {sub_label(args)}', d['n'], args.nmax, args.ppw_min,
          os.path.join(args.out, f'shnorm_{tag}.png'))
     txt = '\n'.join(rep)
     print(txt)
