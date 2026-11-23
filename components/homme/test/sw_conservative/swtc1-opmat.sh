@@ -12,7 +12,12 @@
 #   ops       L, B or LB (default LB).  B depends only on NE.
 #   nranks    MPI ranks (default 1).  Any number works; files are written per rank.
 #
-# output: $outdir/ne${NE}-sc${subcase}-f${adv_form}-${velocity}${psitag}.*
+# output: $outdir/ne${NE}-sc${subcase}-f${adv_form}-${velocity}${psitag}${dgtag}.*
+#
+# DG: environment DG=0 (central fluxes) or DG=1 (upwind), default -1 (CG).  Sets the
+#   namelist dg_flux, requires ops=L, and appends dgtag=-dg<DG> to the name, so the python
+#   scripts read the DG matrices with velocity "analytic-dg1" etc.  With velocity=curlpsi
+#   the DG velocity is curl(psi) in each element (not DSS'd, see set_prescribed_velocity).
 #
 # stream function for velocity=curlpsi (environment, see tc1_init_velocity):
 #   SWEQX_TC1_PSI=solidbody (default) or ylm
@@ -54,7 +59,13 @@ if [ "$velocity" == curlpsi ] && [ "$SWEQX_TC1_PSI" == file ]; then
 elif [ "$velocity" == curlpsi ] && [ -n "$SWEQX_TC1_PSI" ] && [ "$SWEQX_TC1_PSI" != solidbody ]; then
     psitag=-${SWEQX_TC1_PSI}$(echo "$SWEQX_TC1_PSI_PARAMS" | tr -d ' ' | tr ',' '_')
 fi
-name=ne${NE}-sc${subcase}-f${adv_form}-${velocity}${psitag}
+DG=${DG:--1}
+dgtag=""; dgnl=""
+if [ "$DG" -ge 0 ]; then
+    [ "$ops" == L ] || { echo "DG=$DG requires ops=L"; exit 1; }
+    dgtag=-dg$DG; dgnl=", dg_flux = $DG"
+fi
+name=ne${NE}-sc${subcase}-f${adv_form}-${velocity}${psitag}${dgtag}
 
 rundir=$outdir/run-$name
 mkdir -p $rundir/movies
@@ -65,7 +76,7 @@ sed s/^ne.\*/"ne = $NE"/  $input/swtc1.nl |\
 sed s/tstep.\*/"tstep = 600"/  |\
 sed s/limiter_option.\*/"limiter_option = 0"/  |\
 sed s/smooth.\*/"smooth = 0"/  |\
-sed s/test_case.\*/"test_case = \'swtc1\', sub_case = $subcase, theta_advect_form = $adv_form"/  |\
+sed s/test_case.\*/"test_case = \'swtc1\', sub_case = $subcase, theta_advect_form = $adv_form$dgnl"/  |\
 sed s/rk_stage_user.\*/"rk_stage_user = -4"/  |\
 sed "s/^integration.*/integration = \"runge_kutta\"/"  |\
 sed s/ndays.\*/"ndays = 1"/  |\
@@ -85,5 +96,5 @@ else
     mpirun -np $nranks $EXEC < swtc1.nl > sweqx.log 2>&1
 fi
 status=$?
-grep -E "SWEQX_OPMAT|DSS\(curl psi\)|prescribed velocity|stream function" sweqx.log
+grep -E "SWEQX_OPMAT|DSS\(curl psi\)|prescribed velocity|prescribed wind|stream function|DG spectral" sweqx.log
 exit $status

@@ -31,6 +31,16 @@ module opmat_mod
   ! not overlap.  This needs 6*16*np^2/nlev (L) and 6*36*np^2/nlev (B)
   ! operator applications independent of ne, instead of n/nlev.
   !
+  ! DG (namelist dg_flux >= 0, see advance_mod:dg_edge_correction).  Every
+  ! element has its own copy of its np*np nodes, so the unknowns are the
+  ! n = 6 ne^2 np^2 element nodes and column j is the delta function at one
+  ! node of one element.  Its support is that element and its 4 edge
+  ! neighbors (the numerical fluxes couple elements through shared edges only).
+  ! With coloring, elements of the same color are on the same cube face and
+  ! >= 3 elements apart in Manhattan distance, which makes those supports
+  ! disjoint: 6*9*np^2/nlev operator applications.  Only L (DG has no
+  ! hyperviscosity).
+  !
   ! Enabled with environment variables (so that normal runs and the shared
   ! namelist code are unaffected):
   !   SWEQX_OPMAT=<prefix>        extract, write <prefix>.*, then stop.
@@ -42,7 +52,10 @@ module opmat_mod
   ! Output.  dof = 0-based contiguous global index of the unique GLL nodes,
   ! 0 <= dof < n = 6 ne^2 (np-1)^2 + 2, in HOMME's unique-point ordering
   ! (elem%idxP%UniquePtOffset, dof_mod:CreateMetaData), independent of the
-  ! MPI decomposition.  Binary files are stream (no record markers), native
+  ! MPI decomposition.  DG: dof = (GlobalId-1)*np^2 + (j-1)*np + (i-1) for
+  ! node (i,j) of element GlobalId, 0 <= dof < n = 6 ne^2 np^2; mass is the
+  ! element's own GLL mass spheremp, and gdofP the id of the unique point
+  ! the node sits on (shared by the element copies of that point).  Binary files are stream (no record markers), native
   ! (little) endian, and each MPI rank r writes the rows it owns:
   !   <prefix>.meta              text, "key = value"
   !   <prefix>.dofs.r<r>.bin     (int32 dof, int64 gdofP, real64 lat, lon, mass)
@@ -53,7 +66,7 @@ module opmat_mod
   !   <prefix>.Ltest.r<r>.bin    (int32 dof, real64 x(nlev), real64 y(nlev)), y = L x computed
   !   <prefix>.Btest.r<r>.bin    directly, for test fields x, to validate the extracted matrix
   !   <prefix>.vel.r<r>.bin      (int32 dof, real64 u_east, u_north, zeta), the curlpsi velocity
-  !                              (m/s) and its DSS'd vorticity (1/s); only with curlpsi
+  !                              (m/s) and its DSS'd vorticity (1/s); only with curlpsi (CG)
   !
   ! ===========================================================================
   use kinds, only : real_kind, int_kind, long_kind
@@ -95,12 +108,12 @@ contains
   subroutine opmat_extract(elem,edge3,deriv,hybrid,tl,nets,nete)
     use dof_mod, only : CreateMetaData
     use control_mod, only : test_case, sub_case, theta_advect_form, kmass, hypervis_order, &
-         hypervis_scaling, topology
+         hypervis_scaling, topology, dg_flux
     use physical_constants, only : dd_pi
     use shallow_water_mod, only : tc1_parameters, tc1_velocity_diag
     use advance_mod, only : compute_and_apply_rhs
     use viscosity_mod, only : biharmonic_wk
-    use edge_mod, only : edgeVpack, edgeVunpack
+    use edge_mod, only : edgeVpack, edgeVunpack, edgeVpack_nlyr, edgeDGVunpack_nlyr
     use bndry_mod, only : bndry_exchangeV
 
     type (element_t)     , intent(inout), target :: elem(:)
@@ -114,6 +127,9 @@ contains
     character(len=8)    :: ops
     character(len=16)   :: rankstr
     integer(kind=int_kind) :: fdof(np,np,nelemd)   ! 1-based contiguous global id of each GLL node
+    integer :: gid(np,np,nelemd)        ! 1-based global dof of each element node: fdof (CG) or DG id
+    integer :: nown(nelemd), il(np*np,nelemd), jl(np*np,nelemd)  ! nodes whose rows this rank writes
+    logical :: dg
     real (kind=real_kind) :: ptens(np,np,nlev,nets:nete), vtens(np,np,2,nlev,nets:nete)
     real (kind=real_kind) :: y(np,np,nlev,nets:nete)
     real (kind=real_kind), allocatable :: xg(:,:)
@@ -144,6 +160,9 @@ contains
          call abortmp("SWEQX_OPMAT: L requires test_case=swtc1 (prescribed steady velocity)")
     if (index(ops,"B")>0 .and. hypervis_order/=2) &
          call abortmp("SWEQX_OPMAT: B requires hypervis_order=2")
+    dg = (dg_flux >= 0)
+    if (dg .and. index(ops,"B")>0) &
+         call abortmp("SWEQX_OPMAT: DG (dg_flux>=0) has no hyperviscosity, set SWEQX_OPMAT_OPS=L")
 
     call get_environment_variable("SWEQX_OPMAT_COLOR",colorstr,status=stat)
     color = .not. (stat==0 .and. trim(colorstr)=="0")
@@ -152,7 +171,26 @@ contains
 
     ! contiguous global ids of the unique points, on every element copy
     call CreateMetaData(hybrid%par,elem,fdofp=fdof)
-    nloc = maxval(fdof)
+    ! the unknowns: CG, the unique points, written by the rank owning them (idxP);
+    ! DG, every node of every element, written by the element's rank
+    do ie=nets,nete
+       if (dg) then
+          nown(ie) = np*np
+          do j=1,np
+             do i=1,np
+                gid(i,j,ie) = (elem(ie)%GlobalId-1)*np*np + (j-1)*np + i
+                il(i+(j-1)*np,ie) = i
+                jl(i+(j-1)*np,ie) = j
+             enddo
+          enddo
+       else
+          gid(:,:,ie) = fdof(:,:,ie)
+          nown(ie) = elem(ie)%idxP%NumUniquePts
+          il(1:nown(ie),ie) = elem(ie)%idxP%ia(1:nown(ie))
+          jl(1:nown(ie),ie) = elem(ie)%idxP%ja(1:nown(ie))
+       endif
+    enddo
+    nloc = maxval(gid)
     n = nloc
 #ifdef _MPI
     call MPI_Allreduce(nloc,n,1,MPIinteger_t,MPI_MAX,hybrid%par%comm,ierr)
@@ -161,8 +199,8 @@ contains
 
     owned = .false.
     do ie=nets,nete
-       do ii=1,elem(ie)%idxP%NumUniquePts
-          owned(elem(ie)%idxP%ia(ii),elem(ie)%idxP%ja(ii),ie) = .true.
+       do ii=1,nown(ie)
+          owned(il(ii,ie),jl(ii,ie),ie) = .true.
        enddo
     enddo
     if (color) then
@@ -180,7 +218,11 @@ contains
 
     if (hybrid%par%masterproc) then
        print *,'SWEQX_OPMAT: extracting operators ',trim(ops),' to ',trim(prefix),'.*'
-       print *,'SWEQX_OPMAT: n=',n,' expected 6*ne^2*(np-1)^2+2=',6*ne*ne*(np-1)**2+2
+       if (dg) then
+          print *,'SWEQX_OPMAT: DG, n=',n,' expected 6*ne^2*np^2=',6*ne*ne*np*np
+       else
+          print *,'SWEQX_OPMAT: n=',n,' expected 6*ne^2*(np-1)^2+2=',6*ne*ne*(np-1)**2+2
+       endif
        open(newunit=unit,file=trim(prefix)//'.meta',status='replace',action='write')
        write(unit,'(a,i0)') 'ne = ',ne
        write(unit,'(a,i0)') 'np = ',np
@@ -194,6 +236,10 @@ contains
        write(unit,'(a,es25.17)') 'u0 = ',u0
        write(unit,'(a,es25.17)') 'rearth = ',rearth
        write(unit,'(a,i0)') 'theta_advect_form = ',theta_advect_form
+       if (dg) then
+          write(unit,'(a)') 'discretization = dg'
+          write(unit,'(a,i0)') 'dg_flux = ',dg_flux
+       endif
        if (curlpsi) then
           write(unit,'(a)') 'velocity = curlpsi'
           write(unit,'(a,a)') 'psi = ',trim(psiname)
@@ -220,17 +266,22 @@ contains
     open(newunit=unit,file=trim(prefix)//'.dofs'//trim(rankstr),access='stream', &
          form='unformatted',status='replace',action='write')
     do ie=nets,nete
-       do ii=1,elem(ie)%idxP%NumUniquePts
-          i=elem(ie)%idxP%ia(ii); j=elem(ie)%idxP%ja(ii)
-          write(unit) int(fdof(i,j,ie)-1,4), int(elem(ie)%gdofP(i,j),8), &
+       do ii=1,nown(ie)
+          i=il(ii,ie); j=jl(ii,ie)
+          if (dg) then
+             dxe = elem(ie)%spheremp(i,j)        ! DG: the element's own mass
+          else
+             dxe = 1/elem(ie)%rspheremp(i,j)     ! CG: the assembled mass
+          endif
+          write(unit) int(gid(i,j,ie)-1,4), int(elem(ie)%gdofP(i,j),8), &
                real(elem(ie)%spherep(i,j)%lat,8), real(elem(ie)%spherep(i,j)%lon,8), &
-               real(1/elem(ie)%rspheremp(i,j),8)
+               real(dxe,8)
        enddo
     enddo
     close(unit)
 
     ! curlpsi velocity (lat-lon, m/s) and DSS'd vorticity (1/s) at the unique points owned by this rank
-    if (curlpsi) then
+    if (curlpsi .and. .not. dg) then
        open(newunit=unit,file=trim(prefix)//'.vel'//trim(rankstr),access='stream', &
             form='unformatted',status='replace',action='write')
        do ie=nets,nete
@@ -260,7 +311,7 @@ contains
           do k=1,nlev
              do j=1,np
                 do i=1,np
-                   elem(ie)%state%p(i,j,k,tl%n0) = xg(fdof(i,j,ie),k)
+                   elem(ie)%state%p(i,j,k,tl%n0) = xg(gid(i,j,ie),k)
                 enddo
              enddo
           enddo
@@ -269,9 +320,9 @@ contains
        open(newunit=unit,file=trim(prefix)//'.'//op//'test'//trim(rankstr),access='stream', &
             form='unformatted',status='replace',action='write')
        do ie=nets,nete
-          do ii=1,elem(ie)%idxP%NumUniquePts
-             i=elem(ie)%idxP%ia(ii); j=elem(ie)%idxP%ja(ii)
-             write(unit) int(fdof(i,j,ie)-1,4), real(xg(fdof(i,j,ie),:),8), real(y(i,j,:,ie),8)
+          do ii=1,nown(ie)
+             i=il(ii,ie); j=jl(ii,ie)
+             write(unit) int(gid(i,j,ie)-1,4), real(xg(gid(i,j,ie),:),8), real(y(i,j,:,ie),8)
           enddo
        enddo
        close(unit)
@@ -282,6 +333,7 @@ contains
        ! operator application.  lab = column whose support contains each node (0: none)
        if (color) then
           kc = merge(4,6,op=='L')      ! same-color elements are >= kc elements apart
+          if (dg) kc = 3               ! DG support: the element and its edge neighbors
           nring = merge(1,2,op=='L')   ! support of a column: nodes within nring elements
           do ie=nets,nete
              ecolor(ie) = (elem(ie)%FaceNum-1)*kc*kc + mod(eix(ie),kc)*kc + mod(eiy(ie),kc)
@@ -302,30 +354,41 @@ contains
                 if (iset>=nset) cycle
                 c = iset/(np*np); a = mod(iset,np)+1; b = mod(iset/np,np)+1
                 do ie=nets,nete
-                   if (ecolor(ie)==c .and. owned(a,b,ie)) lab(a,b,k,ie) = fdof(a,b,ie)
+                   if (ecolor(ie)==c .and. owned(a,b,ie)) lab(a,b,k,ie) = gid(a,b,ie)
                 enddo
              enddo
-             call dss_labels(.false.)       ! label every element copy of the probed nodes
-             do ie=nets,nete
-                elem(ie)%state%p(:,:,:,tl%n0) = merge(1d0,0d0,lab(:,:,:,ie)>0)
-             enddo
-             do i=1,nring
-                call dss_labels(.true.)     ! extend labels to the support
-             enddo
+             if (dg) then
+                ! probe the node itself; label its element, then the edge neighbors
+                do ie=nets,nete
+                   elem(ie)%state%p(:,:,:,tl%n0) = merge(1d0,0d0,lab(:,:,:,ie)>0)
+                   do k=1,nlev
+                      lab(:,:,k,ie) = maxval(lab(:,:,k,ie))
+                   enddo
+                enddo
+                call dg_labels()
+             else
+                call dss_labels(.false.)       ! label every element copy of the probed nodes
+                do ie=nets,nete
+                   elem(ie)%state%p(:,:,:,tl%n0) = merge(1d0,0d0,lab(:,:,:,ie)>0)
+                enddo
+                do i=1,nring
+                   call dss_labels(.true.)     ! extend labels to the support
+                enddo
+             endif
           else
              do ie=nets,nete
                 do k=1,nlev
                    col = ic*nlev+k
-                   elem(ie)%state%p(:,:,k,tl%n0) = merge(1d0,0d0,fdof(:,:,ie)==col)
+                   elem(ie)%state%p(:,:,k,tl%n0) = merge(1d0,0d0,gid(:,:,ie)==col)
                    lab(:,:,k,ie) = merge(col,0,col<=n)
                 enddo
              enddo
           endif
           call apply_op(op)
           do ie=nets,nete
-             do ii=1,elem(ie)%idxP%NumUniquePts
-                i=elem(ie)%idxP%ia(ii); j=elem(ie)%idxP%ja(ii)
-                row = fdof(i,j,ie)
+             do ii=1,nown(ie)
+                i=il(ii,ie); j=jl(ii,ie)
+                row = gid(i,j,ie)
                 do k=1,nlev
                    if (y(i,j,k,ie)/=0) then
                       col = nint(lab(i,j,k,ie))
@@ -425,17 +488,41 @@ contains
       enddo
     end subroutine dss_labels
 
-    ! continuous test fields: smooth (low-degree polynomials in x,y,z on the
-    ! sphere, cosine bell) and pseudo-random (hash of the dof id)
+    ! DG: extend the labels of the probed elements (uniform over each element)
+    ! to their edge neighbors, through the DG edge exchange.  Aborts if two
+    ! different labels meet (supports of probed columns overlap).
+    subroutine dg_labels()
+      real (kind=real_kind) :: h(0:np+1,0:np+1,nlev), e(4*np), lmax, lmin
+      integer :: ie,k
+      do ie=nets,nete
+         call edgeVpack_nlyr(edge3,elem(ie)%desc,lab(1,1,1,ie),nlev,0,3*nlev)   ! layout as in compute_and_apply_rhs
+      enddo
+      call bndry_exchangeV(hybrid,edge3)
+      do ie=nets,nete
+         call edgeDGVunpack_nlyr(edge3,elem(ie)%desc,h,nlev,0,3*nlev)
+         do k=1,nlev
+            e = [h(1:np,0,k), h(1:np,np+1,k), h(0,1:np,k), h(np+1,1:np,k)]   ! edge halos only
+            if (.not. any(e>0)) cycle
+            lmax = maxval(e)
+            lmin = minval(e,mask=e>0)
+            if (lmax/=lmin .or. any(lab(:,:,k,ie)>0)) &
+                 call abortmp("SWEQX_OPMAT: DG coloring conflict")
+            lab(:,:,k,ie) = lmax
+         enddo
+      enddo
+    end subroutine dg_labels
+
+    ! test fields: smooth (low-degree polynomials in x,y,z on the sphere, cosine
+    ! bell) and pseudo-random (hash of the dof id, discontinuous for DG)
     subroutine test_fields(xg)
       real (kind=real_kind), intent(out) :: xg(:,:)
       real (kind=real_kind) :: lat,lon,xx,yy,zz,r
       integer :: ie,ii,i,j,d,k
       xg = 0
       do ie=nets,nete
-         do ii=1,elem(ie)%idxP%NumUniquePts
-            i=elem(ie)%idxP%ia(ii); j=elem(ie)%idxP%ja(ii)
-            d = fdof(i,j,ie)
+         do ii=1,nown(ie)
+            i=il(ii,ie); j=jl(ii,ie)
+            d = gid(i,j,ie)
             lat = elem(ie)%spherep(i,j)%lat; lon = elem(ie)%spherep(i,j)%lon
             xx = cos(lat)*cos(lon); yy = cos(lat)*sin(lon); zz = sin(lat)
             do k=1,nlev

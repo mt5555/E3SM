@@ -1126,6 +1126,10 @@ contains
           call sweq_invariants(elem,190,tl,pmean,edge3,deriv,hybrid,nets,nete)
        endif  ! if initial run 
 
+    ! run-time options of the RK driver (DG checks, swtc1 velocity choice); before
+    ! opmat_extract, which applies the operators with these options
+    call advance_rk_init_options(hybrid)
+
     ! optional (environment variable SWEQX_OPMAT): write the matrices of the
     ! transport and hyperviscosity operators for eigenvalue analysis, then stop
     if (opmat_requested()) then
@@ -1138,8 +1142,6 @@ contains
     ! times will all be off by tstep. 
     tl%nstep=0 
 
-
-    call advance_rk_init_options(hybrid)
 
     if(Debug) print *,'homme: point #11'
 
